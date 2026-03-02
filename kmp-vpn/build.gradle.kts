@@ -23,6 +23,7 @@ tasks.configureEach {
         (hostDesktopTarget == null || taskDesktopTarget != hostDesktopTarget)
     val isUnsupportedAppleTargetOnHost = !hostOs.contains("mac") && name.contains("Ios")
     val isRustArtifactTask = name.startsWith("cargoBuild") ||
+        name.startsWith("cargoCheck") ||
         name.startsWith("findDynamicLibraries") ||
         name.startsWith("jarJvmRustRuntime") ||
         name.startsWith("rustUpTargetAdd")

@@ -1,4 +1,1 @@
-root - ok
-info/ - ok
-dns/ - ok
-address/VpnAddress
+falta AbstractUnixDesktopPlatformService

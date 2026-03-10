@@ -8,7 +8,7 @@ interface DNSProvider {
         AUTO, PREFER_SPLIT, PREFER_OVERRIDE, REQUIRE_SPLIT, REQUIRE_OVERRIDE
     }
 
-    interface Factory {
+    interface Factory { //TODO add possibility for user to choose
         fun <P : DNSProvider> available(): List<KClass<P>>
 
         fun create(clazz: KClass<out DNSProvider>): DNSProvider?

@@ -21,6 +21,9 @@ interface InetAddress {
     val isAnyLocalAddress: Boolean
     val isLinkLocalAddress: Boolean
     val isLoopbackAddress: Boolean
+    companion object{
+        fun getLocalHost(): String = ""
+    }
 }
 
 interface InetSocketAddress{

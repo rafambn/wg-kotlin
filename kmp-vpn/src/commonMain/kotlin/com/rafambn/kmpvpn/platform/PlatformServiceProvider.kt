@@ -17,7 +17,7 @@ expect fun createBoringTunPlatformService(): PlatformService<*>
  */
 fun createPlatformService(engine: Engine): PlatformService<*> {
     return when (engine) {
-        Engine.QUIC -> createQuicPlatformService()
         Engine.BORINGTUN -> createBoringTunPlatformService()
+        Engine.QUIC -> createQuicPlatformService()
     }
 }

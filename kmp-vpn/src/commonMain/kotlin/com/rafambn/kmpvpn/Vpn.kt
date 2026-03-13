@@ -33,7 +33,6 @@ class Vpn(
 
     fun started(): Boolean = adapter != null
 
-    @Throws(Exception::class)
     fun open() {
         if (adapter != null && adapter!!.address().isUp()) {
             val shortName = adapter!!.address().shortName()
@@ -50,7 +49,6 @@ class Vpn(
         adapter = platformService.start(req)
     }
 
-    @Throws(Exception::class)
     fun information(): VpnInterfaceInformation? {
         return adapter?.information()
     }
@@ -60,7 +58,6 @@ class Vpn(
         onAlert?.invoke(alert)
     }
 
-    @Throws(Exception::class)
     override fun close() {
         if (adapter != null) {
             platformService.stop(vpnConfiguration, adapter!!)

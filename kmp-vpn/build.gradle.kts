@@ -3,6 +3,14 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.gobley.cargo)
+    alias(libs.plugins.gobley.uniffi)
+    alias(libs.plugins.atomicfu)
+}
+
+uniffi {
+    generateFromLibrary {
+        namespace = "kmp_vpn"
+    }
 }
 
 tasks.configureEach {

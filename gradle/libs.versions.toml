@@ -1,6 +1,7 @@
 [versions]
 
 kotlin = "2.2.0"
+atomicfu = "2.2.0"
 agp = "8.10.0"
 maven-publish = "0.34.0"
 compose = "1.8.2"
@@ -20,3 +21,5 @@ compose = { id = "org.jetbrains.compose", version.ref = "compose" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 android-application = { id = "com.android.application", version.ref = "agp" }
 gobley-cargo = { id = "dev.gobley.cargo", version.ref = "gobley" }
+gobley-uniffi = { id = "dev.gobley.uniffi", version.ref = "gobley" }
+atomicfu = { id = "org.jetbrains.kotlin.plugin.atomicfu", version.ref = "atomicfu" }

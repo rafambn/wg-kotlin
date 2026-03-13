@@ -72,11 +72,14 @@ impl TunnelSession {
         arg_preshared_key: Option<String>,
         keep_alive: u16,
         index: u32,
-    ) -> Option<Arc<Self>> {
-        let private = StaticSecret::from(parse_key_bytes(&arg_secret_key)?);
-        let public = PublicKey::from(parse_key_bytes(&arg_public_key)?);
+    ) -> Result<Arc<Self>, TunnelError> {
+        let private = StaticSecret::from(parse_key_bytes(&arg_secret_key)
+            .ok_or(TunnelError::InvalidBase64Key)?);
+        let public = PublicKey::from(parse_key_bytes(&arg_public_key)
+            .ok_or(TunnelError::InvalidBase64Key)?);
         let preshared = match arg_preshared_key {
-            Some(v) => Some(parse_key_bytes(&v)?),
+            Some(v) => Some(parse_key_bytes(&v)
+                .ok_or(TunnelError::InvalidBase64Key)?),
             None => None,
         };
 
@@ -89,7 +92,7 @@ impl TunnelSession {
             None,
         );
 
-        Some(Arc::new(Self {
+        Ok(Arc::new(Self {
             tunnel: Mutex::new(tunnel),
         }))
     }

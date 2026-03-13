@@ -32,5 +32,3 @@ dependencyResolutionManagement {
     }
 }
 include(":kmp-vpn")
-include(":sample:composeApp")
-

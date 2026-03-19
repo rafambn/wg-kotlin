@@ -9,6 +9,7 @@ Create the communication contract between JVM process and privileged daemon subp
 1. Build typed request/response protocol in a shared module.
 2. Implement stdio message framing and correlation.
 3. Establish protocol-level security controls.
+4. Keep protocol strictly control-plane (no runtime packet forwarding payloads).
 
 ## Protocol Design
 
@@ -36,6 +37,9 @@ Create the communication contract between JVM process and privileged daemon subp
 - timeout handling
 - cancellation and process death handling
 4. Add handshake command (`PING`/`HELLO`) with protocol version check.
+5. Define explicit non-goal validation:
+- packet data-plane is out of protocol scope
+- reject/avoid command types carrying raw packet payload
 
 ## Deliverables
 
@@ -48,6 +52,7 @@ Create the communication contract between JVM process and privileged daemon subp
 1. Client can execute typed command round-trips against mock daemon.
 2. Unknown command and malformed payload are rejected predictably.
 3. Protocol docs include backward compatibility rules.
+4. Protocol contains only control-plane operations.
 
 ## Risks and Controls
 

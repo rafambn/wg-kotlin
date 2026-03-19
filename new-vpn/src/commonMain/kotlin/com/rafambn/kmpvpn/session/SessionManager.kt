@@ -8,11 +8,6 @@ import com.rafambn.kmpvpn.VpnAdapterConfiguration
 interface SessionManager {
 
     /**
-     * Ensures sessions are started for all peers in the current configuration.
-     */
-    fun ensureSessions(config: VpnAdapterConfiguration)
-
-    /**
      * Reconciles existing sessions with the desired configuration.
      */
     fun reconcileSessions(config: VpnAdapterConfiguration)
@@ -26,6 +21,11 @@ interface SessionManager {
      * Returns one session by peer public key, or `null` if missing.
      */
     fun session(peerKey: String): SessionSnapshot?
+
+    /**
+     * Closes one session by peer public key.
+     */
+    fun closeSession(peerKey: String)
 
     /**
      * Closes all known sessions.

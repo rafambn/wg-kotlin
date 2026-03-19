@@ -23,13 +23,18 @@ Harden the rebuilt system for production reliability and security.
 - command latency histograms
 - session create/reconcile counters
 - failure categorization
-4. Add stress tests:
+4. Add data-plane metrics hooks:
+- packet loop iterations and queue depth
+- encrypt/decrypt operation outcomes
+- timer-task emissions and retries
+5. Add stress tests:
 - high peer counts
 - repeated start/stop/delete cycles
 - daemon restart during operation
-5. Add resilience features:
+6. Add resilience features:
 - daemon heartbeat checks
 - controlled reconnect/restart behavior
+- packet-loop restart/backoff policy on I/O failures
 
 ## Deliverables
 

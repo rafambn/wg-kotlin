@@ -5,14 +5,18 @@ import kotlin.test.assertFailsWith
 
 class VpnContractInvariantsTest {
 
+    private val privateKey = "oA8gY5Yg7R6pujISiFDUFxIr05o2IaNbS1Ry6j3TzXs="
+    private val publicKey = "V6w5nNq2WEYLRh3SeDsICoZ6irMIXja+6JGZveHFk/Q="
+    private val peerKey = "6fX3drXr/7L0KleChX2NDSSSXWMQZnIcXtNCmieYw0I="
+
     @Test
     fun rejectsBlankInterfaceName() {
         assertFailsWith<IllegalArgumentException> {
             Vpn(
                 vpnConfiguration = DefaultVpnConfiguration(
                     interfaceName = " ",
-                    privateKey = "private-key",
-                    publicKey = "public-key",
+                    privateKey = privateKey,
+                    publicKey = publicKey,
                 ),
             )
         }
@@ -29,8 +33,8 @@ class VpnContractInvariantsTest {
             Vpn(
                 vpnConfiguration = DefaultVpnConfiguration(
                     interfaceName = "wg0",
-                    privateKey = "private-key",
-                    publicKey = "public-key",
+                    privateKey = privateKey,
+                    publicKey = publicKey,
                     peers = duplicatedPeers,
                 ),
             )
@@ -42,9 +46,9 @@ class VpnContractInvariantsTest {
         val vpn = Vpn(
             vpnConfiguration = DefaultVpnConfiguration(
                 interfaceName = "wg0",
-                privateKey = "private-key",
-                publicKey = "public-key",
-                peers = listOf(VpnPeer(publicKey = "peer-a")),
+                privateKey = privateKey,
+                publicKey = publicKey,
+                peers = listOf(VpnPeer(publicKey = peerKey)),
             ),
         )
 
@@ -54,11 +58,11 @@ class VpnContractInvariantsTest {
             vpn.reconfigure(
                 DefaultVpnConfiguration(
                     interfaceName = "wg0",
-                    privateKey = "private-key",
-                    publicKey = "public-key",
+                    privateKey = privateKey,
+                    publicKey = publicKey,
                     peers = listOf(
-                        VpnPeer(publicKey = "peer-a"),
-                        VpnPeer(publicKey = "peer-a"),
+                        VpnPeer(publicKey = peerKey),
+                        VpnPeer(publicKey = peerKey),
                     ),
                 ),
             )
@@ -70,8 +74,8 @@ class VpnContractInvariantsTest {
         val vpn = Vpn(
             vpnConfiguration = DefaultVpnConfiguration(
                 interfaceName = "wg0",
-                privateKey = "private-key",
-                publicKey = "public-key",
+                privateKey = privateKey,
+                publicKey = publicKey,
             ),
         )
 
@@ -81,8 +85,8 @@ class VpnContractInvariantsTest {
             vpn.reconfigure(
                 DefaultVpnConfiguration(
                     interfaceName = "wg1",
-                    privateKey = "private-key",
-                    publicKey = "public-key",
+                    privateKey = privateKey,
+                    publicKey = publicKey,
                 ),
             )
         }

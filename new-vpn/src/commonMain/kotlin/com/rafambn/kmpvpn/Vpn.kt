@@ -12,7 +12,6 @@ import com.rafambn.kmpvpn.session.SessionManager
  * interface concerns to [SessionManager] and [VpnInterface].
  */
 class Vpn internal constructor(
-    val engine: Engine,
     val vpnConfiguration: VpnConfiguration,
     private val onEvent: ((VpnEvent) -> Unit)?,
     private val sessionManager: SessionManager,
@@ -24,10 +23,9 @@ class Vpn internal constructor(
         vpnConfiguration: VpnConfiguration,
         onEvent: ((VpnEvent) -> Unit)? = null,
     ) : this(
-        engine = engine,
         vpnConfiguration = vpnConfiguration,
         onEvent = onEvent,
-        sessionManager = InMemorySessionManager(),
+        sessionManager = InMemorySessionManager(engine = engine),
         vpnInterface = InMemoryVpnInterface(),
     )
 
@@ -125,9 +123,9 @@ class Vpn internal constructor(
         }
 
         try {
-            sessionManager.ensureSessions(currentConfiguration.adapter)
+            sessionManager.reconcileSessions(currentConfiguration.adapter)
         } catch (throwable: Throwable) {
-            val description = "Session operation `ensureSessions` failed: ${throwable.message ?: "unknown"}"
+            val description = "Session operation `reconcileSessions` failed: ${throwable.message ?: "unknown"}"
             publishEvent(VpnEvent.Failure(description))
             throw IllegalStateException(description, throwable)
         }

@@ -8,19 +8,22 @@ Define the final core contracts before platform implementation starts.
 
 1. Design `Vpn` orchestration surface.
 2. Design `SessionManager` contracts.
-3. Design `VpnInterface` contracts and state model.
+3. Design data-plane and `VpnInterface` contracts and state model.
 4. Define error and event model shared by core and JVM.
 
 ## Contract Set
 
 1. `VpnState` (sealed class): observational states `NotCreated`, `Created`, `Running`.
 2. `SessionManager`:
-- `ensureSessions(config)`
 - `reconcileSessions(config)`
 - `sessions()`
 - `session(peerKey)`
 - `closeAll()`
-3. `VpnInterface`:
+3. `VpnSession` and packet loop contracts:
+- `encryptRawPacket` / `decryptToRawPacket`
+- `runPeriodicTask`
+- `TunPort` / `UdpPort` / timer abstraction contracts for platform I/O boundaries
+4. `VpnInterface`:
 - `exists(interfaceName)`
 - `create(config)`
 - `up()` / `down()`
@@ -29,15 +32,16 @@ Define the final core contracts before platform implementation starts.
 - `configuration()`
 - `reconfigure(config)`
 - `readInformation()`
-4. `VpnEvent` stream model for lifecycle telemetry (`Alert(message)`, `Failure(message)`).
+5. `VpnEvent` stream model for lifecycle telemetry (`Alert(message)`, `Failure(message)`).
    Failure and delete semantics are emitted as events/errors instead of persisted synthetic states.
 
 ## Work Breakdown
 
 1. Merge `VpnAdapter` responsibilities into `VpnInterface` and keep lifecycle state in explicit models.
-2. Create new interfaces in `commonMain` only.
-3. Add KDoc for all public contracts.
-4. Define invariants:
+2. Freeze ownership rule: packet data-plane stays in common runtime; daemon is control-plane only.
+3. Create new interfaces in `commonMain` only.
+4. Add KDoc for all public contracts.
+5. Define invariants:
 - interface name non-empty
 - unique peer public keys
 - idempotent `stop`/`delete`

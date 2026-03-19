@@ -2,9 +2,10 @@ package com.rafambn.kmpvpn.session
 
 import com.rafambn.kmpvpn.DefaultVpnAdapterConfiguration
 import com.rafambn.kmpvpn.VpnPeer
+import com.rafambn.kmpvpn.session.factory.VpnSessionFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -12,10 +13,10 @@ import kotlin.test.assertTrue
 class InMemorySessionManagerTest {
 
     @Test
-    fun ensureSessionsCreatesActiveSessionsForAllPeers() {
-        val manager = InMemorySessionManager()
+    fun reconcileSessionsCreatesActiveSessionsForAllPeers() {
+        val manager = InMemorySessionManager(sessionFactory = RecordingSessionFactory())
 
-        manager.ensureSessions(configurationWithPeers("peer-a", "peer-b"))
+        manager.reconcileSessions(configurationWithPeers("peer-a", "peer-b"))
 
         assertEquals(2, manager.sessions().size)
         assertTrue(manager.sessions().all { session -> session.isActive })
@@ -23,25 +24,100 @@ class InMemorySessionManagerTest {
 
     @Test
     fun reconcileSessionsRemovesMissingPeers() {
-        val manager = InMemorySessionManager()
+        val factory = RecordingSessionFactory()
+        val manager = InMemorySessionManager(
+            sessionFactory = factory,
+        )
 
-        manager.ensureSessions(configurationWithPeers("peer-a", "peer-b"))
+        manager.reconcileSessions(configurationWithPeers("peer-a", "peer-b"))
         manager.reconcileSessions(configurationWithPeers("peer-b"))
 
         assertNull(manager.session("peer-a"))
         assertNotNull(manager.session("peer-b"))
+        assertEquals(1, factory.sessionByPeer("peer-a")?.closeCalls)
     }
 
     @Test
-    fun closeAllMarksSessionsAsInactive() {
-        val manager = InMemorySessionManager()
+    fun reconcileSessionsReplacesChangedPeerConfiguration() {
+        val factory = RecordingSessionFactory()
+        val manager = InMemorySessionManager(
+            sessionFactory = factory,
+        )
 
-        manager.ensureSessions(configurationWithPeers("peer-a"))
-        manager.closeAll()
+        manager.reconcileSessions(
+            configurationWithPeer(
+                VpnPeer(
+                    publicKey = "peer-a",
+                    endpointAddress = "10.0.0.1",
+                    endpointPort = 51820,
+                ),
+            ),
+        )
+
+        manager.reconcileSessions(
+            configurationWithPeer(
+                VpnPeer(
+                    publicKey = "peer-a",
+                    endpointAddress = "10.0.0.2",
+                    endpointPort = 51821,
+                ),
+            ),
+        )
+
+        assertEquals(2, factory.createdSessions.size)
+        assertEquals(1, factory.createdSessions.first().closeCalls)
+        assertEquals(0, factory.createdSessions.last().closeCalls)
 
         val session = manager.session("peer-a")
         assertNotNull(session)
-        assertFalse(session.isActive)
+        assertEquals("10.0.0.2", session.endpointAddress)
+        assertEquals(51821, session.endpointPort)
+    }
+
+    @Test
+    fun duplicatePeerKeysAreRejected() {
+        val manager = InMemorySessionManager(sessionFactory = RecordingSessionFactory())
+
+        val duplicated = configurationWithPeer(
+            VpnPeer(publicKey = "peer-a"),
+            VpnPeer(publicKey = "peer-a"),
+        )
+
+        assertFailsWith<IllegalArgumentException> {
+            manager.reconcileSessions(duplicated)
+        }
+    }
+
+    @Test
+    fun partialCreateFailureRollsBackNewlyCreatedSessions() {
+        val factory = RecordingSessionFactory(failOnPeer = "peer-b")
+        val manager = InMemorySessionManager(
+            sessionFactory = factory,
+        )
+
+        val throwable = assertFailsWith<IllegalStateException> {
+            manager.reconcileSessions(configurationWithPeers("peer-a", "peer-b"))
+        }
+
+        assertTrue(throwable.message?.contains("factory forced failure") == true)
+        assertTrue(manager.sessions().isEmpty())
+        assertEquals(1, factory.createdSessions.size)
+        assertEquals(1, factory.createdSessions.first().closeCalls)
+    }
+
+    @Test
+    fun sessionIndexesAreDeterministicAcrossPeerOrderChanges() {
+        val manager = InMemorySessionManager(sessionFactory = RecordingSessionFactory())
+
+        manager.reconcileSessions(configurationWithPeers("peer-b", "peer-a"))
+        val first = manager.sessions().associate { it.peerPublicKey to it.sessionIndex }
+
+        manager.reconcileSessions(configurationWithPeers("peer-a", "peer-b"))
+        val second = manager.sessions().associate { it.peerPublicKey to it.sessionIndex }
+
+        assertEquals(first, second)
+        assertEquals(1u, second["peer-a"])
+        assertEquals(2u, second["peer-b"])
     }
 
     private fun configurationWithPeers(vararg peerKeys: String): DefaultVpnAdapterConfiguration {
@@ -50,5 +126,54 @@ class InMemorySessionManagerTest {
             publicKey = "public-key",
             peers = peerKeys.map { key -> VpnPeer(publicKey = key) },
         )
+    }
+
+    private fun configurationWithPeer(vararg peers: VpnPeer): DefaultVpnAdapterConfiguration {
+        return DefaultVpnAdapterConfiguration(
+            privateKey = "private-key",
+            publicKey = "public-key",
+            peers = peers.toList(),
+        )
+    }
+
+    private class RecordingSessionFactory(
+        private val failOnPeer: String? = null,
+    ) : VpnSessionFactory {
+        val createdSessions: MutableList<TestVpnSession> = mutableListOf()
+
+        override fun create(
+            config: com.rafambn.kmpvpn.VpnAdapterConfiguration,
+            peer: VpnPeer,
+            sessionIndex: UInt,
+        ): VpnSession {
+            if (peer.publicKey == failOnPeer) {
+                throw IllegalStateException("factory forced failure for `${peer.publicKey}`")
+            }
+
+            val session = TestVpnSession(
+                peerPublicKey = peer.publicKey,
+                sessionIndex = sessionIndex,
+            )
+            createdSessions += session
+            return session
+        }
+
+        fun sessionByPeer(peerPublicKey: String): TestVpnSession? {
+            return createdSessions.find { session -> session.peerPublicKey == peerPublicKey }
+        }
+    }
+
+    private class TestVpnSession(
+        override val peerPublicKey: String,
+        override val sessionIndex: UInt,
+    ) : VpnSession {
+        var closeCalls: Int = 0
+
+        override val isActive: Boolean
+            get() = closeCalls == 0
+
+        override fun close() {
+            closeCalls += 1
+        }
     }
 }

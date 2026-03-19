@@ -7,14 +7,18 @@ import kotlin.test.assertTrue
 
 class VpnFoundationWiringTest {
 
+    private val privateKey = "oA8gY5Yg7R6pujISiFDUFxIr05o2IaNbS1Ry6j3TzXs="
+    private val publicKey = "V6w5nNq2WEYLRh3SeDsICoZ6irMIXja+6JGZveHFk/Q="
+    private val peerKey = "6fX3drXr/7L0KleChX2NDSSSXWMQZnIcXtNCmieYw0I="
+
     @Test
     fun inMemoryLifecycleStillWorks() {
         val vpn = Vpn(
             vpnConfiguration = DefaultVpnConfiguration(
                 interfaceName = "wg0",
-                privateKey = "private-key",
-                publicKey = "public-key",
-                peers = listOf(VpnPeer(publicKey = "peer-wg0"))
+                privateKey = privateKey,
+                publicKey = publicKey,
+                peers = listOf(VpnPeer(publicKey = peerKey))
             )
         )
 
@@ -38,9 +42,9 @@ class VpnFoundationWiringTest {
         val vpn = Vpn(
             vpnConfiguration = DefaultVpnConfiguration(
                 interfaceName = "wg1",
-                privateKey = "private-key",
-                publicKey = "public-key",
-                peers = listOf(VpnPeer(publicKey = "peer-wg1"))
+                privateKey = privateKey,
+                publicKey = publicKey,
+                peers = listOf(VpnPeer(publicKey = peerKey))
             )
         )
 
@@ -56,9 +60,9 @@ class VpnFoundationWiringTest {
             vpnConfiguration = DefaultVpnConfiguration(
                 interfaceName = "wg2",
                 dns = mutableListOf("1.1.1.1"),
-                privateKey = "private-key",
-                publicKey = "public-key",
-                peers = listOf(VpnPeer(publicKey = "peer-wg2-a")),
+                privateKey = privateKey,
+                publicKey = publicKey,
+                peers = listOf(VpnPeer(publicKey = peerKey)),
             ),
         )
 
@@ -69,9 +73,9 @@ class VpnFoundationWiringTest {
                 interfaceName = "wg2",
                 dns = mutableListOf("9.9.9.9"),
                 addresses = mutableListOf("10.20.30.2/32"),
-                privateKey = "private-key",
-                publicKey = "public-key",
-                peers = listOf(VpnPeer(publicKey = "peer-wg2-b")),
+                privateKey = privateKey,
+                publicKey = publicKey,
+                peers = listOf(VpnPeer(publicKey = publicKey)),
             ),
         )
 
@@ -79,6 +83,6 @@ class VpnFoundationWiringTest {
 
         assertEquals(listOf("9.9.9.9"), current.dns)
         assertEquals(listOf("10.20.30.2/32"), current.addresses)
-        assertEquals(listOf("peer-wg2-b"), current.adapter.peers.map { peer -> peer.publicKey })
+        assertEquals(listOf(publicKey), current.adapter.peers.map { peer -> peer.publicKey })
     }
 }

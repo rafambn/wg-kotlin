@@ -10,6 +10,10 @@ import kotlin.test.assertTrue
 
 class VpnStateTransitionTest {
 
+    private val privateKey = "oA8gY5Yg7R6pujISiFDUFxIr05o2IaNbS1Ry6j3TzXs="
+    private val publicKey = "V6w5nNq2WEYLRh3SeDsICoZ6irMIXja+6JGZveHFk/Q="
+    private val peerKey = "6fX3drXr/7L0KleChX2NDSSSXWMQZnIcXtNCmieYw0I="
+
     @Test
     fun lifecycleTransitionsFollowContract() {
         val vpn = Vpn(vpnConfiguration = baseConfiguration(interfaceName = "wg0"))
@@ -64,9 +68,9 @@ class VpnStateTransitionTest {
     private fun baseConfiguration(interfaceName: String): VpnConfiguration {
         return DefaultVpnConfiguration(
             interfaceName = interfaceName,
-            privateKey = "private-key",
-            publicKey = "public-key",
-            peers = listOf(VpnPeer(publicKey = "peer-$interfaceName")),
+            privateKey = privateKey,
+            publicKey = publicKey,
+            peers = listOf(VpnPeer(publicKey = peerKey)),
         )
     }
 

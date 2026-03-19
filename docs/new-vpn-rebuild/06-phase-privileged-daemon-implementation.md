@@ -9,6 +9,7 @@ Implement a hardened JVM daemon subprocess that executes only an allowlisted com
 1. Build daemon executable module.
 2. Implement command dispatcher from typed protocol commands.
 3. Enforce strict command validation and execution model.
+4. Keep daemon responsibilities limited to privileged OS control-plane commands.
 
 ## Work Breakdown
 
@@ -28,6 +29,9 @@ Implement a hardened JVM daemon subprocess that executes only an allowlisted com
 - DNS apply/unset
 - WireGuard apply/sync/remove peer
 6. Add audit logging for every executed command.
+7. Enforce non-goal in code and tests:
+- daemon must not implement TUN/UDP packet relay loop
+- daemon must not perform runtime encryption/decryption loop
 
 ## Deliverables
 
@@ -41,6 +45,7 @@ Implement a hardened JVM daemon subprocess that executes only an allowlisted com
 2. Invalid payloads fail before process execution.
 3. No code path allows arbitrary command execution.
 4. Logs contain traceable request ID and command outcome.
+5. No code path in daemon owns runtime packet forwarding.
 
 ## Risks and Controls
 

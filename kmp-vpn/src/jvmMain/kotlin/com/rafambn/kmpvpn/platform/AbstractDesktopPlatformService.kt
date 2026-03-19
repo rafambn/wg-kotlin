@@ -1,7 +1,6 @@
 package com.rafambn.kmpvpn.platform
 
 import com.rafambn.kmpvpn.NoHandshakeException
-import com.rafambn.kmpvpn.StartRequest
 import com.rafambn.kmpvpn.VpnAdapter
 import com.rafambn.kmpvpn.VpnAdapterConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
@@ -32,10 +31,9 @@ import kotlin.time.toJavaInstant
 abstract class AbstractDesktopPlatformService<I : VpnAddress> : AbstractPlatformService<I>() {
     private var dnsProvider: DNSProvider? = null
 
-    protected fun findAddress(startRequest: StartRequest): I {
+    protected fun findAddress(configuration: VpnConfiguration): I {
         val addresses = addresses()
-        val configuration = startRequest.configuration
-        val interfaceName = startRequest.interfaceName
+        val interfaceName = configuration.interfaceName
         var ip: I? = null
 
         val addr = find(interfaceName, addresses)
@@ -133,16 +131,21 @@ abstract class AbstractDesktopPlatformService<I : VpnAddress> : AbstractPlatform
     }
 
     @Throws(IOException::class)
-    override fun start(startRequest: StartRequest): VpnAdapter {
+    override fun create(configuration: VpnConfiguration): VpnAdapter {
+        return configureExistingSession(findAddress(configuration))
+    }
+
+    @Throws(IOException::class)
+    override fun start(configuration: VpnConfiguration): VpnAdapter {
         val session = VpnAdapter(this)
-        val config = startRequest.configuration
+        val config = configuration
 
         if (!config.preUp.isEmpty()) {
             runHook(config, session, *config.preUp.toTypedArray())
         }
 
         try {
-            onStart(startRequest, session)
+            onStart(configuration, session)
         } catch (ioe: IOException) {
             throw ioe
         } catch (re: RuntimeException) {
@@ -242,7 +245,7 @@ abstract class AbstractDesktopPlatformService<I : VpnAddress> : AbstractPlatform
     }
 
     @Throws(Exception::class)
-    protected abstract fun onStart(startRequest: StartRequest, session: VpnAdapter)
+    protected abstract fun onStart(configuration: VpnConfiguration, session: VpnAdapter)
 
     @Throws(IOException::class)
     protected fun waitForFirstHandshake(

@@ -1,10 +1,9 @@
 package com.rafambn.kmpvpn.platform
 
 import com.rafambn.kmpvpn.NATMode
+import com.rafambn.kmpvpn.VpnAdapterConfiguration
 import com.rafambn.kmpvpn.VpnAdapter
 import com.rafambn.kmpvpn.VpnConfiguration
-import com.rafambn.kmpvpn.StartRequest
-import com.rafambn.kmpvpn.VpnAdapterConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.address.VpnAddress
 import com.rafambn.kmpvpn.dns.DNSProvider
@@ -19,9 +18,13 @@ interface PlatformService<ADDRESS : VpnAddress> {
         val address: String
     )
 
+    fun create(configuration: VpnConfiguration): VpnAdapter {
+        throw UnsupportedOperationException("Create is not implemented for this platform service.")
+    }
+
     fun stop(configuration: VpnConfiguration, session: VpnAdapter)
 
-    fun start(startRequest: StartRequest): VpnAdapter
+    fun start(configuration: VpnConfiguration): VpnAdapter
 
     fun getByPublicKey(publicKey: String): VpnAdapter? {
         for (ip in adapters()) {

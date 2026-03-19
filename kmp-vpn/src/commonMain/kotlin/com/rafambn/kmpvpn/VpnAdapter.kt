@@ -69,13 +69,23 @@ class VpnAdapter(
         this.ip = vpn
     }
 
+    fun isRunning(): Boolean {
+        return ip?.isUp() == true
+    }
+
+    fun stop() {
+        ip?.down()
+    }
+
+    fun delete() {
+        ip?.delete()
+    }
+
     override fun close() {
-        ip?.let {
-            try {
-                it.down()
-            } finally {
-                it.delete()
-            }
+        try {
+            stop()
+        } finally {
+            delete()
         }
     }
 

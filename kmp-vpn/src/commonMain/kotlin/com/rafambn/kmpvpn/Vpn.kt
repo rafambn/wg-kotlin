@@ -13,10 +13,10 @@ class Vpn(
 
     private val platformService: PlatformService<out VpnAddress>
     private var adapter: VpnAdapter? = null
+    private val interfaceName: String
+        get() = vpnConfiguration.interfaceName
 
     init {
-        val interfaceName = vpnConfiguration.interfaceName
-
         require(interfaceName.isNotEmpty()) { "Interface name cannot be empty" }
 
         platformService = createPlatformService(engine)
@@ -32,22 +32,59 @@ class Vpn(
         }
     }
 
-    fun started(): Boolean = adapter != null
+    fun exists(): Boolean {
+        val exists = platformService.addressExists(interfaceName)
+        if (!exists) {
+            adapter = null
+        }
+        return exists
+    }
 
-    fun open() {
-        if (adapter != null && adapter!!.address().isUp()) {
-            val shortName = adapter!!.address().shortName()
+    fun isRunning(): Boolean {
+        return resolveExistingAdapter()?.isRunning() == true
+    }
+
+    fun create() {
+        if (exists()) {
+            resolveExistingAdapter()
+            return
+        }
+
+        adapter = platformService.create(vpnConfiguration)
+    }
+
+    fun start() {
+        val currentAdapter = resolveExistingAdapter()
+        if (currentAdapter?.isRunning() == true) {
+            val shortName = currentAdapter.address().shortName()
             alertUser(ErrorCode.INTERFACE_ALREADY_UP, "`$shortName` already exists and is up")
             throw IllegalStateException("`$shortName` already exists and is up")
         }
 
-        val req = StartRequest(configuration = vpnConfiguration)
+        adapter = platformService.start(vpnConfiguration)
+    }
 
-        adapter = platformService.start(req)
+    fun stop() {
+        val currentAdapter = resolveExistingAdapter() ?: return
+        platformService.stop(vpnConfiguration, currentAdapter)
+    }
+
+    fun delete() {
+        val currentAdapter = resolveExistingAdapter() ?: run {
+            adapter = null
+            return
+        }
+
+        if (currentAdapter.isRunning()) {
+            platformService.stop(vpnConfiguration, currentAdapter)
+        }
+
+        currentAdapter.delete()
+        adapter = null
     }
 
     fun information(): VpnInterfaceInformation? {
-        return adapter?.information()
+        return resolveExistingAdapter()?.information()
     }
 
     private fun alertUser(errorCode: ErrorCode, message: String) {
@@ -56,9 +93,21 @@ class Vpn(
     }
 
     override fun close() {
-        if (adapter != null) {
-            platformService.stop(vpnConfiguration, adapter!!)
+        delete()
+    }
+
+    private fun resolveExistingAdapter(): VpnAdapter? {
+        if (!platformService.addressExists(interfaceName)) {
+            adapter = null
+            return null
         }
+
+        adapter?.let { return it }
+
+        return VpnAdapter(
+            service = platformService,
+            ip = platformService.address(interfaceName)
+        ).also { adapter = it }
     }
 
     companion object {

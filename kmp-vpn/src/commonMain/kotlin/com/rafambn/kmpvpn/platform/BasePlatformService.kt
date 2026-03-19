@@ -24,12 +24,11 @@ abstract class BasePlatformService<I : VpnAddress> : PlatformService<I> {
                     )
                 }
             } finally {
-                session.use { session ->
-                    if (!configuration.preDown.isEmpty()) {
-                        val p: MutableList<String> = configuration.preDown
-                        runHook(configuration, session, *p.toTypedArray())
-                    }
+                if (!configuration.preDown.isEmpty()) {
+                    val p: MutableList<String> = configuration.preDown
+                    runHook(configuration, session, *p.toTypedArray())
                 }
+                session.stop()
             }
         } finally {
             try {

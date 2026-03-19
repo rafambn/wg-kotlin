@@ -1,7 +1,6 @@
 package com.rafambn.kmpvpn.platform
 
 import com.rafambn.kmpvpn.NATMode
-import com.rafambn.kmpvpn.StartRequest
 import com.rafambn.kmpvpn.VpnAdapter
 import com.rafambn.kmpvpn.VpnAdapterConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
@@ -47,7 +46,7 @@ private class LinuxWireGuardGoService : PlatformService<VpnAddress> {
         throw UnsupportedOperationException("Placeholder: Implement Linux WireGuard Go")
     }
 
-    override fun start(startRequest: StartRequest): VpnAdapter {
+    override fun start(configuration: VpnConfiguration): VpnAdapter {
         throw UnsupportedOperationException("Placeholder: Implement Linux WireGuard Go")
     }
 
@@ -149,7 +148,7 @@ private class MacosWireGuardGoService : PlatformService<VpnAddress> {
         throw UnsupportedOperationException("Placeholder: Implement macOS WireGuard Go")
     }
 
-    override fun start(startRequest: StartRequest): VpnAdapter {
+    override fun start(configuration: VpnConfiguration): VpnAdapter {
         throw UnsupportedOperationException("Placeholder: Implement macOS WireGuard Go")
     }
 
@@ -251,7 +250,7 @@ private class WindowsWireGuardGoService : PlatformService<VpnAddress> {
         throw UnsupportedOperationException("Placeholder: Implement Windows WireGuard Go")
     }
 
-    override fun start(startRequest: StartRequest): VpnAdapter {
+    override fun start(configuration: VpnConfiguration): VpnAdapter {
         throw UnsupportedOperationException("Placeholder: Implement Windows WireGuard Go")
     }
 
@@ -355,7 +354,7 @@ private class LinuxBoringTunService : PlatformService<VpnAddress> {
         throw UnsupportedOperationException("Placeholder: Implement Linux BoringTun")
     }
 
-    override fun start(startRequest: StartRequest): VpnAdapter {
+    override fun start(configuration: VpnConfiguration): VpnAdapter {
         throw UnsupportedOperationException("Placeholder: Implement Linux BoringTun")
     }
 
@@ -457,7 +456,7 @@ private class MacosBoringTunService : PlatformService<VpnAddress> {
         throw UnsupportedOperationException("Placeholder: Implement macOS BoringTun")
     }
 
-    override fun start(startRequest: StartRequest): VpnAdapter {
+    override fun start(configuration: VpnConfiguration): VpnAdapter {
         throw UnsupportedOperationException("Placeholder: Implement macOS BoringTun")
     }
 
@@ -559,7 +558,7 @@ private class WindowsBoringTunService : PlatformService<VpnAddress> {
         throw UnsupportedOperationException("Placeholder: Implement Windows BoringTun")
     }
 
-    override fun start(startRequest: StartRequest): VpnAdapter {
+    override fun start(configuration: VpnConfiguration): VpnAdapter {
         throw UnsupportedOperationException("Placeholder: Implement Windows BoringTun")
     }
 

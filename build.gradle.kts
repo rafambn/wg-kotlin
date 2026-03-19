@@ -1,6 +1,6 @@
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
-import org.gradle.api.artifacts.ProjectDependency
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.TaskAction
@@ -16,13 +16,30 @@ fun normalizeProjectPath(path: String): String {
     return if (path.startsWith(":")) path else ":$path"
 }
 
-fun collectProjectDependencies(projectPath: String): List<String> {
-    return project(projectPath).configurations
-        .flatMap { configuration ->
-            configuration.dependencies
-                .withType(ProjectDependency::class.java)
-                .map { dependency -> normalizeProjectPath(dependency.path) }
+fun collectResolvedProjectDependencies(projectPath: String, configurationNames: List<String>): List<String> {
+    val targetProject = project(projectPath)
+    val normalizedProjectPath = normalizeProjectPath(projectPath)
+
+    return configurationNames
+        .map { configurationName ->
+            targetProject.configurations.findByName(configurationName)
+                ?: throw GradleException(
+                    "Architecture rule misconfigured: $normalizedProjectPath does not define configuration '$configurationName'."
+                )
         }
+        .onEach { configuration ->
+            if (!configuration.isCanBeResolved) {
+                throw GradleException(
+                    "Architecture rule misconfigured: $normalizedProjectPath configuration '${configuration.name}' must be resolvable."
+                )
+            }
+        }
+        .flatMap { configuration ->
+            configuration.incoming.resolutionResult.allComponents.mapNotNull { component ->
+                (component.id as? ProjectComponentIdentifier)?.projectPath
+            }
+        }
+        .filterNot { dependencyPath -> dependencyPath == normalizedProjectPath }
         .distinct()
         .sorted()
 }
@@ -75,11 +92,26 @@ val checkArchitectureBoundaries = tasks.register<ArchitectureBoundaryCheckTask>(
     description = "Enforces phase 01 module dependency boundaries."
 }
 
+val newVpnMainClasspathConfigurations = listOf("jvmCompileClasspath", "jvmRuntimeClasspath")
+val jvmMainClasspathConfigurations = listOf("compileClasspath", "runtimeClasspath")
+
 gradle.projectsEvaluated {
     checkArchitectureBoundaries.configure {
-        coreProjectDependencies.set(collectProjectDependencies(":new-vpn"))
-        daemonJvmProjectDependencies.set(collectProjectDependencies(":new-vpn-daemon-jvm"))
-        daemonClientProjectDependencies.set(collectProjectDependencies(":new-vpn-daemon-client-jvm"))
+        coreProjectDependencies.set(
+            providers.provider {
+                collectResolvedProjectDependencies(":new-vpn", newVpnMainClasspathConfigurations)
+            }
+        )
+        daemonJvmProjectDependencies.set(
+            providers.provider {
+                collectResolvedProjectDependencies(":new-vpn-daemon-jvm", jvmMainClasspathConfigurations)
+            }
+        )
+        daemonClientProjectDependencies.set(
+            providers.provider {
+                collectResolvedProjectDependencies(":new-vpn-daemon-client-jvm", jvmMainClasspathConfigurations)
+            }
+        )
     }
 }
 

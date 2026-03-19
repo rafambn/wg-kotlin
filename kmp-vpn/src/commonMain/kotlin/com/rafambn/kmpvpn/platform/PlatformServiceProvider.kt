@@ -3,17 +3,17 @@ package com.rafambn.kmpvpn.platform
 import com.rafambn.kmpvpn.Engine
 
 /**
- * Create a WireGuard Go platform service
+ * Create a QUIC platform service.
  */
 expect fun createQuicPlatformService(): PlatformService<*>
 
 /**
- * Create a BoringTun platform service
+ * Create a BoringTun platform service.
  */
 expect fun createBoringTunPlatformService(): PlatformService<*>
 
 /**
- * Create a platform service based on the engine type
+ * Create a platform service based on the engine type.
  */
 fun createPlatformService(engine: Engine): PlatformService<*> {
     return when (engine) {

@@ -99,14 +99,12 @@ class DaemonClientSmokeTest {
 
         val client = DaemonProcessClient(
             port = port,
+            timeout = Duration.ofMillis(50),
         )
 
         try {
             val failure = assertFailsWith<DaemonClientException.Timeout> {
-                client.ping(
-                    nonce = "timeout",
-                    timeout = Duration.ofMillis(50),
-                )
+                client.ping(nonce = "timeout")
             }
             assertEquals(50L, failure.timeout.toMillis())
         } finally {

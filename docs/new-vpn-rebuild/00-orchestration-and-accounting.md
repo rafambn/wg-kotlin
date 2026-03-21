@@ -24,7 +24,7 @@ Purpose: typed command/request/response models shared by daemon and JVM client.
 3. `:new-vpn-daemon-jvm`
 Purpose: privileged daemon executable with strict allowlist execution for OS commands only.
 4. `:new-vpn-daemon-client-jvm` (optional; can stay in `:new-vpn` jvmMain initially)
-Purpose: stdio IPC client used by JVM `VpnInterface` implementation.
+Purpose: kRPC client used by JVM `VpnInterface` implementation, defaulting to local loopback transport.
 
 ## Phase Map
 
@@ -32,7 +32,7 @@ Purpose: stdio IPC client used by JVM `VpnInterface` implementation.
 2. Phase 02: Domain model and contract design.
 3. Phase 03: SessionManager and common data-plane loop.
 4. Phase 04: VpnInterface and platform edge adapters.
-5. Phase 05: Daemon protocol and subprocess IPC.
+5. Phase 05: Daemon protocol and local RPC IPC.
 6. Phase 06: Privileged daemon implementation.
 7. Phase 07: Vpn orchestrator integration and lifecycle semantics.
 8. Phase 08: Security/observability/performance hardening.
@@ -74,7 +74,7 @@ Use this table as the source of truth during execution.
 | 02 | Completed | 10 | 10 | 2026-03-19 | 2026-03-19 | Passed | Core contracts added, `VpnAdapter` merged into `VpnInterface`, and state simplified to live observations |
 | 03 | Completed | 14 | 14 | 2026-03-19 | 2026-03-19 | Passed | Session reconciliation finalized, engine factories wired, common packet loop (`TunPort`/`UdpPort`/ticker) implemented, and loop behavior covered by tests |
 | 04 | Completed | 16 | 16 | 2026-03-20 | 2026-03-20 | Passed | `PlatformInterfaceFactory` (`expect/actual`) added, JVM interface layer split behind daemon-only `InterfaceCommandExecutor` boundary, and packet I/O adapter `KtorDatagramUdpPort` delivered in `commonMain` with rollback/idempotency tests |
-| 05 | Not started | 12 | 0 | - | - | - | - |
+| 05 | In progress | 12 | 6 | 2026-03-21 | - | In progress | `:new-vpn-daemon-protocol` now has typed serializable request/response models plus shared `@Rpc` contract; `:new-vpn-daemon-jvm` exposes Ktor+kRPC control-plane service; `:new-vpn-daemon-client-jvm` executes typed requests with timeout/protocol/failure mapping and smoke tests |
 | 06 | Not started | 16 | 0 | - | - | - | - |
 | 07 | Not started | 12 | 0 | - | - | - | - |
 | 08 | Not started | 14 | 0 | - | - | - | - |
@@ -149,6 +149,14 @@ Record architecture decisions in this file as appended entries.
 - Context: Phase 04 requires JVM interface operations now, but daemon IPC will only be introduced in phase 05.
 - Decision: Introduce `InterfaceCommandExecutor` as the only command boundary consumed by `JvmVpnInterface`; forbid local OS command execution in `:new-vpn` JVM code and reserve privileged command execution for daemon-backed executors only.
 - Consequence: Phase 05 plugs daemon IPC implementations into `InterfaceCommandExecutor` without changing `Vpn`, `SessionManager`, or `VpnInterface` contracts.
+
+### Decision Entry ADR-07
+
+- Decision ID: ADR-07
+- Date: 2026-03-21
+- Context: Phase 05 needed a first transport choice balancing implementation speed, typed safety, and future migration options.
+- Decision: Adopt `kotlinx-rpc` (kRPC) over Ktor WebSocket as the default local IPC transport for daemon control-plane requests, with shared `@Rpc` contracts and typed envelopes in `:new-vpn-daemon-protocol`.
+- Consequence: The daemon/client integration is delivered earlier with transport-specific logic isolated in `:new-vpn-daemon-client-jvm` and `:new-vpn-daemon-jvm`, preserving a migration path to alternative transports (UDS, remote endpoint, or gRPC) without changing core command payload models.
 
 ## Definition of Done (Program Level)
 

@@ -1,4 +1,4 @@
-package com.rafambn.kmpvpn.platform.iface
+package com.rafambn.kmpvpn.iface
 
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.requireValidConfiguration

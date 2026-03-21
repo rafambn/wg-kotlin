@@ -1,5 +1,7 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.kotlinx.rpc)
     application
 }
 
@@ -13,6 +15,11 @@ application {
 
 dependencies {
     implementation(project(":new-vpn-daemon-protocol"))
+    implementation(libs.kotlinx.rpc.krpc.server)
+    implementation(libs.kotlinx.rpc.krpc.serialization.json)
+    implementation(libs.kotlinx.rpc.krpc.ktor.server)
+    implementation(libs.ktor.server.netty)
+    implementation(libs.ktor.server.websockets)
 
     testImplementation(kotlin("test-junit5"))
 }

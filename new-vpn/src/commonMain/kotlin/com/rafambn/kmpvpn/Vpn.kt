@@ -1,7 +1,7 @@
 package com.rafambn.kmpvpn
 
-import com.rafambn.kmpvpn.platform.iface.PlatformInterfaceFactory
-import com.rafambn.kmpvpn.platform.iface.VpnInterface
+import com.rafambn.kmpvpn.iface.PlatformInterfaceFactory
+import com.rafambn.kmpvpn.iface.VpnInterface
 import com.rafambn.kmpvpn.session.InMemorySessionManager
 import com.rafambn.kmpvpn.session.SessionManager
 

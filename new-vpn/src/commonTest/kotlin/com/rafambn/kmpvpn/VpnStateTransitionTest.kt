@@ -1,7 +1,7 @@
 package com.rafambn.kmpvpn
 
-import com.rafambn.kmpvpn.platform.iface.VpnInterface
-import com.rafambn.kmpvpn.platform.iface.VpnInterfaceInformation
+import com.rafambn.kmpvpn.iface.VpnInterface
+import com.rafambn.kmpvpn.iface.VpnInterfaceInformation
 import com.rafambn.kmpvpn.session.InMemorySessionManager
 import kotlin.test.Test
 import kotlin.test.assertEquals

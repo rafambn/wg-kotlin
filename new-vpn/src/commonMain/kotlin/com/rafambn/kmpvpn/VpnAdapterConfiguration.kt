@@ -1,7 +1,7 @@
 package com.rafambn.kmpvpn
 
 /**
- * WireGuard runtime configuration owned by [com.rafambn.kmpvpn.platform.iface.VpnInterface].
+ * WireGuard runtime configuration owned by [com.rafambn.kmpvpn.iface.VpnInterface].
  */
 interface VpnAdapterConfiguration {
 

@@ -1,4 +1,4 @@
-package com.rafambn.kmpvpn.platform.iface
+package com.rafambn.kmpvpn.iface
 
 /**
  * Read-only interface information returned by [VpnInterface.readInformation].

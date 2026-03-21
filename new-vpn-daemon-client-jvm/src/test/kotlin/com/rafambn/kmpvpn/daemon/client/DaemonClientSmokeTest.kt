@@ -9,7 +9,7 @@ import com.rafambn.kmpvpn.daemon.protocol.response.ApplyRoutesResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.CreateInterfaceResponse
 import com.rafambn.kmpvpn.daemon.protocol.DAEMON_HELLO_TOKEN
 import com.rafambn.kmpvpn.daemon.protocol.DaemonCommandResult
-import com.rafambn.kmpvpn.daemon.protocol.DaemonControlPlaneService
+import com.rafambn.kmpvpn.daemon.protocol.DaemonProcessApi
 import com.rafambn.kmpvpn.daemon.protocol.DaemonErrorKind
 import com.rafambn.kmpvpn.daemon.protocol.response.DeleteInterfaceResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.InterfaceExistsResponse
@@ -31,7 +31,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.rpc.krpc.ktor.server.Krpc
 import kotlinx.rpc.krpc.ktor.server.rpc
 import kotlinx.rpc.krpc.serialization.json.json
-import kotlinx.rpc.registerService
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -43,7 +42,7 @@ class DaemonClientSmokeTest {
         val port = randomPort()
         val engine = startServer(
             port = port,
-            service = object : StubDaemonControlPlaneService() {
+            service = object : StubDaemonProcessApi() {
                 override suspend fun ping(nonce: String): DaemonCommandResult<PingResponse> {
                     return success(PingResponse(helloToken = DAEMON_HELLO_TOKEN))
                 }
@@ -62,8 +61,8 @@ class DaemonClientSmokeTest {
             },
         )
 
-        val client = KtorKrpcDaemonClient(
-            endpoint = DaemonClientEndpoint(port = port),
+        val client = DaemonProcessClient(
+            port = port,
         )
 
         try {
@@ -90,7 +89,7 @@ class DaemonClientSmokeTest {
         val port = randomPort()
         val engine = startServer(
             port = port,
-            service = object : StubDaemonControlPlaneService() {
+            service = object : StubDaemonProcessApi() {
                 override suspend fun ping(nonce: String): DaemonCommandResult<PingResponse> {
                     delay(300)
                     return success(PingResponse(helloToken = DAEMON_HELLO_TOKEN))
@@ -98,8 +97,8 @@ class DaemonClientSmokeTest {
             },
         )
 
-        val client = KtorKrpcDaemonClient(
-            endpoint = DaemonClientEndpoint(port = port),
+        val client = DaemonProcessClient(
+            port = port,
         )
 
         try {
@@ -121,7 +120,7 @@ class DaemonClientSmokeTest {
         val port = randomPort()
         val engine = startServer(
             port = port,
-            service = object : StubDaemonControlPlaneService() {
+            service = object : StubDaemonProcessApi() {
                 override suspend fun createInterface(
                     interfaceName: String,
                 ): DaemonCommandResult<CreateInterfaceResponse> {
@@ -130,8 +129,8 @@ class DaemonClientSmokeTest {
             },
         )
 
-        val client = KtorKrpcDaemonClient(
-            endpoint = DaemonClientEndpoint(port = port),
+        val client = DaemonProcessClient(
+            port = port,
         )
 
         try {
@@ -148,7 +147,7 @@ class DaemonClientSmokeTest {
 
     private fun startServer(
         port: Int,
-        service: DaemonControlPlaneService,
+        service: DaemonProcessApi,
     ): EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration> {
         val engine = embeddedServer(Netty, host = "127.0.0.1", port = port, module = {
             install(WebSockets)
@@ -165,7 +164,7 @@ class DaemonClientSmokeTest {
                             json()
                         }
                     }
-                    registerService<DaemonControlPlaneService> {
+                    registerService<DaemonProcessApi> {
                         service
                     }
                 }
@@ -193,7 +192,7 @@ class DaemonClientSmokeTest {
         )
     }
 
-    private open inner class StubDaemonControlPlaneService : DaemonControlPlaneService {
+    private open inner class StubDaemonProcessApi : DaemonProcessApi {
         override suspend fun ping(nonce: String): DaemonCommandResult<PingResponse> = unsupported("PING")
 
         override suspend fun interfaceExists(

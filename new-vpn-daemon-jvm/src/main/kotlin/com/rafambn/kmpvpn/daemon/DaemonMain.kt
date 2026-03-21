@@ -1,6 +1,6 @@
 package com.rafambn.kmpvpn.daemon
 
-import com.rafambn.kmpvpn.daemon.protocol.DaemonControlPlaneService
+import com.rafambn.kmpvpn.daemon.protocol.DaemonProcessApi
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
@@ -10,7 +10,6 @@ import io.ktor.server.websocket.WebSockets
 import kotlinx.rpc.krpc.ktor.server.Krpc
 import kotlinx.rpc.krpc.ktor.server.rpc
 import kotlinx.rpc.krpc.serialization.json.json
-import kotlinx.rpc.registerService
 
 fun main(vararg args: String) {
     val (host, port) = parseDaemonAddress(args)
@@ -65,8 +64,8 @@ fun Application.module() {
                     json()
                 }
             }
-            registerService<DaemonControlPlaneService> {
-                DaemonControlPlaneServiceImpl()
+            registerService<DaemonProcessApi> {
+                DaemonProcessApiImpl()
             }
         }
     }

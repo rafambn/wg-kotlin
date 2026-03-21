@@ -1,15 +1,15 @@
 package com.rafambn.kmpvpn.daemon.client
 
+import com.rafambn.kmpvpn.daemon.protocol.DAEMON_HELLO_TOKEN
+import com.rafambn.kmpvpn.daemon.protocol.DaemonCommandResult
+import com.rafambn.kmpvpn.daemon.protocol.DaemonProcessApi
+import com.rafambn.kmpvpn.daemon.protocol.request.ApplyPeerConfigurationRequest
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyAddressesResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyDnsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyMtuResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyPeerConfigurationResponse
-import com.rafambn.kmpvpn.daemon.protocol.request.ApplyPeerConfigurationRequest
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyRoutesResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.CreateInterfaceResponse
-import com.rafambn.kmpvpn.daemon.protocol.DAEMON_HELLO_TOKEN
-import com.rafambn.kmpvpn.daemon.protocol.DaemonCommandResult
-import com.rafambn.kmpvpn.daemon.protocol.DaemonControlPlaneService
 import com.rafambn.kmpvpn.daemon.protocol.response.DeleteInterfaceResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.InterfaceExistsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.PingResponse
@@ -27,13 +27,17 @@ import kotlinx.rpc.krpc.ktor.client.rpc
 import kotlinx.rpc.krpc.serialization.json.json
 import kotlinx.rpc.withService
 
-class KtorKrpcDaemonClient(
-    endpoint: DaemonClientEndpoint,
-    clientFactory: (() -> HttpClient)? = null,
-) : DaemonClient {
-    private val ownsHttpClient: Boolean = clientFactory == null
+class DaemonProcessClient(
+    host: String = "127.0.0.1",
+    port: Int,
+    val timeout: Duration = Duration.ofSeconds(15)
+) : DaemonProcessApi, AutoCloseable {
+    init {
+        require(host.isNotBlank()) { "Daemon host cannot be blank" }
+        require(port in 1..65535) { "Daemon port must be between 1 and 65535" }
+    }
 
-    private val httpClient: HttpClient = clientFactory?.invoke() ?: HttpClient(CIO) {
+    private val httpClient: HttpClient = HttpClient(CIO) {
         install(WebSockets)
         installKrpc {
             serialization {
@@ -43,11 +47,13 @@ class KtorKrpcDaemonClient(
         }
     }
 
-    private val rpcClient = httpClient.rpc(endpoint.wsUrl())
-    private val service: DaemonControlPlaneService = rpcClient.withService()
+    private val rpcClient = httpClient.rpc("ws://$host:$port/services")
+    private val service = rpcClient.withService<DaemonProcessApi>()
 
-    override suspend fun handshake(timeout: Duration): DaemonCommandResult<PingResponse> {
-        val response = ping(nonce = "handshake", timeout = timeout)
+    suspend fun handshake(timeout: Duration = Duration.ofSeconds(5)): DaemonCommandResult<PingResponse> {
+        val response = callWithTimeout(timeout) {
+            service.ping(nonce = "handshake")
+        }
 
         val success = response as? DaemonCommandResult.Success<PingResponse>
             ?: throw DaemonClientException.ProtocolViolation(
@@ -63,38 +69,26 @@ class KtorKrpcDaemonClient(
         return success
     }
 
-    override suspend fun ping(
-        nonce: String,
-        timeout: Duration,
-    ): DaemonCommandResult<PingResponse> {
-        return executeCommand(timeout) {
+    override suspend fun ping(nonce: String): DaemonCommandResult<PingResponse> {
+        return callWithTimeout(timeout) {
             service.ping(nonce = nonce)
         }
     }
 
-    override suspend fun interfaceExists(
-        interfaceName: String,
-        timeout: Duration,
-    ): DaemonCommandResult<InterfaceExistsResponse> {
-        return executeCommand(timeout) {
+    override suspend fun interfaceExists(interfaceName: String): DaemonCommandResult<InterfaceExistsResponse> {
+        return callWithTimeout(timeout) {
             service.interfaceExists(interfaceName = interfaceName)
         }
     }
 
-    override suspend fun createInterface(
-        interfaceName: String,
-        timeout: Duration,
-    ): DaemonCommandResult<CreateInterfaceResponse> {
-        return executeCommand(timeout) {
+    override suspend fun createInterface(interfaceName: String): DaemonCommandResult<CreateInterfaceResponse> {
+        return callWithTimeout(timeout) {
             service.createInterface(interfaceName = interfaceName)
         }
     }
 
-    override suspend fun deleteInterface(
-        interfaceName: String,
-        timeout: Duration,
-    ): DaemonCommandResult<DeleteInterfaceResponse> {
-        return executeCommand(timeout) {
+    override suspend fun deleteInterface(interfaceName: String): DaemonCommandResult<DeleteInterfaceResponse> {
+        return callWithTimeout(timeout) {
             service.deleteInterface(interfaceName = interfaceName)
         }
     }
@@ -102,9 +96,8 @@ class KtorKrpcDaemonClient(
     override suspend fun setInterfaceState(
         interfaceName: String,
         up: Boolean,
-        timeout: Duration,
     ): DaemonCommandResult<SetInterfaceStateResponse> {
-        return executeCommand(timeout) {
+        return callWithTimeout(timeout) {
             service.setInterfaceState(interfaceName = interfaceName, up = up)
         }
     }
@@ -112,9 +105,8 @@ class KtorKrpcDaemonClient(
     override suspend fun applyMtu(
         interfaceName: String,
         mtu: Int?,
-        timeout: Duration,
     ): DaemonCommandResult<ApplyMtuResponse> {
-        return executeCommand(timeout) {
+        return callWithTimeout(timeout) {
             service.applyMtu(interfaceName = interfaceName, mtu = mtu)
         }
     }
@@ -122,9 +114,8 @@ class KtorKrpcDaemonClient(
     override suspend fun applyAddresses(
         interfaceName: String,
         addresses: List<String>,
-        timeout: Duration,
     ): DaemonCommandResult<ApplyAddressesResponse> {
-        return executeCommand(timeout) {
+        return callWithTimeout(timeout) {
             service.applyAddresses(interfaceName = interfaceName, addresses = addresses)
         }
     }
@@ -133,9 +124,8 @@ class KtorKrpcDaemonClient(
         interfaceName: String,
         routes: List<String>,
         table: String?,
-        timeout: Duration,
     ): DaemonCommandResult<ApplyRoutesResponse> {
-        return executeCommand(timeout) {
+        return callWithTimeout(timeout) {
             service.applyRoutes(
                 interfaceName = interfaceName,
                 routes = routes,
@@ -147,49 +137,45 @@ class KtorKrpcDaemonClient(
     override suspend fun applyDns(
         interfaceName: String,
         dnsServers: List<String>,
-        timeout: Duration,
     ): DaemonCommandResult<ApplyDnsResponse> {
-        return executeCommand(timeout) {
+        return callWithTimeout(timeout) {
             service.applyDns(interfaceName = interfaceName, dnsServers = dnsServers)
         }
     }
 
     override suspend fun applyPeerConfiguration(
         request: ApplyPeerConfigurationRequest,
-        timeout: Duration,
     ): DaemonCommandResult<ApplyPeerConfigurationResponse> {
-        return executeCommand(timeout) {
+        return callWithTimeout(timeout) {
             service.applyPeerConfiguration(request)
         }
     }
 
     override suspend fun readInterfaceInformation(
         interfaceName: String,
-        timeout: Duration,
     ): DaemonCommandResult<ReadInterfaceInformationResponse> {
-        return executeCommand(timeout) {
+        return callWithTimeout(timeout) {
             service.readInterfaceInformation(interfaceName = interfaceName)
         }
     }
 
-    override suspend fun readPeerStats(
-        interfaceName: String,
-        timeout: Duration,
-    ): DaemonCommandResult<ReadPeerStatsResponse> {
-        return executeCommand(timeout) {
+    override suspend fun readPeerStats(interfaceName: String): DaemonCommandResult<ReadPeerStatsResponse> {
+        return callWithTimeout(timeout) {
             service.readPeerStats(interfaceName = interfaceName)
         }
     }
 
-    private suspend fun <D> executeCommand(
+    private suspend fun <D> callWithTimeout(
         timeout: Duration,
-        commandCall: suspend () -> DaemonCommandResult<D>,
+        call: suspend () -> DaemonCommandResult<D>,
     ): DaemonCommandResult<D> {
-        require(timeout.toMillis() > 0L) { "Timeout must be positive" }
+        if (timeout.toMillis() <= 0L) {
+            throw IllegalArgumentException("Timeout must be positive")
+        }
 
         return try {
             withTimeout(timeout.toMillis()) {
-                commandCall()
+                call()
             }
         } catch (timeoutFailure: TimeoutCancellationException) {
             throw DaemonClientException.Timeout(
@@ -200,8 +186,6 @@ class KtorKrpcDaemonClient(
     }
 
     override fun close() {
-        if (ownsHttpClient) {
-            httpClient.close()
-        }
+        httpClient.close()
     }
 }

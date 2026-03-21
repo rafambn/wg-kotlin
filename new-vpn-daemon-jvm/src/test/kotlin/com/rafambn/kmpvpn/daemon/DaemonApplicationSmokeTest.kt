@@ -9,11 +9,11 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
-class DaemonControlPlaneServiceSmokeTest {
+class DaemonProcessApiSmokeTest {
 
     @Test
     fun pingReturnsHello() = runBlocking {
-        val response = DaemonControlPlaneServiceImpl().ping(
+        val response = DaemonProcessApiImpl().ping(
             nonce = "probe",
         )
         val success = response as DaemonCommandResult.Success<PingResponse>
@@ -23,7 +23,7 @@ class DaemonControlPlaneServiceSmokeTest {
 
     @Test
     fun knownButUnimplementedCommandReturnsPredictableFailure() = runBlocking {
-        val response = DaemonControlPlaneServiceImpl().createInterface(
+        val response = DaemonProcessApiImpl().createInterface(
             interfaceName = "wg0",
         )
         val failure = response as DaemonCommandResult.Failure
@@ -34,7 +34,7 @@ class DaemonControlPlaneServiceSmokeTest {
 
     @Test
     fun invalidInputReturnsValidationFailureInsteadOfThrowing() = runBlocking {
-        val response = DaemonControlPlaneServiceImpl().ping(nonce = "")
+        val response = DaemonProcessApiImpl().ping(nonce = "")
         val failure = response as DaemonCommandResult.Failure
 
         assertEquals(DaemonErrorKind.VALIDATION_ERROR, failure.kind)

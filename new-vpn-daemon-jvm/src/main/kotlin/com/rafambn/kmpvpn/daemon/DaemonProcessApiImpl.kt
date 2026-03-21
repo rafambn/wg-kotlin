@@ -9,7 +9,7 @@ import com.rafambn.kmpvpn.daemon.protocol.response.ApplyRoutesResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.CreateInterfaceResponse
 import com.rafambn.kmpvpn.daemon.protocol.DAEMON_HELLO_TOKEN
 import com.rafambn.kmpvpn.daemon.protocol.DaemonCommandResult
-import com.rafambn.kmpvpn.daemon.protocol.DaemonControlPlaneService
+import com.rafambn.kmpvpn.daemon.protocol.DaemonProcessApi
 import com.rafambn.kmpvpn.daemon.protocol.DaemonErrorKind
 import com.rafambn.kmpvpn.daemon.protocol.response.DeleteInterfaceResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.InterfaceExistsResponse
@@ -18,7 +18,7 @@ import com.rafambn.kmpvpn.daemon.protocol.response.ReadInterfaceInformationRespo
 import com.rafambn.kmpvpn.daemon.protocol.response.ReadPeerStatsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.SetInterfaceStateResponse
 
-class DaemonControlPlaneServiceImpl : DaemonControlPlaneService {
+class DaemonProcessApiImpl : DaemonProcessApi {
     override suspend fun ping(nonce: String): DaemonCommandResult<PingResponse> {
         if (nonce.isBlank()) {
             return validationFailure(message = "Ping nonce cannot be blank")

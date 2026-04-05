@@ -1,19 +1,16 @@
 package com.rafambn.kmpvpn.daemon.client
 
-import com.rafambn.kmpvpn.daemon.protocol.DaemonCommandResult
+import com.rafambn.kmpvpn.daemon.protocol.CommandResult
+import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_HOST
 import com.rafambn.kmpvpn.daemon.protocol.DaemonProcessApi
-import com.rafambn.kmpvpn.daemon.protocol.request.ApplyPeerConfigurationRequest
+import com.rafambn.kmpvpn.daemon.protocol.daemonRpcUrl
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyAddressesResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyDnsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyMtuResponse
-import com.rafambn.kmpvpn.daemon.protocol.response.ApplyPeerConfigurationResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyRoutesResponse
-import com.rafambn.kmpvpn.daemon.protocol.response.CreateInterfaceResponse
-import com.rafambn.kmpvpn.daemon.protocol.response.DeleteInterfaceResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.InterfaceExistsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.PingResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ReadInterfaceInformationResponse
-import com.rafambn.kmpvpn.daemon.protocol.response.ReadPeerStatsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.SetInterfaceStateResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
@@ -27,7 +24,7 @@ import kotlinx.rpc.krpc.serialization.json.json
 import kotlinx.rpc.withService
 
 class DaemonProcessClient(
-    host: String = "127.0.0.1",
+    host: String = DEFAULT_DAEMON_HOST,
     port: Int,
     val timeout: Duration = Duration.ofSeconds(15)
 ) : DaemonProcessApi, AutoCloseable {
@@ -46,13 +43,13 @@ class DaemonProcessClient(
         }
     }
 
-    private val rpcClient = httpClient.rpc("ws://$host:$port/services")
+    private val rpcClient = httpClient.rpc(daemonRpcUrl(host = host, port = port))
     private val service = rpcClient.withService<DaemonProcessApi>()
 
-    suspend fun handshake(timeout: Duration = Duration.ofSeconds(5)): DaemonCommandResult<PingResponse> {
+    suspend fun handshake(timeout: Duration = Duration.ofSeconds(5)): CommandResult<PingResponse> {
         val response = callWithTimeout(timeout) { service.ping() }
 
-        if (response is DaemonCommandResult.Failure) {
+        if (response is CommandResult.Failure) {
             throw DaemonClientException.ProtocolViolation(
                 message = "Handshake failed: ${response.message}",
             )
@@ -61,32 +58,20 @@ class DaemonProcessClient(
         return response
     }
 
-    override suspend fun ping(): DaemonCommandResult<PingResponse> {
+    override suspend fun ping(): CommandResult<PingResponse> {
         return callWithTimeout(timeout) { service.ping() }
     }
 
-    override suspend fun interfaceExists(interfaceName: String): DaemonCommandResult<InterfaceExistsResponse> {
+    override suspend fun interfaceExists(interfaceName: String): CommandResult<InterfaceExistsResponse> {
         return callWithTimeout(timeout) {
             service.interfaceExists(interfaceName = interfaceName)
-        }
-    }
-
-    override suspend fun createInterface(interfaceName: String): DaemonCommandResult<CreateInterfaceResponse> {
-        return callWithTimeout(timeout) {
-            service.createInterface(interfaceName = interfaceName)
-        }
-    }
-
-    override suspend fun deleteInterface(interfaceName: String): DaemonCommandResult<DeleteInterfaceResponse> {
-        return callWithTimeout(timeout) {
-            service.deleteInterface(interfaceName = interfaceName)
         }
     }
 
     override suspend fun setInterfaceState(
         interfaceName: String,
         up: Boolean,
-    ): DaemonCommandResult<SetInterfaceStateResponse> {
+    ): CommandResult<SetInterfaceStateResponse> {
         return callWithTimeout(timeout) {
             service.setInterfaceState(interfaceName = interfaceName, up = up)
         }
@@ -94,8 +79,8 @@ class DaemonProcessClient(
 
     override suspend fun applyMtu(
         interfaceName: String,
-        mtu: Int?,
-    ): DaemonCommandResult<ApplyMtuResponse> {
+        mtu: Int,
+    ): CommandResult<ApplyMtuResponse> {
         return callWithTimeout(timeout) {
             service.applyMtu(interfaceName = interfaceName, mtu = mtu)
         }
@@ -104,7 +89,7 @@ class DaemonProcessClient(
     override suspend fun applyAddresses(
         interfaceName: String,
         addresses: List<String>,
-    ): DaemonCommandResult<ApplyAddressesResponse> {
+    ): CommandResult<ApplyAddressesResponse> {
         return callWithTimeout(timeout) {
             service.applyAddresses(interfaceName = interfaceName, addresses = addresses)
         }
@@ -113,52 +98,36 @@ class DaemonProcessClient(
     override suspend fun applyRoutes(
         interfaceName: String,
         routes: List<String>,
-        table: String?,
-    ): DaemonCommandResult<ApplyRoutesResponse> {
+    ): CommandResult<ApplyRoutesResponse> {
         return callWithTimeout(timeout) {
             service.applyRoutes(
                 interfaceName = interfaceName,
                 routes = routes,
-                table = table,
             )
         }
     }
 
     override suspend fun applyDns(
         interfaceName: String,
-        dnsServers: List<String>,
-    ): DaemonCommandResult<ApplyDnsResponse> {
+        dnsDomainPool: Pair<List<String>, List<String>>,
+    ): CommandResult<ApplyDnsResponse> {
         return callWithTimeout(timeout) {
-            service.applyDns(interfaceName = interfaceName, dnsServers = dnsServers)
-        }
-    }
-
-    override suspend fun applyPeerConfiguration(
-        request: ApplyPeerConfigurationRequest,
-    ): DaemonCommandResult<ApplyPeerConfigurationResponse> {
-        return callWithTimeout(timeout) {
-            service.applyPeerConfiguration(request)
+            service.applyDns(interfaceName = interfaceName, dnsDomainPool = dnsDomainPool)
         }
     }
 
     override suspend fun readInterfaceInformation(
         interfaceName: String,
-    ): DaemonCommandResult<ReadInterfaceInformationResponse> {
+    ): CommandResult<ReadInterfaceInformationResponse> {
         return callWithTimeout(timeout) {
             service.readInterfaceInformation(interfaceName = interfaceName)
         }
     }
 
-    override suspend fun readPeerStats(interfaceName: String): DaemonCommandResult<ReadPeerStatsResponse> {
-        return callWithTimeout(timeout) {
-            service.readPeerStats(interfaceName = interfaceName)
-        }
-    }
-
     private suspend fun <D> callWithTimeout(
         timeout: Duration,
-        call: suspend () -> DaemonCommandResult<D>,
-    ): DaemonCommandResult<D> {
+        call: suspend () -> CommandResult<D>,
+    ): CommandResult<D> {
         if (timeout.toMillis() <= 0L) {
             throw IllegalArgumentException("Timeout must be positive")
         }

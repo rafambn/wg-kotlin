@@ -3,6 +3,8 @@ package com.rafambn.kmpvpn.session
 import com.rafambn.kmpvpn.session.io.InMemoryTunPort
 import com.rafambn.kmpvpn.session.io.InMemoryUdpPort
 import com.rafambn.kmpvpn.session.io.ManualPeriodicTicker
+import com.rafambn.kmpvpn.session.io.UdpDatagram
+import com.rafambn.kmpvpn.session.io.UdpEndpoint
 import com.rafambn.kmpvpn.session.io.VpnPacketLoop
 import com.rafambn.kmpvpn.session.io.VpnPacketResult
 import kotlinx.coroutines.test.runTest
@@ -12,6 +14,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class VpnPacketLoopTest {
+    private val peerEndpoint = UdpEndpoint(host = "198.51.100.10", port = 51820)
 
     @Test
     fun pollOnceRoutesTunPacketsToUdp() = runTest {
@@ -29,12 +32,14 @@ class VpnPacketLoopTest {
             session = session,
             tunPort = tunPort,
             udpPort = udpPort,
+            peerEndpoint = peerEndpoint,
         )
 
         loop.pollOnce()
 
-        assertEquals(1, udpPort.sentPackets.size)
-        assertContentEquals(byteArrayOf(9, 8, 7), udpPort.sentPackets.single())
+        assertEquals(1, udpPort.sentDatagrams.size)
+        assertContentEquals(byteArrayOf(9, 8, 7), udpPort.sentDatagrams.single().packet)
+        assertEquals(peerEndpoint, udpPort.sentDatagrams.single().endpoint)
         assertEquals(1, session.encryptInputs.size)
         assertContentEquals(byteArrayOf(1, 2, 3), session.encryptInputs.single())
     }
@@ -50,12 +55,22 @@ class VpnPacketLoopTest {
             ),
         )
         val tunPort = InMemoryTunPort()
-        val udpPort = InMemoryUdpPort(incomingPackets = ArrayDeque(listOf(byteArrayOf(7, 8, 9))))
+        val udpPort = InMemoryUdpPort(
+            incomingDatagrams = ArrayDeque(
+                listOf(
+                    UdpDatagram(
+                        packet = byteArrayOf(7, 8, 9),
+                        endpoint = peerEndpoint,
+                    ),
+                ),
+            ),
+        )
 
         val loop = VpnPacketLoop(
             session = session,
             tunPort = tunPort,
             udpPort = udpPort,
+            peerEndpoint = peerEndpoint,
             maxFlushIterations = 4,
         )
 
@@ -85,14 +100,15 @@ class VpnPacketLoopTest {
             session = session,
             tunPort = tunPort,
             udpPort = udpPort,
+            peerEndpoint = peerEndpoint,
             periodicTicker = ticker,
         )
 
         loop.pollOnce()
 
         assertEquals(1, session.periodicCalls)
-        assertEquals(1, udpPort.sentPackets.size)
-        assertContentEquals(byteArrayOf(42), udpPort.sentPackets.single())
+        assertEquals(1, udpPort.sentDatagrams.size)
+        assertContentEquals(byteArrayOf(42), udpPort.sentDatagrams.single().packet)
     }
 
     @Test
@@ -111,6 +127,7 @@ class VpnPacketLoopTest {
             session = session,
             tunPort = tunPort,
             udpPort = udpPort,
+            peerEndpoint = peerEndpoint,
         )
 
         val throwable = assertFailsWith<IllegalStateException> {
@@ -132,12 +149,22 @@ class VpnPacketLoopTest {
             ),
         )
         val tunPort = InMemoryTunPort()
-        val udpPort = InMemoryUdpPort(incomingPackets = ArrayDeque(listOf(byteArrayOf(9))))
+        val udpPort = InMemoryUdpPort(
+            incomingDatagrams = ArrayDeque(
+                listOf(
+                    UdpDatagram(
+                        packet = byteArrayOf(9),
+                        endpoint = peerEndpoint,
+                    ),
+                ),
+            ),
+        )
 
         val loop = VpnPacketLoop(
             session = session,
             tunPort = tunPort,
             udpPort = udpPort,
+            peerEndpoint = peerEndpoint,
             maxFlushIterations = 2,
         )
 
@@ -145,9 +172,9 @@ class VpnPacketLoopTest {
             loop.pollOnce()
         }
 
-        assertEquals(2, udpPort.sentPackets.size)
-        assertContentEquals(byteArrayOf(1), udpPort.sentPackets[0])
-        assertContentEquals(byteArrayOf(2), udpPort.sentPackets[1])
+        assertEquals(2, udpPort.sentDatagrams.size)
+        assertContentEquals(byteArrayOf(1), udpPort.sentDatagrams[0].packet)
+        assertContentEquals(byteArrayOf(2), udpPort.sentDatagrams[1].packet)
     }
 
     private class QueueVpnSession(

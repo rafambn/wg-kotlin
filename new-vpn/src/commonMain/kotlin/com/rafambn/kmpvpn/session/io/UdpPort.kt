@@ -1,7 +1,17 @@
 package com.rafambn.kmpvpn.session.io
 
-interface UdpPort {
-    suspend fun receivePacket(): ByteArray?
+data class UdpEndpoint(
+    val host: String,
+    val port: Int,
+)
 
-    suspend fun sendPacket(packet: ByteArray)
+data class UdpDatagram(
+    val packet: ByteArray,
+    val endpoint: UdpEndpoint,
+)
+
+interface UdpPort {
+    suspend fun receiveDatagram(): UdpDatagram?
+
+    suspend fun sendDatagram(datagram: UdpDatagram)
 }

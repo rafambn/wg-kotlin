@@ -1,7 +1,7 @@
 package com.rafambn.kmpvpn
 
 /**
- * WireGuard runtime configuration owned by [com.rafambn.kmpvpn.iface.VpnInterface].
+ * WireGuard session/runtime configuration consumed by session and userspace runtime code.
  */
 interface VpnAdapterConfiguration {
 
@@ -12,8 +12,6 @@ interface VpnAdapterConfiguration {
     //TODO(Create default key generator)
     //return Keys.pubkeyBase64(privateKey()).getBase64PublicKey()
     val publicKey: String
-
-    val fwMark: Int?
 
     val peers: List<VpnPeer>
 }

@@ -67,14 +67,11 @@ interface VpnAddress {
 
     fun peer(): String
 
-    fun table(): String
-
     fun mtu(mtu: Int)
 
     //	void setName(String name);
     //
     //	void setPeer(String peer);
     //
-    //	void setTable(String table);
     fun up()
 }

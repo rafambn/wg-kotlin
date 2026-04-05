@@ -3,6 +3,8 @@ package com.rafambn.kmpvpn.session
 import com.rafambn.kmpvpn.Engine
 import com.rafambn.kmpvpn.VpnAdapterConfiguration
 import com.rafambn.kmpvpn.VpnPeer
+import com.rafambn.kmpvpn.requireDistinctAllowedIpOwnership
+import com.rafambn.kmpvpn.requireUserspacePeerEndpoints
 import com.rafambn.kmpvpn.requireUniquePeerPublicKeys
 import com.rafambn.kmpvpn.session.factory.BoringTunVpnSessionFactory
 import com.rafambn.kmpvpn.session.factory.QuicVpnSessionFactory
@@ -16,6 +18,8 @@ internal class InMemorySessionManager(
 
     override fun reconcileSessions(config: VpnAdapterConfiguration) {
         requireUniquePeerPublicKeys(config.peers)
+        requireUserspacePeerEndpoints(config.peers)
+        requireDistinctAllowedIpOwnership(config.peers)
 
         val desiredPeers = config.peers.associateBy { peer -> peer.publicKey }
         val desiredIndexes = desiredPeers.keys
@@ -76,6 +80,12 @@ internal class InMemorySessionManager(
                     isActive = managed.session.isActive,
                 )
             }
+    }
+
+    override fun managedSessions(): List<ManagedSession> {
+        return sessionsByPeer.values
+            .sortedBy { managed -> managed.session.sessionIndex.toInt() }
+            .map { managed -> managed.copy() }
     }
 
     override fun session(peerKey: String): SessionSnapshot? {

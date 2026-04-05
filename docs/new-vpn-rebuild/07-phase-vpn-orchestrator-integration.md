@@ -2,14 +2,15 @@
 
 ## Objective
 
-Finalize `Vpn` orchestration semantics across `SessionManager` and `VpnInterface`, then complete daemon-backed execution cutover.
+Finish the production cutover that wires the userspace runtime into `Vpn`
+lifecycle operations.
 
 ## Implementation Status
 
-Status: Re-scoped (partially implemented)  
-As Of: 2026-04-02
+Status: Deferred  
+As Of: 2026-04-08
 
-## Implemented in Current Code
+## Already Implemented
 
 1. `Vpn` constructor supports production defaults plus injectable test dependencies.
 2. Core lifecycle orchestration is implemented:
@@ -20,34 +21,35 @@ As Of: 2026-04-02
 3. Health and state APIs are implemented:
 - `exists`
 - `isRunning`
-- `state` (observational: `NotCreated`, `Created`, `Running`)
+- `state`
 - `configuration`
 4. `reconfigure` updates interface configuration and re-runs session reconciliation.
 5. Error mapping publishes `VpnEvent.Failure`; non-fatal lifecycle conflicts publish `VpnEvent.Alert`.
-6. Tests cover lifecycle transitions, idempotency, and invariant behavior.
 
 ## Remaining Scope
 
-1. Wire daemon-backed `InterfaceCommandExecutor` into JVM production factory/cutover path.
-2. Add integration tests for orchestrator lifecycle against a real daemon-backed executor.
-3. Confirm and document long-term packet-loop ownership boundary versus orchestrator lifecycle.
+1. Start and stop a real `UserspaceVpnRuntime` job from `Vpn.start()`, `stop()`, and `delete()`.
+2. Feed live `TunPort` and endpoint-aware `UdpPort` instances into that runtime.
+3. Cut `PlatformInterfaceFactory.jvm` over from in-memory providers to production `TunProvider` and production `InterfaceCommandExecutor`.
+4. Wire runtime peer byte counters into orchestrator-facing information reads.
+5. Add lifecycle integration tests for the production JVM path.
 
 ## Deliverables
 
-1. Core orchestrator-based `Vpn` implementation in `:new-vpn` (completed).
-2. Merged interface-configuration policy validated and documented (completed).
-3. Lifecycle integration tests with daemon-backed path (pending).
-4. Finalized packet-loop ownership/cutover docs after daemon wiring (pending).
+1. Orchestrator-owned runtime job lifecycle.
+2. Production JVM factory cutover.
+3. Live runtime stats wiring.
+4. Integration tests covering start/stop/reconfigure/delete on the production path.
 
 ## Exit Criteria
 
-1. Public lifecycle API works against daemon-backed JVM path.
-2. Rollback tests pass for failure boundaries including daemon-backed command failures.
-3. `Vpn` maintains strict delegation to `SessionManager` and `VpnInterface` contracts.
+1. Public lifecycle API works against the real JVM userspace path.
+2. Rollback tests pass for failure boundaries including runtime-start and daemon-control failures.
+3. `Vpn` maintains strict delegation to `SessionManager`, `UserspaceVpnRuntime`, and `VpnInterface`.
 
 ## Risks and Controls
 
 1. Risk: lifecycle race conditions.  
 Control: keep explicit idempotent transitions and deterministic error mapping.
-2. Risk: hidden coupling returns through convenience methods.  
-Control: enforce contract boundaries and integration tests during daemon cutover.
+2. Risk: production cutover leaks test doubles into runtime wiring.  
+Control: keep provider abstractions explicit and add integration coverage for the real path.

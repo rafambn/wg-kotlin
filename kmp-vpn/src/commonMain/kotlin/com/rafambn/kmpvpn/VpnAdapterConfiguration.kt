@@ -10,8 +10,6 @@ interface VpnAdapterConfiguration {
     //return Keys.pubkeyBase64(privateKey()).getBase64PublicKey()
     val publicKey: String
 
-    val fwMark: Int?
-
     val peers: List<VpnPeer>
 }
 
@@ -19,6 +17,5 @@ open class DefaultVpnAdapterConfiguration(
     override val listenPort: Int? = null,
     override val privateKey: String, // Keys.genkey().getBase64PrivateKey()
     override val publicKey: String,
-    override val fwMark: Int? = null,
     override val peers: List<VpnPeer> = emptyList()
 ) : VpnAdapterConfiguration

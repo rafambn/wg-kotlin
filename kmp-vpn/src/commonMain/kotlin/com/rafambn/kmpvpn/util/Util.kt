@@ -38,17 +38,6 @@ object Util {
         return l.toString()
     }
 
-    fun parseFwMark(tkn: String): Int {
-        val t = tkn.trim()
-        return if (t == "off" || t.isEmpty()) {
-            0
-        } else if (t.startsWith("0x")) {
-            t.substring(2).toInt(16)
-        } else {
-            t.toInt()
-        }
-    }
-
     fun parseQuotedString(command: String): MutableList<String> {
         val args = ArrayList<String>()
         var escaped = false

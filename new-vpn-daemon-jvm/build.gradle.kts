@@ -10,11 +10,13 @@ kotlin {
 }
 
 application {
-    mainClass.set("com.rafambn.kmpvpn.daemon.DaemonApplicationKt")
+    mainClass.set("com.rafambn.kmpvpn.daemon.DaemonMainKt")
 }
 
 dependencies {
     implementation(project(":new-vpn-daemon-protocol"))
+    implementation(libs.clikt)
+    implementation(libs.commons.exec)
     implementation(libs.kotlinx.rpc.krpc.server)
     implementation(libs.kotlinx.rpc.krpc.serialization.json)
     implementation(libs.kotlinx.rpc.krpc.ktor.server)
@@ -22,6 +24,8 @@ dependencies {
     implementation(libs.ktor.server.websockets)
 
     testImplementation(kotlin("test-junit5"))
+    testImplementation(libs.mockk)
+    testImplementation(project(":new-vpn-daemon-client-jvm"))
 }
 
 tasks.test {

@@ -13,9 +13,9 @@ Build a new architecture in `:new-vpn` where:
 This plan assumes the current baseline in `new-vpn`:
 
 - Kotlin core: orchestrator `Vpn` lifecycle (`create/start/stop/delete/reconfigure`), observational `VpnState`, and `VpnEvent` telemetry.
-- Session runtime: `SessionManager` reconciliation, engine factories (`BORINGTUN`/`QUIC` placeholder), and common packet loop contracts/runtime (`VpnPacketLoop`, `TunPort`, `UdpPort`, periodic ticker).
-- JVM interface layer: `JvmVpnInterface` behind `InterfaceCommandExecutor`, with `PlatformInterfaceFactory.jvm` currently wiring `InMemoryInterfaceCommandExecutor`.
-- Daemon stack: shared `DaemonProcessApi` + `DaemonCommandResult`, JVM client (`DaemonProcessClient`), and daemon kRPC server scaffold (`ping` implemented; privileged commands scaffolded).
+- Session runtime: `SessionManager` reconciliation, engine factories (`BORINGTUN`/`QUIC` placeholder), `VpnPacketLoop`, and `UserspaceVpnRuntime` with endpoint-aware UDP routing and runtime peer stats.
+- JVM interface layer: `JvmVpnInterface` behind `InterfaceCommandExecutor` plus local `TunProvider`, with `PlatformInterfaceFactory.jvm` currently wiring in-memory implementations.
+- Daemon stack: shared `DaemonProcessApi` + `CommandResult`, JVM client (`DaemonProcessClient`), and daemon kRPC server with typed control-plane command handlers.
 - Rust: working `TunnelSession` UniFFI binding with packet operations.
 
 ## Target Module Topology
@@ -75,11 +75,11 @@ Use this table as the source of truth during execution.
 |---|---|---:|---:|---|---|---|---|
 | 01 | Completed | 8 | 8 | 2026-03-19 | 2026-03-19 | Passed | Module scaffolding, architecture checks, and CI entry tasks added |
 | 02 | Completed | 10 | 10 | 2026-03-19 | 2026-03-19 | Passed | Core contracts added, `VpnAdapter` merged into `VpnInterface`, and state simplified to live observations |
-| 03 | Completed | 14 | 14 | 2026-03-19 | 2026-03-19 | Passed | Session reconciliation finalized, engine factories wired, common packet loop (`TunPort`/`UdpPort`/ticker) implemented, and loop behavior covered by tests |
-| 04 | Completed | 16 | 16 | 2026-03-20 | 2026-03-20 | Passed | `PlatformInterfaceFactory` (`expect/actual`) and `JvmVpnInterface` delivered behind `InterfaceCommandExecutor`; default JVM factory currently uses `InMemoryInterfaceCommandExecutor`; `KtorDatagramUdpPort` and rollback/idempotency tests delivered |
-| 05 | Completed | 12 | 12 | 2026-03-21 | 2026-04-02 | Passed | `DaemonProcessApi` (`@Rpc`) + `DaemonCommandResult` protocol, kRPC `/services` daemon scaffold, JVM client with timeout + handshake checks, simplified ping contract, and smoke/contract tests across protocol/client/daemon modules |
-| 06 | Not started | 16 | 0 | - | - | - | Daemon executable is scaffold-only today (`ping` success; privileged command methods currently return `UNKNOWN_COMMAND`) |
-| 07 | Re-scoped (partial) | 12 | 0 | - | - | - | Core orchestration semantics are already present in `Vpn`; remaining work is daemon-backed executor wiring and final packet-loop ownership/cutover decisions |
+| 03 | Completed (reconciled) | 14 | 14 | 2026-03-19 | 2026-04-08 | Passed | `UserspaceVpnRuntime`, endpoint-aware `UdpPort`, longest-prefix routing, endpoint demux, and runtime peer stats delivered |
+| 04 | Completed (re-scoped) | 16 | 16 | 2026-03-20 | 2026-04-08 | Passed | `JvmVpnInterface` now owns a live `TunPort` through `TunProvider`; command boundary reduced to `InterfaceCommandExecutor`; default JVM factory remains in-memory until phase 07 cutover |
+| 05 | Completed (reconciled) | 12 | 12 | 2026-03-21 | 2026-04-08 | Passed | Daemon protocol reduced to control-plane RPCs only; peer apply/create/delete/read-peer-stats removed from the shared surface |
+| 06 | Completed (reconciled) | 16 | 16 | 2026-04-02 | 2026-04-08 | Passed | Daemon planners and validators now cover control-plane commands only; WireGuard-backend peer operations removed |
+| 07 | Deferred | 12 | 0 | - | - | - | Remaining work is orchestrator-owned runtime-job lifecycle, production provider cutover, and live runtime stats wiring |
 | 08 | Not started | 14 | 0 | - | - | - | - |
 | 09 | Not started | 8 | 0 | - | - | - | - |
 
@@ -150,8 +150,8 @@ Record architecture decisions in this file as appended entries.
 - Decision ID: ADR-06
 - Date: 2026-03-20
 - Context: Phase 04 requires JVM interface operations now, but daemon IPC will only be introduced in phase 05.
-- Decision: Introduce `InterfaceCommandExecutor` as the only command boundary consumed by `JvmVpnInterface`; forbid local OS command execution in `:new-vpn` JVM code and reserve privileged command execution for daemon-backed executors only.
-- Consequence: Phase 05 can deliver daemon protocol/client/server scaffolds without changing `Vpn`, `SessionManager`, or `VpnInterface` contracts; default factory wiring to daemon-backed executors remains a later cutover step.
+- Decision: Introduce a control-only executor boundary consumed by `JvmVpnInterface`; local TUN ownership stays in `:new-vpn`, while privileged OS command execution is reserved for daemon-backed executors.
+- Consequence: Phase 05 can deliver daemon protocol/client/server scaffolds without changing `Vpn`, `SessionManager`, or `VpnInterface` contracts; phase 04 no longer implies OS WireGuard peer ownership.
 
 ### Decision Entry ADR-07
 
@@ -174,8 +174,24 @@ Record architecture decisions in this file as appended entries.
 - Decision ID: ADR-09
 - Date: 2026-04-02
 - Context: Phase 05 delivered standalone daemon protocol/client/server scaffolding, but privileged command execution is not yet implemented in the daemon.
-- Decision: Keep `PlatformInterfaceFactory.jvm` wired to `InMemoryInterfaceCommandExecutor` until phase 06 allowlisted command execution is implemented and phase 07/09 cutover is ready.
-- Consequence: Core orchestration tests remain deterministic and decoupled from daemon lifecycle, while program-level DoD items requiring daemon-only privileged execution remain open.
+- Decision: Keep `PlatformInterfaceFactory.jvm` wired to in-memory control and TUN providers until phase 07 production cutover is ready.
+- Consequence: Core orchestration tests remain deterministic and decoupled from daemon lifecycle, while program-level DoD items requiring production providers remain open.
+
+### Decision Entry ADR-10
+
+- Decision ID: ADR-10
+- Date: 2026-04-02
+- Context: Phase 06 required replacing scaffolded `UNKNOWN_COMMAND` responses with hardened privileged command execution.
+- Decision: Implement daemon-side command execution directly in `DaemonProcessApiImpl` through explicit per-method handlers, OS-specific allowlist command catalogs (Linux/macOS/Windows), strict payload validation, and process execution via `ProcessBuilder` without shell interpolation.
+- Consequence: The daemon now executes typed control-plane operations with validation and auditability, while production cutover in `PlatformInterfaceFactory.jvm` remains a later phase step.
+
+### Decision Entry ADR-11
+
+- Decision ID: ADR-11
+- Date: 2026-04-08
+- Context: The earlier daemon/apply-peer path assumed an OS WireGuard backend, but BORINGTUN peer state and packet forwarding now live in-process.
+- Decision: Treat `Engine.BORINGTUN` as userspace-only; remove daemon/backend peer control, interface create/delete RPCs, and daemon peer-stats reads; keep peer routing and byte accounting in `UserspaceVpnRuntime`.
+- Consequence: Phases 03-06 are reconciled around a userspace runtime plus control-only daemon, and phase 07 narrows to runtime-job orchestration plus production provider cutover.
 
 ## Definition of Done (Program Level)
 
@@ -186,4 +202,4 @@ Record architecture decisions in this file as appended entries.
 5. Core module can be tested with fake interface/session dependencies.
 6. End-to-end lifecycle tests pass: `create`, `start`, `stop`, `delete`, peer updates, failure rollback.
 
-Current gap snapshot (2026-04-02): items 3 and 4 are still pending phase 06/09 completion.
+Current gap snapshot (2026-04-08): the daemon surface and userspace runtime are aligned, but program-level item 3 still awaits production `PlatformInterfaceFactory.jvm` cutover and item 6 still awaits orchestrator-owned runtime-job integration in phase 07.

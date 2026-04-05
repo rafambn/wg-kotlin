@@ -5,5 +5,5 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ApplyMtuResponse(
     val interfaceName: String,
-    val mtu: Int?,
+    val mtu: Int,
 )

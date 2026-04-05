@@ -8,6 +8,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertEquals
 
 class JvmPacketIoAdaptersTest {
 
@@ -20,20 +21,24 @@ class JvmPacketIoAdaptersTest {
         try {
             val portA = KtorDatagramUdpPort(
                 socket = socketA,
-                remoteAddress = socketB.localAddress,
                 receiveTimeoutMillis = 1_000L,
             )
             val portB = KtorDatagramUdpPort(
                 socket = socketB,
-                remoteAddress = socketA.localAddress,
                 receiveTimeoutMillis = 1_000L,
             )
 
-            portA.sendPacket(byteArrayOf(7, 8, 9))
-            val received = portB.receivePacket()
+            portA.sendDatagram(
+                UdpDatagram(
+                    packet = byteArrayOf(7, 8, 9),
+                    endpoint = UdpEndpoint(host = "127.0.0.1", port = (socketB.localAddress as InetSocketAddress).port),
+                ),
+            )
+            val received = portB.receiveDatagram()
 
             assertNotNull(received)
-            assertContentEquals(byteArrayOf(7, 8, 9), received)
+            assertContentEquals(byteArrayOf(7, 8, 9), received.packet)
+            assertEquals((socketA.localAddress as InetSocketAddress).port, received.endpoint.port)
         } finally {
             socketA.close()
             socketB.close()

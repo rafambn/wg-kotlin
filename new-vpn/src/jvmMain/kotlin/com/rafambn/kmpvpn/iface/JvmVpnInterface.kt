@@ -6,28 +6,32 @@ import com.rafambn.kmpvpn.VpnAdapterConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.requireValidConfiguration
+import com.rafambn.kmpvpn.session.io.TunPort
 
 /**
- * JVM-backed [VpnInterface] implementation using [InterfaceCommandExecutor].
+ * JVM-backed [VpnInterface] implementation using a local [TunProvider] plus
+ * privileged [InterfaceCommandExecutor] operations.
  */
 class JvmVpnInterface(
     private val commandExecutor: InterfaceCommandExecutor,
+    private val tunProvider: TunProvider,
 ) : VpnInterface {
     private var createdInterfaceName: String? = null
     private var currentConfiguration: VpnConfiguration? = null
+    private var currentTunPort: OwnedTunPort? = null
     private var up: Boolean = false
 
     override fun exists(interfaceName: String): Boolean {
+        val providerExists = tunProvider.exists(interfaceName)
+        val observedExists = providerExists || commandExecutor.interfaceExists(interfaceName)
+
         if (createdInterfaceName == interfaceName) {
-            val observedExists = commandExecutor.interfaceExists(interfaceName)
             if (!observedExists) {
-                createdInterfaceName = null
-                currentConfiguration = null
-                up = false
+                clearState(closeTunPort = true)
             }
             return observedExists
         }
-        return commandExecutor.interfaceExists(interfaceName)
+        return observedExists
     }
 
     override fun create(config: VpnConfiguration) {
@@ -39,26 +43,34 @@ class JvmVpnInterface(
             )
         }
 
-        if (exists(config.interfaceName)) {
-            createdInterfaceName = config.interfaceName
-            if (currentConfiguration == null) {
-                currentConfiguration = snapshot(config)
-            }
+        if (createdInterfaceName == config.interfaceName && currentTunPort != null) {
+            if (currentConfiguration == null) currentConfiguration = snapshot(config)
             return
         }
 
+        val tunPort = try {
+            tunProvider.open(config.interfaceName)
+        } catch (throwable: Throwable) {
+            throw IllegalStateException(
+                "Failed to open tun interface `${config.interfaceName}`: ${throwable.message ?: "unknown"}",
+                throwable,
+            )
+        }
+
         try {
-            commandExecutor.createInterface(config.interfaceName)
+            currentTunPort = tunPort
+            createdInterfaceName = tunPort.interfaceName
             applyConfiguration(config)
         } catch (throwable: Throwable) {
-            safeRun { commandExecutor.deleteInterface(config.interfaceName) }
+            safeRun { tunPort.close() }
+            clearState(closeTunPort = false)
             throw IllegalStateException(
                 "Failed to create interface `${config.interfaceName}`: ${throwable.message ?: "unknown"}",
                 throwable,
             )
         }
 
-        createdInterfaceName = config.interfaceName
+        createdInterfaceName = tunPort.interfaceName
         currentConfiguration = snapshot(config)
         up = false
     }
@@ -90,11 +102,7 @@ class JvmVpnInterface(
             safeRun { commandExecutor.setInterfaceUp(interfaceName, false) }
         }
 
-        safeRun { commandExecutor.deleteInterface(interfaceName) }
-
-        createdInterfaceName = null
-        currentConfiguration = null
-        up = false
+        clearState(closeTunPort = true)
     }
 
     override fun isUp(): Boolean {
@@ -114,6 +122,10 @@ class JvmVpnInterface(
         )
     }
 
+    override fun tunPort(): TunPort {
+        return currentTunPort ?: throw IllegalStateException("Cannot access tunPort before create()")
+    }
+
     override fun reconfigure(config: VpnConfiguration) {
         requireValidConfiguration(config)
 
@@ -131,20 +143,17 @@ class JvmVpnInterface(
 
         val rollbackActions: MutableList<() -> Unit> = mutableListOf()
         try {
-            applyMtu(config)
             rollbackActions += { safeRun { applyMtu(previousConfiguration) } }
+            applyMtu(config)
 
-            applyAddresses(config)
             rollbackActions += { safeRun { applyAddresses(previousConfiguration) } }
+            applyAddresses(config)
 
-            applyRoutes(config)
             rollbackActions += { safeRun { applyRoutes(previousConfiguration) } }
+            applyRoutes(config)
 
-            applyDns(config)
             rollbackActions += { safeRun { applyDns(previousConfiguration) } }
-
-            applyPeerConfiguration(interfaceName, config.adapter)
-            rollbackActions += { safeRun { applyPeerConfiguration(interfaceName, previousConfiguration.adapter) } }
+            applyDns(config)
         } catch (throwable: Throwable) {
             rollbackActions.asReversed().forEach { rollback -> rollback() }
             throw IllegalStateException(
@@ -161,27 +170,22 @@ class JvmVpnInterface(
         val configuration = currentConfiguration
             ?: throw IllegalStateException("Cannot read interface information before create()")
         val observedInformation = commandExecutor.readInformation(interfaceName)
-        val observedPeerStats = commandExecutor.readPeerStats(interfaceName)
 
         if (observedInformation != null) {
             up = observedInformation.isUp
             return observedInformation.copy(
-                addresses = if (observedInformation.addresses.isEmpty()) {
+                addresses = observedInformation.addresses.ifEmpty {
                     configuration.addresses.toList()
-                } else {
-                    observedInformation.addresses
                 },
-                dnsServers = if (observedInformation.dnsServers.isEmpty()) {
-                    configuration.dns.toList()
+                dnsDomainPool = if (observedInformation.dnsDomainPool.first.isEmpty() &&
+                    observedInformation.dnsDomainPool.second.isEmpty()
+                ) {
+                    configuration.dnsDomainPool
                 } else {
-                    observedInformation.dnsServers
+                    observedInformation.dnsDomainPool
                 },
                 mtu = observedInformation.mtu ?: configuration.mtu,
-                peerStats = if (observedPeerStats.isNotEmpty()) {
-                    observedPeerStats
-                } else if (observedInformation.peerStats.isNotEmpty()) {
-                    observedInformation.peerStats
-                } else {
+                peerStats = observedInformation.peerStats.ifEmpty {
                     defaultPeerStats(configuration.adapter)
                 },
             )
@@ -191,13 +195,9 @@ class JvmVpnInterface(
             interfaceName = interfaceName,
             isUp = up,
             addresses = configuration.addresses.toList(),
-            dnsServers = configuration.dns.toList(),
+            dnsDomainPool = configuration.dnsDomainPool,
             mtu = configuration.mtu,
-            peerStats = if (observedPeerStats.isNotEmpty()) {
-                observedPeerStats
-            } else {
-                defaultPeerStats(configuration.adapter)
-            },
+            peerStats = defaultPeerStats(configuration.adapter),
         )
     }
 
@@ -206,7 +206,6 @@ class JvmVpnInterface(
         applyAddresses(config)
         applyRoutes(config)
         applyDns(config)
-        applyPeerConfiguration(config.interfaceName, config.adapter)
     }
 
     private fun applyMtu(config: VpnConfiguration) {
@@ -221,16 +220,11 @@ class JvmVpnInterface(
         commandExecutor.applyRoutes(
             interfaceName = config.interfaceName,
             routes = routesFrom(config),
-            table = config.table,
         )
     }
 
     private fun applyDns(config: VpnConfiguration) {
-        commandExecutor.applyDns(config.interfaceName, config.dns.toList())
-    }
-
-    private fun applyPeerConfiguration(interfaceName: String, adapter: VpnAdapterConfiguration) {
-        commandExecutor.applyPeerConfiguration(interfaceName, adapter)
+        commandExecutor.applyDns(config.interfaceName, config.dnsDomainPool)
     }
 
     private fun routesFrom(config: VpnConfiguration): List<String> {
@@ -259,11 +253,9 @@ class JvmVpnInterface(
 
     private fun configurationsEquivalent(first: VpnConfiguration, second: VpnConfiguration): Boolean {
         return first.interfaceName == second.interfaceName &&
-            first.dns.toList() == second.dns.toList() &&
+            first.dnsDomainPool == second.dnsDomainPool &&
             first.mtu == second.mtu &&
             first.addresses.toList() == second.addresses.toList() &&
-            first.table == second.table &&
-            first.saveConfig == second.saveConfig &&
             adapterEquivalent(first.adapter, second.adapter)
     }
 
@@ -271,23 +263,19 @@ class JvmVpnInterface(
         return first.listenPort == second.listenPort &&
             first.privateKey == second.privateKey &&
             first.publicKey == second.publicKey &&
-            first.fwMark == second.fwMark &&
             first.peers == second.peers
     }
 
     private fun snapshot(config: VpnConfiguration): VpnConfiguration {
         return DefaultVpnConfiguration(
             interfaceName = config.interfaceName,
-            dns = config.dns.toMutableList(),
+            dnsDomainPool = config.dnsDomainPool.first.toList() to config.dnsDomainPool.second.toList(),
             mtu = config.mtu,
             addresses = config.addresses.toMutableList(),
-            table = config.table,
-            saveConfig = config.saveConfig,
             adapter = DefaultVpnAdapterConfiguration(
                 listenPort = config.adapter.listenPort,
                 privateKey = config.adapter.privateKey,
                 publicKey = config.adapter.publicKey,
-                fwMark = config.adapter.fwMark,
                 peers = config.adapter.peers.map { peer ->
                     VpnPeer(
                         endpointPort = peer.endpointPort,
@@ -308,5 +296,15 @@ class JvmVpnInterface(
         } catch (_: Throwable) {
             // best-effort cleanup
         }
+    }
+
+    private fun clearState(closeTunPort: Boolean) {
+        if (closeTunPort) {
+            safeRun { currentTunPort?.close() }
+        }
+        currentTunPort = null
+        createdInterfaceName = null
+        currentConfiguration = null
+        up = false
     }
 }

@@ -3,6 +3,7 @@ package com.rafambn.kmpvpn
 import com.rafambn.kmpvpn.iface.VpnInterface
 import com.rafambn.kmpvpn.iface.VpnInterfaceInformation
 import com.rafambn.kmpvpn.session.InMemorySessionManager
+import com.rafambn.kmpvpn.session.io.TunPort
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -69,7 +70,7 @@ class VpnStateTransitionTest {
             interfaceName = interfaceName,
             privateKey = privateKey,
             publicKey = publicKey,
-            peers = listOf(VpnPeer(publicKey = peerKey)),
+            peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
         )
     }
 
@@ -103,6 +104,14 @@ class VpnStateTransitionTest {
             return checkNotNull(currentConfiguration)
         }
 
+        override fun tunPort(): TunPort {
+            return object : TunPort {
+                override suspend fun readPacket(): ByteArray? = null
+
+                override suspend fun writePacket(packet: ByteArray) = Unit
+            }
+        }
+
         override fun reconfigure(config: VpnConfiguration) {
             currentConfiguration = config
         }
@@ -112,7 +121,7 @@ class VpnStateTransitionTest {
                 interfaceName = "wg-failing",
                 isUp = false,
                 addresses = emptyList(),
-                dnsServers = emptyList(),
+                dnsDomainPool = (emptyList<String>() to emptyList()),
                 mtu = null,
             )
         }

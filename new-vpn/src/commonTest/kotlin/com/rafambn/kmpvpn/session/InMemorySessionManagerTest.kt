@@ -124,7 +124,13 @@ class InMemorySessionManagerTest {
         return DefaultVpnAdapterConfiguration(
             privateKey = "private-key",
             publicKey = "public-key",
-            peers = peerKeys.map { key -> VpnPeer(publicKey = key) },
+            peers = peerKeys.mapIndexed { index, key ->
+                VpnPeer(
+                    publicKey = key,
+                    endpointAddress = "198.51.100.${index + 1}",
+                    endpointPort = 51820 + index,
+                )
+            },
         )
     }
 

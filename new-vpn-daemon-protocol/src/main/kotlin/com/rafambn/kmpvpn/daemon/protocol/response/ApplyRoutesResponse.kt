@@ -6,5 +6,4 @@ import kotlinx.serialization.Serializable
 data class ApplyRoutesResponse(
     val interfaceName: String,
     val routes: List<String>,
-    val table: String?,
 )

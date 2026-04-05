@@ -1,5 +1,32 @@
 package com.rafambn.kmpvpn
 
+internal fun requireUserspacePeerEndpoints(peers: List<VpnPeer>) {
+    peers.forEachIndexed { index, peer ->
+        require(!peer.endpointAddress.isNullOrBlank()) {
+            "Peer `${peer.publicKey}` at index $index must define endpointAddress for BORINGTUN userspace runtime"
+        }
+        require(peer.endpointPort != null) {
+            "Peer `${peer.publicKey}` at index $index must define endpointPort for BORINGTUN userspace runtime"
+        }
+    }
+}
+
+internal fun requireDistinctAllowedIpOwnership(peers: List<VpnPeer>) {
+    val ownershipByNetwork: MutableMap<String, String> = linkedMapOf()
+
+    peers.forEach { peer ->
+        peer.allowedIps.forEach { allowedIp ->
+            val parsed = parseCidr(allowedIp)
+                ?: throw IllegalArgumentException("Peer `${peer.publicKey}` has invalid allowed IP `$allowedIp`")
+            val key = parsed.normalizedKey()
+            val previousOwner = ownershipByNetwork.putIfAbsent(key, peer.publicKey)
+            require(previousOwner == null || previousOwner == peer.publicKey) {
+                "Allowed IP `${allowedIp}` overlaps ambiguously between peers `$previousOwner` and `${peer.publicKey}`"
+            }
+        }
+    }
+}
+
 internal fun requireNonBlankInterfaceName(interfaceName: String) {
     require(interfaceName.isNotBlank()) {
         "Interface name cannot be empty"

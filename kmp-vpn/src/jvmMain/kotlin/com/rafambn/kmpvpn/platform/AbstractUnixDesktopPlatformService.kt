@@ -3,18 +3,7 @@ package com.rafambn.kmpvpn.platform
 import com.rafambn.kmpvpn.VpnAdapter
 import com.rafambn.kmpvpn.VpnAdapterConfiguration
 import com.rafambn.kmpvpn.address.VpnAddress
-import com.rafambn.kmpvpn.info.VpnInterfaceInformation
-import com.rafambn.kmpvpn.info.VpnPeerInformation
 import java.io.IOException
-import java.io.UncheckedIOException
-import java.net.InetSocketAddress
-import java.text.ParseException
-import java.util.ArrayList
-import java.util.Arrays
-import java.util.Optional
-import java.util.StringTokenizer
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -140,7 +129,6 @@ abstract class AbstractUnixDesktopPlatformService<I : VpnAddress> : AbstractDesk
 //            val rx = AtomicLong(0L)
 //            val tx = AtomicLong(0L)
 //            val port = AtomicInteger()
-//            val fwmark = AtomicInteger()
 //            val publicKey = StringBuffer()
 //            val privateKey = StringBuffer()
 //
@@ -155,7 +143,6 @@ abstract class AbstractUnixDesktopPlatformService<I : VpnAddress> : AbstractDesk
 //                    privateKey.append(st.nextToken())
 //                    publicKey.append(st.nextToken())
 //                    port.set(st.nextToken().toInt())
-//                    fwmark.set(Util.parseFwMark(st.nextToken()))
 //                } else {
 //                    val peerPublicKey = st.nextToken()
 //                    val presharedKeyVal = st.nextToken()
@@ -191,7 +178,6 @@ abstract class AbstractUnixDesktopPlatformService<I : VpnAddress> : AbstractDesk
 //                override fun lastHandshake(): Instant = Instant.ofEpochMilli(lastHandshake.get())
 //                override fun error(): Optional<String> = Optional.empty()
 //                override fun listenPort(): Optional<Int> = if (port.get() == 0) Optional.empty() else Optional.of(port.get())
-//                override fun fwmark(): Optional<Int> = if (fwmark.get() == 0) Optional.empty() else Optional.of(fwmark.get())
 //                override fun publicKey(): String = publicKey.toString()
 //                override fun privateKey(): String = privateKey.toString()
 //            }

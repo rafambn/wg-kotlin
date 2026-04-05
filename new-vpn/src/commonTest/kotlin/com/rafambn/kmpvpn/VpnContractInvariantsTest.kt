@@ -25,8 +25,8 @@ class VpnContractInvariantsTest {
     @Test
     fun rejectsDuplicatePeerPublicKeysOnConstruction() {
         val duplicatedPeers = listOf(
-            VpnPeer(publicKey = "peer-a"),
-            VpnPeer(publicKey = "peer-a"),
+            VpnPeer(publicKey = "peer-a", endpointAddress = "198.51.100.1", endpointPort = 51820),
+            VpnPeer(publicKey = "peer-a", endpointAddress = "198.51.100.2", endpointPort = 51821),
         )
 
         assertFailsWith<IllegalArgumentException> {
@@ -48,7 +48,7 @@ class VpnContractInvariantsTest {
                 interfaceName = "wg0",
                 privateKey = privateKey,
                 publicKey = publicKey,
-                peers = listOf(VpnPeer(publicKey = peerKey)),
+                peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
             ),
         )
 
@@ -61,8 +61,8 @@ class VpnContractInvariantsTest {
                     privateKey = privateKey,
                     publicKey = publicKey,
                     peers = listOf(
-                        VpnPeer(publicKey = peerKey),
-                        VpnPeer(publicKey = peerKey),
+                        VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820),
+                        VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.2", endpointPort = 51821),
                     ),
                 ),
             )

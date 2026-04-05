@@ -6,6 +6,7 @@ class VpnPacketLoop(
     private val session: VpnSession,
     private val tunPort: TunPort,
     private val udpPort: UdpPort,
+    private val peerEndpoint: UdpEndpoint,
     private val periodicTicker: () -> Boolean = { false },
     private val packetBufferSize: UInt = DEFAULT_PACKET_BUFFER_SIZE,
     private val maxFlushIterations: Int = DEFAULT_MAX_FLUSH_ITERATIONS,
@@ -33,9 +34,12 @@ class VpnPacketLoop(
     }
 
     private suspend fun processUdpInput() {
-        val packet = udpPort.receivePacket() ?: return
+        val datagram = udpPort.receiveDatagram() ?: return
+        if (datagram.endpoint != peerEndpoint) {
+            return
+        }
 
-        var result = session.decryptToRawPacket(packet, packetBufferSize)
+        var result = session.decryptToRawPacket(datagram.packet, packetBufferSize)
         var iterations = 0
 
         while (result !is VpnPacketResult.Done) {
@@ -65,7 +69,12 @@ class VpnPacketLoop(
     private suspend fun applyPacketResult(result: VpnPacketResult, operation: String) {
         when (result) {
             VpnPacketResult.Done -> Unit
-            is VpnPacketResult.WriteToNetwork -> udpPort.sendPacket(result.packet)
+            is VpnPacketResult.WriteToNetwork -> udpPort.sendDatagram(
+                UdpDatagram(
+                    packet = result.packet,
+                    endpoint = peerEndpoint,
+                ),
+            )
             is VpnPacketResult.WriteToTunnelIpv4 -> tunPort.writePacket(result.packet)
             is VpnPacketResult.WriteToTunnelIpv6 -> tunPort.writePacket(result.packet)
             is VpnPacketResult.Error -> {

@@ -1,64 +1,64 @@
-# Phase 04: VpnInterface and Platform Edge Adapters
+# Phase 04: VpnInterface and TUN Ownership Boundary
 
 ## Objective
 
-Implement OS interaction behind a dedicated `VpnInterface` boundary and provide platform adapters for packet I/O ports.
+Keep `VpnInterface` limited to interface lifecycle and control-plane application,
+while making the live TUN handle available to the userspace runtime.
 
 ## Implementation Status
 
 Status: Completed (re-scoped)  
-Date: 2026-03-20 (reconciled on 2026-04-02)
+As Of: 2026-04-08
 
 ## Scope
 
 1. Build interface lifecycle abstraction independent of session code.
-2. Provide JVM implementation that can run with real or stub executors.
-3. Implement merged interface+configuration semantics in `VpnInterface`.
-4. Deliver concrete packet-loop edge adapters where practical, keeping remaining platform bindings behind common contracts.
+2. Add local TUN ownership to the JVM interface layer.
+3. Keep privileged commands behind a control-only boundary.
+4. Deliver packet I/O adapters and test doubles needed by the userspace runtime.
 
-## Work Breakdown
+## Implemented in Code
 
-1. Define `PlatformInterfaceFactory` (`expect/actual`) for per-target `VpnInterface` creation.
-2. Implement `JvmVpnInterface` with operations:
-- create/check/delete interface
+1. `VpnInterface` now exposes `tunPort()` for the live interface handle.
+2. `JvmVpnInterface` now owns:
+- local TUN handle lifecycle through `TunProvider`
 - up/down state
-- apply MTU/address/routes/DNS
-- reconfigure peer configuration
-- read interface information and peer stats
-3. Provide packet loop edge adapters and test doubles:
-- `KtorDatagramUdpPort` implementation for `UdpPort` in `commonMain`
-- `TunPort` and periodic ticker test doubles for deterministic loop testing
-4. Add `InterfaceCommandExecutor` boundary so daemon migration can plug in later.
-5. Implement fake in-memory interface and fake packet ports for fast `commonTest`.
-6. Defer OS-specific command packs and concrete `TunPort` integrations to later phases.
+- MTU/address/routes/DNS application through `InterfaceCommandExecutor`
+- configuration snapshots and rollback behavior
+3. `InterfaceCommandExecutor` scope was reduced:
+- no peer apply
+- no interface create/delete
+- no peer-stats read command
+4. Added JVM-side TUN ownership primitives:
+- `OwnedTunPort`
+- `TunProvider`
+- `InMemoryTunProvider`
+5. Added packet I/O adapters and fakes:
+- `KtorDatagramUdpPort`
+- `InMemoryTunPort`
+- `InMemoryUdpPort`
+- manual periodic ticker fakes
+6. `PlatformInterfaceFactory.jvm` remains intentionally wired to in-memory providers until phase 07 production cutover.
 
 ## Deliverables
 
 1. Core `VpnInterface` contract and factory.
-2. JVM interface implementation wired to executor abstraction.
-3. Packet I/O adapter baseline wired to common loop contracts (`KtorDatagramUdpPort` + test fakes).
-4. Tests validating idempotency and rollback behavior.
+2. JVM interface implementation wired to control executor and local TUN provider abstractions.
+3. Packet I/O adapter baseline wired to common loop contracts.
+4. Tests validating idempotency, rollback, and `TunPort` ownership behavior.
 
 ## Exit Criteria
 
-1. `Vpn` lifecycle runs through a single `VpnInterface` contract (no separate adapter type).
-2. Session lifecycle and interface lifecycle are independent modules/classes.
-3. Packet loop can run with platform adapters without daemon ownership.
-4. Existing minimal API remains callable via orchestrator.
+1. `Vpn` lifecycle runs through a single `VpnInterface` contract.
+2. Session lifecycle and interface lifecycle stay independent.
+3. Packet loop can consume a live `TunPort` without daemon ownership.
+4. No interface-level API implies OS WireGuard peer ownership.
 
 ## Risks and Controls
 
-1. Risk: platform branching leaks into core.
+1. Risk: platform branching leaks into core.  
 Control: keep all OS branching inside JVM interface implementations.
-2. Risk: incomplete cleanup on failure.
-Control: add rollback contract and tests for every create/apply step.
-
-## Implementation Notes
-
-1. Added `PlatformInterfaceFactory` (`expect/actual`) and `VpnPeerStats`.
-2. Added JVM interface layer:
-- `JvmVpnInterface`
-- `InterfaceCommandExecutor` boundary (daemon-backed executor planned; current default factory uses in-memory executor)
-3. Added JVM packet I/O adapters:
-- `KtorDatagramUdpPort` (in `commonMain`) with timeout support for non-blocking poll behavior
-4. Added reusable common test fakes (`InMemoryTunPort`, `InMemoryUdpPort`, `ManualPeriodicTicker`) and new JVM tests for idempotency, rollback, and adapter behavior.
+2. Risk: incomplete cleanup on failure.  
+Control: rollback contract and tests for every apply step.
+3. Risk: production cutover arrives before native TUN providers are ready.  
+Control: keep default factory in-memory until phase 07 integration work.

@@ -1,15 +1,22 @@
 package com.rafambn.kmpvpn.session.io
 
 class InMemoryUdpPort(
-    private val incomingPackets: ArrayDeque<ByteArray> = ArrayDeque(),
+    private val incomingDatagrams: ArrayDeque<UdpDatagram> = ArrayDeque(),
 ) : UdpPort {
-    val sentPackets: MutableList<ByteArray> = mutableListOf()
+    val sentDatagrams: MutableList<UdpDatagram> = mutableListOf()
 
-    override suspend fun receivePacket(): ByteArray? {
-        return incomingPackets.removeFirstOrNull()?.copyOf()
+    override suspend fun receiveDatagram(): UdpDatagram? {
+        val datagram = incomingDatagrams.removeFirstOrNull() ?: return null
+        return UdpDatagram(
+            packet = datagram.packet.copyOf(),
+            endpoint = datagram.endpoint,
+        )
     }
 
-    override suspend fun sendPacket(packet: ByteArray) {
-        sentPackets += packet.copyOf()
+    override suspend fun sendDatagram(datagram: UdpDatagram) {
+        sentDatagrams += UdpDatagram(
+            packet = datagram.packet.copyOf(),
+            endpoint = datagram.endpoint,
+        )
     }
 }

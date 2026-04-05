@@ -3,11 +3,11 @@ package com.rafambn.kmpvpn.daemon.protocol
 import kotlinx.serialization.Serializable
 
 @Serializable
-sealed class DaemonCommandResult<out S> {
+sealed class CommandResult<out S> {
     @Serializable
     data class Success<out S>(
         val data: S,
-    ) : DaemonCommandResult<S>() {
+    ) : CommandResult<S>() {
         override fun toString(): String {
             return "Success(data=$data)"
         }
@@ -17,9 +17,10 @@ sealed class DaemonCommandResult<out S> {
     data class Failure(
         val kind: DaemonErrorKind,
         val message: String,
-    ) : DaemonCommandResult<Nothing>() {
+        val detail: DaemonFailureDetail? = null,
+    ) : CommandResult<Nothing>() {
         override fun toString(): String {
-            return "Failure(kind=$kind, message=$message)"
+            return "Failure(kind=$kind, message=$message, detail=$detail)"
         }
     }
 
@@ -29,14 +30,14 @@ sealed class DaemonCommandResult<out S> {
     val isFailure: Boolean
         get() = this is Failure
 
-    inline fun onSuccess(action: (Success<S>) -> Unit): DaemonCommandResult<S> {
+    inline fun onSuccess(action: (Success<S>) -> Unit): CommandResult<S> {
         if (this is Success<S>) {
             action(this)
         }
         return this
     }
 
-    inline fun onFailure(action: (Failure) -> Unit): DaemonCommandResult<S> {
+    inline fun onFailure(action: (Failure) -> Unit): CommandResult<S> {
         if (this is Failure) {
             action(this)
         }
@@ -44,17 +45,19 @@ sealed class DaemonCommandResult<out S> {
     }
 
     companion object {
-        fun <S> success(data: S): DaemonCommandResult<S> {
+        fun <S> success(data: S): CommandResult<S> {
             return Success(data = data)
         }
 
         fun <S> failure(
             kind: DaemonErrorKind,
             message: String,
-        ): DaemonCommandResult<S> {
+            detail: DaemonFailureDetail? = null,
+        ): CommandResult<S> {
             return Failure(
                 kind = kind,
                 message = message,
+                detail = detail,
             )
         }
     }

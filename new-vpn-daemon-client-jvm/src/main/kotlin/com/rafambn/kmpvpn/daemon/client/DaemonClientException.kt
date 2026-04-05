@@ -1,6 +1,6 @@
 package com.rafambn.kmpvpn.daemon.client
 
-import com.rafambn.kmpvpn.daemon.protocol.DaemonCommandResult
+import com.rafambn.kmpvpn.daemon.protocol.CommandResult
 import java.time.Duration
 
 sealed class DaemonClientException(
@@ -20,7 +20,7 @@ sealed class DaemonClientException(
     ) : DaemonClientException(message = message)
 
     class RemoteFailure(
-        val failure: DaemonCommandResult.Failure,
+        val failure: CommandResult.Failure,
     ) : DaemonClientException(
         message = "Daemon returned failure kind=${failure.kind}: ${failure.message}",
     )

@@ -1,7 +1,6 @@
 package com.rafambn.kmpvpn.iface
 
 import com.rafambn.kmpvpn.DefaultVpnConfiguration
-import com.rafambn.kmpvpn.VpnAdapterConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import kotlin.test.Test
@@ -15,10 +14,14 @@ class JvmVpnInterfaceTest {
     @Test
     fun createAndDeleteRemainIdempotent() {
         val executor = InMemoryInterfaceCommandExecutor()
-        val vpnInterface = JvmVpnInterface(commandExecutor = executor)
+        val tunProvider = InMemoryTunProvider()
+        val vpnInterface = JvmVpnInterface(
+            commandExecutor = executor,
+            tunProvider = tunProvider,
+        )
         val config = configuration(
             interfaceName = "wg0",
-            dns = listOf("1.1.1.1"),
+            dnsDomainPool = (listOf("corp.local") to listOf("1.1.1.1")),
             addresses = listOf("10.0.0.1/32"),
             peers = listOf(VpnPeer(publicKey = "peer-a", allowedIps = listOf("0.0.0.0/0"))),
         )
@@ -32,57 +35,64 @@ class JvmVpnInterfaceTest {
         vpnInterface.delete()
         vpnInterface.delete()
 
-        assertEquals(1, executor.callLog.count { call -> call == "createInterface:wg0" })
         assertEquals(1, executor.callLog.count { call -> call == "setInterfaceUp:wg0:true" })
         assertEquals(1, executor.callLog.count { call -> call == "setInterfaceUp:wg0:false" })
-        assertEquals(1, executor.callLog.count { call -> call == "deleteInterface:wg0" })
+        assertEquals(1, tunProvider.callLog.count { call -> call == "openTun:wg0" })
+        assertEquals(1, tunProvider.callLog.count { call -> call == "closeTun:wg0" })
         assertFalse(vpnInterface.exists("wg0"))
     }
 
     @Test
-    fun reconfigureRollsBackOnPeerApplyFailure() {
+    fun reconfigureRollsBackOnDnsApplyFailure() {
         val delegate = InMemoryInterfaceCommandExecutor()
+        val tunProvider = InMemoryTunProvider()
         val executor = FailureInjectingExecutor(delegate)
-        val vpnInterface = JvmVpnInterface(commandExecutor = executor)
+        val vpnInterface = JvmVpnInterface(
+            commandExecutor = executor,
+            tunProvider = tunProvider,
+        )
 
         val baseConfiguration = configuration(
             interfaceName = "wg1",
-            dns = listOf("1.1.1.1"),
+            dnsDomainPool = (listOf("corp.local") to listOf("1.1.1.1")),
             addresses = listOf("10.10.0.1/32"),
             peers = listOf(VpnPeer(publicKey = "peer-a", allowedIps = listOf("10.200.0.0/24"))),
         )
         val updatedConfiguration = configuration(
             interfaceName = "wg1",
-            dns = listOf("9.9.9.9"),
+            dnsDomainPool = (listOf("corp.local") to listOf("9.9.9.9")),
             addresses = listOf("10.10.0.2/32"),
             peers = listOf(VpnPeer(publicKey = "peer-b", allowedIps = listOf("10.201.0.0/24"))),
         )
 
         vpnInterface.create(baseConfiguration)
 
-        executor.failOnPeerConfiguration = true
+        executor.failOnDns = true
         assertFailsWith<IllegalStateException> {
             vpnInterface.reconfigure(updatedConfiguration)
         }
 
         val current = vpnInterface.configuration()
-        assertEquals(baseConfiguration.dns, current.dns)
+        assertEquals(baseConfiguration.dnsDomainPool, current.dnsDomainPool)
         assertEquals(baseConfiguration.addresses, current.addresses)
         assertEquals(baseConfiguration.adapter.peers, current.adapter.peers)
 
         val info = vpnInterface.readInformation()
-        assertEquals(baseConfiguration.dns, info.dnsServers)
+        assertEquals(baseConfiguration.dnsDomainPool, info.dnsDomainPool)
         assertEquals(baseConfiguration.addresses, info.addresses)
 
         val dnsOperations = delegate.callLog.filter { call -> call.startsWith("applyDns:wg1:") }
-        assertTrue(dnsOperations.any { call -> call.contains("9.9.9.9") })
-        assertTrue(dnsOperations.last().contains("1.1.1.1"))
+        assertTrue(dnsOperations.any { call -> call.contains("domains=corp.local") && call.contains("dns=9.9.9.9") })
+        assertTrue(dnsOperations.last().contains("domains=corp.local") && dnsOperations.last().contains("dns=1.1.1.1"))
     }
 
     @Test
     fun readInformationIncludesExecutorPeerStats() {
         val executor = InMemoryInterfaceCommandExecutor()
-        val vpnInterface = JvmVpnInterface(commandExecutor = executor)
+        val vpnInterface = JvmVpnInterface(
+            commandExecutor = executor,
+            tunProvider = InMemoryTunProvider(),
+        )
         val config = configuration(
             interfaceName = "wg2",
             peers = listOf(
@@ -113,13 +123,13 @@ class JvmVpnInterfaceTest {
 
     private fun configuration(
         interfaceName: String,
-        dns: List<String> = emptyList(),
+        dnsDomainPool: Pair<List<String>, List<String>> = (emptyList<String>() to emptyList()),
         addresses: List<String> = emptyList(),
         peers: List<VpnPeer> = emptyList(),
     ): VpnConfiguration {
         return DefaultVpnConfiguration(
             interfaceName = interfaceName,
-            dns = dns.toMutableList(),
+            dnsDomainPool = dnsDomainPool,
             addresses = addresses.toMutableList(),
             privateKey = LOCAL_PRIVATE_KEY,
             publicKey = LOCAL_PUBLIC_KEY,
@@ -130,14 +140,15 @@ class JvmVpnInterfaceTest {
     private class FailureInjectingExecutor(
         private val delegate: InMemoryInterfaceCommandExecutor,
     ) : InterfaceCommandExecutor by delegate {
-        var failOnPeerConfiguration: Boolean = false
+        var failOnDns: Boolean = false
 
-        override fun applyPeerConfiguration(interfaceName: String, adapter: VpnAdapterConfiguration) {
-            if (failOnPeerConfiguration) {
-                failOnPeerConfiguration = false
-                throw IllegalStateException("forced peer configuration failure")
+        override fun applyDns(interfaceName: String, dnsDomainPool: Pair<List<String>, List<String>>) {
+            if (failOnDns) {
+                failOnDns = false
+                delegate.applyDns(interfaceName, dnsDomainPool)
+                throw IllegalStateException("forced dns failure")
             }
-            delegate.applyPeerConfiguration(interfaceName, adapter)
+            delegate.applyDns(interfaceName, dnsDomainPool)
         }
     }
 

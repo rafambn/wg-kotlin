@@ -2,17 +2,18 @@ package com.rafambn.kmpvpn.session.io
 
 import io.ktor.network.sockets.BoundDatagramSocket
 import io.ktor.network.sockets.Datagram
+import io.ktor.network.sockets.InetSocketAddress
 import io.ktor.network.sockets.SocketAddress
-import io.ktor.utils.io.core.ByteReadPacket
-import io.ktor.utils.io.core.readBytes
+import io.ktor.utils.io.core.buildPacket
+import io.ktor.utils.io.core.writeFully
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.io.readByteArray
 
 /**
  * Ktor-based UDP adapter that can run from common code.
  */
 class KtorDatagramUdpPort(
     private val socket: BoundDatagramSocket,
-    private val remoteAddress: SocketAddress? = null,
     private val receiveTimeoutMillis: Long? = null,
 ) : UdpPort {
     init {
@@ -23,7 +24,7 @@ class KtorDatagramUdpPort(
         }
     }
 
-    override suspend fun receivePacket(): ByteArray? {
+    override suspend fun receiveDatagram(): UdpDatagram? {
         val received = if (receiveTimeoutMillis == null) {
             socket.receive()
         } else {
@@ -32,18 +33,29 @@ class KtorDatagramUdpPort(
             }
         } ?: return null
 
-        return received.packet.readBytes()
+        return UdpDatagram(
+            packet = received.packet.readByteArray(),
+            endpoint = received.address.toUdpEndpoint(),
+        )
     }
 
-    override suspend fun sendPacket(packet: ByteArray) {
-        val destination = remoteAddress
-            ?: throw IllegalStateException("Cannot send packet without a remote address")
-
+    override suspend fun sendDatagram(datagram: UdpDatagram) {
         socket.send(
             Datagram(
-                packet = ByteReadPacket(packet.copyOf()),
-                address = destination,
+                packet = buildPacket {
+                    writeFully(datagram.packet)
+                },
+                address = InetSocketAddress(datagram.endpoint.host, datagram.endpoint.port),
             ),
         )
     }
+}
+
+private fun SocketAddress.toUdpEndpoint(): UdpEndpoint {
+    val inetAddress = this as? InetSocketAddress
+        ?: throw IllegalStateException("Unsupported Ktor socket address type `${this::class.simpleName}`")
+    return UdpEndpoint(
+        host = inetAddress.hostname,
+        port = inetAddress.port,
+    )
 }

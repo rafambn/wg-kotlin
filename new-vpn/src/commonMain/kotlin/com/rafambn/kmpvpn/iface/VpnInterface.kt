@@ -1,6 +1,7 @@
 package com.rafambn.kmpvpn.iface
 
 import com.rafambn.kmpvpn.VpnConfiguration
+import com.rafambn.kmpvpn.session.io.TunPort
 
 /**
  * Contract for platform-facing VPN interface ownership.
@@ -43,6 +44,11 @@ interface VpnInterface {
      * Returns current effective interface configuration.
      */
     fun configuration(): VpnConfiguration
+
+    /**
+     * Returns the live TUN port owned by this interface.
+     */
+    fun tunPort(): TunPort
 
     /**
      * Replaces current interface configuration.

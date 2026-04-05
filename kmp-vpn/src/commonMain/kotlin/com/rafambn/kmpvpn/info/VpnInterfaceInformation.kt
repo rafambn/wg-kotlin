@@ -9,9 +9,9 @@ interface VpnInterfaceInformation {
 
     fun interfaceName(): String
 
-    fun tx(): Long
+    fun transmittedBytes(): Long
 
-    fun rx(): Long
+    fun receivedBytes(): Long
 
     fun peers(): MutableList<VpnPeerInformation>
 
@@ -27,8 +27,6 @@ interface VpnInterfaceInformation {
      * @return listening port or null if it cannot be determined
      */
     fun listenPort(): Int?
-
-    fun fwmark(): Int?
 
     fun error(): String?
 

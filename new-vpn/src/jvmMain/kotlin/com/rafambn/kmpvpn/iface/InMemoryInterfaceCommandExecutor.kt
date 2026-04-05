@@ -1,73 +1,47 @@
 package com.rafambn.kmpvpn.iface
 
-import com.rafambn.kmpvpn.VpnAdapterConfiguration
-
 /**
- * Non-privileged JVM executor used by tests.
+ * Non-privileged JVM command executor used by tests.
  */
 class InMemoryInterfaceCommandExecutor : InterfaceCommandExecutor {
     private val interfaces: LinkedHashMap<String, InterfaceState> = linkedMapOf()
+    private val observedInterfaces: MutableSet<String> = linkedSetOf()
 
     val callLog: MutableList<String> = mutableListOf()
 
     override fun interfaceExists(interfaceName: String): Boolean {
         callLog += "interfaceExists:$interfaceName"
-        return interfaces.containsKey(interfaceName)
-    }
-
-    override fun createInterface(interfaceName: String) {
-        callLog += "createInterface:$interfaceName"
-        interfaces.putIfAbsent(interfaceName, InterfaceState())
-    }
-
-    override fun deleteInterface(interfaceName: String) {
-        callLog += "deleteInterface:$interfaceName"
-        interfaces.remove(interfaceName)
+        return observedInterfaces.contains(interfaceName)
     }
 
     override fun setInterfaceUp(interfaceName: String, up: Boolean) {
         callLog += "setInterfaceUp:$interfaceName:$up"
-        val state = requireState(interfaceName)
+        val state = stateFor(interfaceName)
         state.isUp = up
     }
 
     override fun applyMtu(interfaceName: String, mtu: Int?) {
         callLog += "applyMtu:$interfaceName:${mtu ?: "none"}"
-        val state = requireState(interfaceName)
+        val state = stateFor(interfaceName)
         state.mtu = mtu
     }
 
     override fun applyAddresses(interfaceName: String, addresses: List<String>) {
         callLog += "applyAddresses:$interfaceName:${addresses.joinToString(",")}"
-        val state = requireState(interfaceName)
+        val state = stateFor(interfaceName)
         state.addresses = addresses.toList()
     }
 
-    override fun applyRoutes(interfaceName: String, routes: List<String>, table: String?) {
-        callLog += "applyRoutes:$interfaceName:${routes.joinToString(",")}:${table ?: "default"}"
-        val state = requireState(interfaceName)
+    override fun applyRoutes(interfaceName: String, routes: List<String>) {
+        callLog += "applyRoutes:$interfaceName:${routes.joinToString(",")}"
+        val state = stateFor(interfaceName)
         state.routes = routes.toList()
-        state.table = table
     }
 
-    override fun applyDns(interfaceName: String, dnsServers: List<String>) {
-        callLog += "applyDns:$interfaceName:${dnsServers.joinToString(",")}"
-        val state = requireState(interfaceName)
-        state.dnsServers = dnsServers.toList()
-    }
-
-    override fun applyPeerConfiguration(interfaceName: String, adapter: VpnAdapterConfiguration) {
-        callLog += "applyPeerConfiguration:$interfaceName:${adapter.peers.size}"
-        val state = requireState(interfaceName)
-        state.peerStats = adapter.peers.map { peer ->
-            VpnPeerStats(
-                publicKey = peer.publicKey,
-                receivedBytes = state.peerStatsByPublicKey[peer.publicKey]?.receivedBytes ?: 0L,
-                transmittedBytes = state.peerStatsByPublicKey[peer.publicKey]?.transmittedBytes ?: 0L,
-                lastHandshakeEpochSeconds = state.peerStatsByPublicKey[peer.publicKey]?.lastHandshakeEpochSeconds,
-            )
-        }
-        state.peerStatsByPublicKey = state.peerStats.associateBy { stats -> stats.publicKey }.toMutableMap()
+    override fun applyDns(interfaceName: String, dnsDomainPool: Pair<List<String>, List<String>>) {
+        callLog += "applyDns:$interfaceName:domains=${dnsDomainPool.first.joinToString(",")};dns=${dnsDomainPool.second.joinToString(",")}"
+        val state = stateFor(interfaceName)
+        state.dnsDomainPool = dnsDomainPool.first.toList() to dnsDomainPool.second.toList()
     }
 
     override fun readInformation(interfaceName: String): VpnInterfaceInformation? {
@@ -77,26 +51,19 @@ class InMemoryInterfaceCommandExecutor : InterfaceCommandExecutor {
             interfaceName = interfaceName,
             isUp = state.isUp,
             addresses = state.addresses.toList(),
-            dnsServers = state.dnsServers.toList(),
+            dnsDomainPool = state.dnsDomainPool.first.toList() to state.dnsDomainPool.second.toList(),
             mtu = state.mtu,
             peerStats = state.peerStats.toList(),
         )
     }
 
-    override fun readPeerStats(interfaceName: String): List<VpnPeerStats> {
-        callLog += "readPeerStats:$interfaceName"
-        return interfaces[interfaceName]?.peerStats?.toList().orEmpty()
-    }
-
     fun setPeerStats(interfaceName: String, peerStats: List<VpnPeerStats>) {
-        val state = requireState(interfaceName)
+        val state = stateFor(interfaceName)
         state.peerStats = peerStats.toList()
-        state.peerStatsByPublicKey = peerStats.associateBy { stats -> stats.publicKey }.toMutableMap()
     }
 
-    private fun requireState(interfaceName: String): InterfaceState {
-        return interfaces[interfaceName]
-            ?: throw IllegalStateException("Interface `$interfaceName` was not created")
+    private fun stateFor(interfaceName: String): InterfaceState {
+        return interfaces.getOrPut(interfaceName) { InterfaceState() }
     }
 
     private class InterfaceState {
@@ -104,9 +71,7 @@ class InMemoryInterfaceCommandExecutor : InterfaceCommandExecutor {
         var mtu: Int? = null
         var addresses: List<String> = emptyList()
         var routes: List<String> = emptyList()
-        var table: String? = null
-        var dnsServers: List<String> = emptyList()
+        var dnsDomainPool: Pair<List<String>, List<String>> = (emptyList<String>() to emptyList())
         var peerStats: List<VpnPeerStats> = emptyList()
-        var peerStatsByPublicKey: MutableMap<String, VpnPeerStats> = linkedMapOf()
     }
 }

@@ -1,0 +1,11 @@
+DOCUMENTATION FILES - FORMAT RULES
+
+- Only use bullet points, no section titles
+- No fancy formatting, no equals signs, no symbols
+- Format: - item name - reason because of this
+- Keep bullets short and simple
+- One line per bullet point
+- File name should match the class or file being reviewed (vpn.txt for Vpn.kt)
+- Start with FILE: path to the file
+- End with what to review next
+- Explain the "why" not the "what"

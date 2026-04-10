@@ -1,9 +1,9 @@
 package com.rafambn.kmpvpn
 
 import com.rafambn.kmpvpn.iface.PlatformInterfaceFactory
-import com.rafambn.kmpvpn.iface.VpnInterface
-import com.rafambn.kmpvpn.session.InMemorySessionManager
-import com.rafambn.kmpvpn.session.SessionManager
+import com.rafambn.kmpvpn.iface.InterfaceManager
+import com.rafambn.kmpvpn.session.InMemoryTunnelManager
+import com.rafambn.kmpvpn.session.TunnelManager
 import org.koin.core.context.GlobalContext
 import org.koin.core.context.loadKoinModules
 import org.koin.core.context.startKoin
@@ -11,29 +11,18 @@ import org.koin.core.context.stopKoin
 import org.koin.core.module.Module
 import org.koin.dsl.module
 
-fun interface SessionManagerProvider {
-    fun create(engine: Engine): SessionManager
-}
-
-fun interface VpnInterfaceProvider {
-    fun create(configuration: VpnConfiguration): VpnInterface
-}
 
 internal object VpnKoinBootstrap {
     private val lock = Any()
     private val loadedModuleIds: MutableSet<Int> = linkedSetOf()
 
     private val baseModule: Module = module {
-        single<SessionManagerProvider> {
-            SessionManagerProvider { engine ->
-                InMemorySessionManager(engine = engine)
-            }
+        single<TunnelManager> { params ->
+            InMemoryTunnelManager(engine = params.get<Engine>())
         }
 
-        single<VpnInterfaceProvider> {
-            VpnInterfaceProvider { configuration ->
-                PlatformInterfaceFactory.create(configuration)
-            }
+        single<InterfaceManager> { params ->
+            PlatformInterfaceFactory.create(params.get<VpnConfiguration>())
         }
     }
 

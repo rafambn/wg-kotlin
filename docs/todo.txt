@@ -1,1 +1,3 @@
 ISSUES AND TASKS
+
+-Adapt VpnConfiguration to wireguard config default

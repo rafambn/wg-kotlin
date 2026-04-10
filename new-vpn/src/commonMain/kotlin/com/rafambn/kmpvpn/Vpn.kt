@@ -1,21 +1,21 @@
 package com.rafambn.kmpvpn
 
 import com.rafambn.kmpvpn.iface.PlatformInterfaceFactory
-import com.rafambn.kmpvpn.iface.VpnInterface
+import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnInterfaceInformation
-import com.rafambn.kmpvpn.session.InMemorySessionManager
-import com.rafambn.kmpvpn.session.SessionManager
+import com.rafambn.kmpvpn.session.InMemoryTunnelManager
+import com.rafambn.kmpvpn.session.TunnelManager
 
 /**
  * Core orchestrator facade for VPN lifecycle operations.
  *
  * Manages the full lifecycle of a VPN interface (create, start, stop, delete)
- * while delegating session and interface concerns to [SessionManager] and [VpnInterface].
+ * while delegating session and interface concerns to [TunnelManager] and [InterfaceManager].
  */
 class Vpn internal constructor(
     val vpnConfiguration: VpnConfiguration,
-    private val sessionManager: SessionManager,
-    private val vpnInterface: VpnInterface,
+    private val tunnelManager: TunnelManager,
+    private val interfaceManager: InterfaceManager,
 ) : AutoCloseable {
 
     constructor(
@@ -23,8 +23,8 @@ class Vpn internal constructor(
         vpnConfiguration: VpnConfiguration,
     ) : this(
         vpnConfiguration = vpnConfiguration,
-        sessionManager = InMemorySessionManager(engine = engine),
-        vpnInterface = PlatformInterfaceFactory.create(vpnConfiguration),
+        tunnelManager = InMemoryTunnelManager(engine = engine),
+        interfaceManager = PlatformInterfaceFactory.create(vpnConfiguration),
     )
 
     init {
@@ -50,7 +50,7 @@ class Vpn internal constructor(
      * Returns whether the VPN interface currently exists.
      */
     fun exists(): Boolean {
-        return vpnInterface.exists()
+        return interfaceManager.exists()
     }
 
     /**
@@ -60,19 +60,19 @@ class Vpn internal constructor(
         if (!exists()) {
             return false
         }
-        if (!vpnInterface.isUp()) {
+        if (!interfaceManager.isUp()) {
             return false
         }
 
-        return sessionManager.sessions().any { session -> session.isActive }
+        return tunnelManager.sessions().any { session -> session.isActive }
     }
 
     /**
      * Creates the interface and returns the managed interface contract.
      */
-    fun create(): VpnInterface {
+    fun create(): InterfaceManager {
         try {
-            vpnInterface.create(vpnConfiguration)
+            interfaceManager.create(vpnConfiguration)
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Interface operation `create` failed: ${throwable.message ?: "unknown"}",
@@ -81,7 +81,7 @@ class Vpn internal constructor(
         }
 
         try {
-            sessionManager.reconcileSessions(vpnInterface.configuration().adapter)
+            tunnelManager.reconcileSessions(interfaceManager.configuration().adapter)
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Session operation `reconcileSessions` failed: ${throwable.message ?: "unknown"}",
@@ -89,13 +89,13 @@ class Vpn internal constructor(
             )
         }
 
-        return vpnInterface
+        return interfaceManager
     }
 
     /**
      * Starts the interface and ensures sessions are active.
      */
-    fun start(): VpnInterface {
+    fun start(): InterfaceManager {
         val managedInterface = create()
         if (isRunning()) {
             throw IllegalStateException(
@@ -123,7 +123,7 @@ class Vpn internal constructor(
         }
 
         try {
-            sessionManager.reconcileSessions(currentConfiguration.adapter)
+            tunnelManager.reconcileSessions(currentConfiguration.adapter)
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Session operation `reconcileSessions` failed: ${throwable.message ?: "unknown"}",
@@ -142,9 +142,9 @@ class Vpn internal constructor(
         }
 
         try {
-            sessionManager.startRuntime(
+            tunnelManager.startRuntime(
                 configuration = currentConfiguration,
-                vpnInterface = managedInterface,
+                interfaceManager = managedInterface,
             )
         } catch (throwable: Throwable) {
             safeRun { managedInterface.down() }
@@ -168,7 +168,7 @@ class Vpn internal constructor(
         }
 
         try {
-            sessionManager.closeAll()
+            tunnelManager.closeAll()
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Session operation `closeAll` failed: ${throwable.message ?: "unknown"}",
@@ -177,7 +177,7 @@ class Vpn internal constructor(
         }
 
         try {
-            vpnInterface.down()
+            interfaceManager.down()
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Interface operation `down` failed: ${throwable.message ?: "unknown"}",
@@ -196,9 +196,9 @@ class Vpn internal constructor(
         }
 
         var sessionsClosed = false
-        if (vpnInterface.isUp()) {
+        if (interfaceManager.isUp()) {
             try {
-                sessionManager.closeAll()
+                tunnelManager.closeAll()
             } catch (throwable: Throwable) {
                 throw IllegalStateException(
                     "Session operation `closeAll` failed: ${throwable.message ?: "unknown"}",
@@ -208,7 +208,7 @@ class Vpn internal constructor(
             sessionsClosed = true
 
             try {
-                vpnInterface.down()
+                interfaceManager.down()
             } catch (throwable: Throwable) {
                 throw IllegalStateException(
                     "Interface operation `down` failed: ${throwable.message ?: "unknown"}",
@@ -219,7 +219,7 @@ class Vpn internal constructor(
 
         if (!sessionsClosed) {
             try {
-                sessionManager.closeAll()
+                tunnelManager.closeAll()
             } catch (throwable: Throwable) {
                 throw IllegalStateException(
                     "Session operation `closeAll` failed: ${throwable.message ?: "unknown"}",
@@ -229,7 +229,7 @@ class Vpn internal constructor(
         }
 
         try {
-            vpnInterface.delete()
+            interfaceManager.delete()
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Interface operation `delete` failed: ${throwable.message ?: "unknown"}",
@@ -243,7 +243,7 @@ class Vpn internal constructor(
      */
     fun configuration(): VpnConfiguration {
         return try {
-            vpnInterface.configuration()
+            interfaceManager.configuration()
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Interface operation `configuration` failed: ${throwable.message ?: "unknown"}",
@@ -261,7 +261,7 @@ class Vpn internal constructor(
         }
 
         val baseInformation = try {
-            vpnInterface.readInformation()
+            interfaceManager.readInformation()
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Interface operation `readInformation` failed: ${throwable.message ?: "unknown"}",
@@ -269,7 +269,7 @@ class Vpn internal constructor(
             )
         }
 
-        val runtimePeerStats = sessionManager.peerStats()
+        val runtimePeerStats = tunnelManager.peerStats()
         return if (runtimePeerStats.isEmpty()) {
             baseInformation
         } else {
@@ -287,7 +287,7 @@ class Vpn internal constructor(
         }
 
         try {
-            vpnInterface.reconfigure(config)
+            interfaceManager.reconfigure(config)
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Interface operation `reconfigure` failed: ${throwable.message ?: "unknown"}",
@@ -296,7 +296,7 @@ class Vpn internal constructor(
         }
 
         try {
-            sessionManager.reconcileSessions(vpnInterface.configuration().adapter)
+            tunnelManager.reconcileSessions(interfaceManager.configuration().adapter)
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Session operation `reconcileSessions` failed: ${throwable.message ?: "unknown"}",
@@ -304,11 +304,11 @@ class Vpn internal constructor(
             )
         }
 
-        if (vpnInterface.isUp()) {
+        if (interfaceManager.isUp()) {
             try {
-                sessionManager.startRuntime(
-                    configuration = vpnInterface.configuration(),
-                    vpnInterface = vpnInterface,
+                tunnelManager.startRuntime(
+                    configuration = interfaceManager.configuration(),
+                    interfaceManager = interfaceManager,
                 )
             } catch (throwable: Throwable) {
                 throw IllegalStateException(
@@ -325,7 +325,7 @@ class Vpn internal constructor(
 
     private fun safeCloseSessions() {
         try {
-            sessionManager.closeAll()
+            tunnelManager.closeAll()
         } catch (_: Throwable) {
             // best-effort rollback and cleanup
         }

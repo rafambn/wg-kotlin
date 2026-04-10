@@ -1,8 +1,8 @@
 package com.rafambn.kmpvpn
 
-import com.rafambn.kmpvpn.iface.VpnInterface
+import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnInterfaceInformation
-import com.rafambn.kmpvpn.session.InMemorySessionManager
+import com.rafambn.kmpvpn.session.InMemoryTunnelManager
 import com.rafambn.kmpvpn.session.io.TunPort
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -50,8 +50,8 @@ class VpnStateTransitionTest {
     fun interfaceFailureDoesNotPersistSyntheticState() {
         val vpn = Vpn(
             vpnConfiguration = baseConfiguration(interfaceName = "wg2"),
-            sessionManager = InMemorySessionManager(),
-            vpnInterface = FailingUpVpnInterface(),
+            tunnelManager = InMemoryTunnelManager(),
+            interfaceManager = FailingUpInterfaceManager(),
         )
 
         assertFailsWith<IllegalStateException> {
@@ -70,7 +70,7 @@ class VpnStateTransitionTest {
         )
     }
 
-    private class FailingUpVpnInterface : VpnInterface {
+    private class FailingUpInterfaceManager : InterfaceManager {
         private var created: Boolean = false
         private var currentConfiguration: VpnConfiguration? = null
 

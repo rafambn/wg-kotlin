@@ -1,7 +1,7 @@
 package com.rafambn.kmpvpn.iface
 
 /**
- * Read-only interface information returned by [VpnInterface.readInformation].
+ * Read-only interface information returned by [InterfaceManager.readInformation].
  */
 data class VpnInterfaceInformation(
     val interfaceName: String,

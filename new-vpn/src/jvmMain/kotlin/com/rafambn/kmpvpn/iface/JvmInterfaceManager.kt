@@ -9,14 +9,14 @@ import com.rafambn.kmpvpn.requireValidConfiguration
 import com.rafambn.kmpvpn.session.io.TunPort
 
 /**
- * JVM-backed [VpnInterface] implementation using a local [TunProvider] plus
+ * JVM-backed [InterfaceManager] implementation using a local [TunProvider] plus
  * privileged [InterfaceCommandExecutor] operations.
  */
-class JvmVpnInterface(
+class JvmInterfaceManager(
     private val interfaceName: String,
     private val commandExecutor: InterfaceCommandExecutor,
     private val tunProvider: TunProvider,
-) : VpnInterface {
+) : InterfaceManager {
     private var currentConfiguration: VpnConfiguration? = null
     private var currentTunPort: OwnedTunPort? = null
     private var up: Boolean = false

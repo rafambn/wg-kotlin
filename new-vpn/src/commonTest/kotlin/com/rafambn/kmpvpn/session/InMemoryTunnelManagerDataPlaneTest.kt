@@ -3,7 +3,7 @@ package com.rafambn.kmpvpn.session
 import com.rafambn.kmpvpn.DefaultVpnConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
-import com.rafambn.kmpvpn.iface.VpnInterface
+import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnInterfaceInformation
 import com.rafambn.kmpvpn.session.factory.VpnSessionFactory
 import com.rafambn.kmpvpn.session.io.InMemoryTunPort
@@ -19,7 +19,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class InMemorySessionManagerDataPlaneTest {
+class InMemoryTunnelManagerDataPlaneTest {
 
     @Test
     fun longestPrefixMatchRoutesTunPacketsToTheCorrectPeer() = runTest {
@@ -54,7 +54,7 @@ class InMemorySessionManagerDataPlaneTest {
         val udpPort = InMemoryUdpPort()
 
         manager.reconcileSessions(configuration.adapter)
-        manager.startRuntime(configuration, TunOnlyVpnInterface(tunPort, configuration))
+        manager.startRuntime(configuration, TunOnlyInterfaceManager(tunPort, configuration))
         manager.pollRuntimeOnce(udpPort) { false }
 
         assertEquals(1, udpPort.sentDatagrams.size)
@@ -85,7 +85,7 @@ class InMemorySessionManagerDataPlaneTest {
         val udpPort = InMemoryUdpPort()
 
         manager.reconcileSessions(configuration.adapter)
-        manager.startRuntime(configuration, TunOnlyVpnInterface(tunPort, configuration))
+        manager.startRuntime(configuration, TunOnlyInterfaceManager(tunPort, configuration))
         manager.pollRuntimeOnce(udpPort) { false }
 
         assertTrue(udpPort.sentDatagrams.isEmpty())
@@ -132,7 +132,7 @@ class InMemorySessionManagerDataPlaneTest {
         )
 
         manager.reconcileSessions(configuration.adapter)
-        manager.startRuntime(configuration, TunOnlyVpnInterface(tunPort, configuration))
+        manager.startRuntime(configuration, TunOnlyInterfaceManager(tunPort, configuration))
         manager.pollRuntimeOnce(udpPort) { false }
 
         assertEquals(0, peerA.decryptInputs.size)
@@ -172,7 +172,7 @@ class InMemorySessionManagerDataPlaneTest {
         val udpPort = InMemoryUdpPort()
 
         manager.reconcileSessions(configuration.adapter)
-        manager.startRuntime(configuration, TunOnlyVpnInterface(InMemoryTunPort(), configuration))
+        manager.startRuntime(configuration, TunOnlyInterfaceManager(InMemoryTunPort(), configuration))
         manager.pollRuntimeOnce(
             udpPort = udpPort,
             periodicTicker = ManualPeriodicTicker(values = ArrayDeque(listOf(true))),
@@ -185,8 +185,8 @@ class InMemorySessionManagerDataPlaneTest {
         assertEquals(1L, manager.peerStats().single { it.publicKey == "peer-b" }.transmittedBytes)
     }
 
-    private fun manager(vararg sessions: QueueVpnSession): InMemorySessionManager {
-        return InMemorySessionManager(
+    private fun manager(vararg sessions: QueueVpnSession): InMemoryTunnelManager {
+        return InMemoryTunnelManager(
             sessionFactory = RecordingSessionFactory(sessions.associateBy { session -> session.peerPublicKey }),
             userspaceRuntimeFactory = { _, _, _, _, _ -> null },
         )
@@ -260,10 +260,10 @@ class InMemorySessionManagerDataPlaneTest {
         }
     }
 
-    private class TunOnlyVpnInterface(
+    private class TunOnlyInterfaceManager(
         private val tun: TunPort,
         private var configuration: VpnConfiguration,
-    ) : VpnInterface {
+    ) : InterfaceManager {
         override fun exists(): Boolean = true
 
         override fun create(config: VpnConfiguration) = Unit

@@ -9,13 +9,13 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class JvmVpnInterfaceTest {
+class JvmInterfaceManagerTest {
 
     @Test
     fun createAndDeleteRemainIdempotent() {
         val executor = InMemoryInterfaceCommandExecutor()
         val tunProvider = InMemoryTunProvider()
-        val vpnInterface = JvmVpnInterface(
+        val interfaceManager = JvmInterfaceManager(
             interfaceName = "wg0",
             commandExecutor = executor,
             tunProvider = tunProvider,
@@ -27,20 +27,20 @@ class JvmVpnInterfaceTest {
             peers = listOf(VpnPeer(publicKey = "peer-a", allowedIps = listOf("0.0.0.0/0"))),
         )
 
-        vpnInterface.create(config)
-        vpnInterface.create(config)
-        vpnInterface.up()
-        vpnInterface.up()
-        vpnInterface.down()
-        vpnInterface.down()
-        vpnInterface.delete()
-        vpnInterface.delete()
+        interfaceManager.create(config)
+        interfaceManager.create(config)
+        interfaceManager.up()
+        interfaceManager.up()
+        interfaceManager.down()
+        interfaceManager.down()
+        interfaceManager.delete()
+        interfaceManager.delete()
 
         assertEquals(1, executor.callLog.count { call -> call == "setInterfaceUp:wg0:true" })
         assertEquals(1, executor.callLog.count { call -> call == "setInterfaceUp:wg0:false" })
         assertEquals(1, tunProvider.callLog.count { call -> call == "openTun:wg0" })
         assertEquals(1, tunProvider.callLog.count { call -> call == "closeTun:wg0" })
-        assertFalse(vpnInterface.exists())
+        assertFalse(interfaceManager.exists())
     }
 
     @Test
@@ -48,7 +48,7 @@ class JvmVpnInterfaceTest {
         val delegate = InMemoryInterfaceCommandExecutor()
         val tunProvider = InMemoryTunProvider()
         val executor = FailureInjectingExecutor(delegate)
-        val vpnInterface = JvmVpnInterface(
+        val interfaceManager = JvmInterfaceManager(
             interfaceName = "wg1",
             commandExecutor = executor,
             tunProvider = tunProvider,
@@ -67,19 +67,19 @@ class JvmVpnInterfaceTest {
             peers = listOf(VpnPeer(publicKey = "peer-b", allowedIps = listOf("10.201.0.0/24"))),
         )
 
-        vpnInterface.create(baseConfiguration)
+        interfaceManager.create(baseConfiguration)
 
         executor.failOnDns = true
         assertFailsWith<IllegalStateException> {
-            vpnInterface.reconfigure(updatedConfiguration)
+            interfaceManager.reconfigure(updatedConfiguration)
         }
 
-        val current = vpnInterface.configuration()
+        val current = interfaceManager.configuration()
         assertEquals(baseConfiguration.dnsDomainPool, current.dnsDomainPool)
         assertEquals(baseConfiguration.addresses, current.addresses)
         assertEquals(baseConfiguration.adapter.peers, current.adapter.peers)
 
-        val info = vpnInterface.readInformation()
+        val info = interfaceManager.readInformation()
         assertEquals(baseConfiguration.dnsDomainPool, info.dnsDomainPool)
         assertEquals(baseConfiguration.addresses, info.addresses)
 
@@ -91,7 +91,7 @@ class JvmVpnInterfaceTest {
     @Test
     fun readInformationIncludesExecutorPeerStats() {
         val executor = InMemoryInterfaceCommandExecutor()
-        val vpnInterface = JvmVpnInterface(
+        val interfaceManager = JvmInterfaceManager(
             interfaceName = "wg2",
             commandExecutor = executor,
             tunProvider = InMemoryTunProvider(),
@@ -104,7 +104,7 @@ class JvmVpnInterfaceTest {
             ),
         )
 
-        vpnInterface.create(config)
+        interfaceManager.create(config)
         executor.setPeerStats(
             interfaceName = "wg2",
             peerStats = listOf(
@@ -117,7 +117,7 @@ class JvmVpnInterfaceTest {
             ),
         )
 
-        val information = vpnInterface.readInformation()
+        val information = interfaceManager.readInformation()
 
         assertEquals(1, information.peerStats.size)
         assertEquals("peer-a", information.peerStats.single().publicKey)

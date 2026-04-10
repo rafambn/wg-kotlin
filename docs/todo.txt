@@ -1,3 +1,1 @@
-OUTSTANDING ISSUES AND TASKS
-
-- No way to delete interface once created - interface cleanup is not properly handled when the system/user closes the app or VPN crashes leaving orphaned interfaces on the OS
+ISSUES AND TASKS

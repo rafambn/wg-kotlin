@@ -5,7 +5,7 @@ import com.rafambn.kmpvpn.VpnAdapterConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.Vpn
-import com.rafambn.kmpvpn.iface.VpnInterface
+import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnPeerStats
 import com.rafambn.kmpvpn.matches
 import com.rafambn.kmpvpn.parseCidr
@@ -23,11 +23,11 @@ import com.rafambn.kmpvpn.session.io.UdpPort
 import com.rafambn.kmpvpn.session.io.VpnPacketLoop
 import com.rafambn.kmpvpn.session.io.VpnPacketResult
 
-internal class InMemorySessionManager(
+internal class InMemoryTunnelManager(
     engine: Engine = Engine.BORINGTUN,
     private val sessionFactory: VpnSessionFactory = defaultFactory(engine),
     private val userspaceRuntimeFactory: UserspaceRuntimeFactory = PlatformUserspaceRuntimeFactory::create,
-) : SessionManager {
+) : TunnelManager {
     private val sessionsByPeer: LinkedHashMap<String, ManagedSession> = linkedMapOf()
     private val peerStatsByPublicKey: MutableMap<String, MutablePeerStats> = linkedMapOf()
     private var runtimeHandle: UserspaceRuntimeHandle? = null
@@ -144,7 +144,7 @@ internal class InMemorySessionManager(
 
     override fun startRuntime(
         configuration: VpnConfiguration,
-        vpnInterface: VpnInterface,
+        interfaceManager: InterfaceManager,
         onFailure: (Throwable) -> Unit,
     ) {
         if (sessionsByPeer.isEmpty()) {
@@ -162,7 +162,7 @@ internal class InMemorySessionManager(
         }
 
         safeStopRuntime()
-        runtimeTunPort = vpnInterface.tunPort()
+        runtimeTunPort = interfaceManager.tunPort()
         peerStatsByPublicKey.clear()
 
         val createdRuntime = userspaceRuntimeFactory(

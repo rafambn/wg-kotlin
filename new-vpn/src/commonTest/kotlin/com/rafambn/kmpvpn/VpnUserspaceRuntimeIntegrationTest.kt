@@ -1,9 +1,9 @@
 package com.rafambn.kmpvpn
 
 import com.rafambn.kmpvpn.iface.VpnInterfaceInformation
-import com.rafambn.kmpvpn.iface.VpnInterface
+import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnPeerStats
-import com.rafambn.kmpvpn.session.InMemorySessionManager
+import com.rafambn.kmpvpn.session.InMemoryTunnelManager
 import com.rafambn.kmpvpn.session.UserspaceRuntimeHandle
 import com.rafambn.kmpvpn.session.io.InMemoryTunPort
 import com.rafambn.kmpvpn.session.io.TunPort
@@ -21,10 +21,10 @@ class VpnUserspaceRuntimeIntegrationTest {
     @Test
     fun startStopAndDeleteOwnUserspaceRuntimeLifecycle() {
         val runtimeFactory = RecordingRuntimeFactory()
-        val vpnInterface = RecordingVpnInterface()
+        val interfaceManager = RecordingInterfaceManager()
         val vpn = vpn(
             configuration = configuration(interfaceName = "wg-runtime", listenPort = 51820),
-            vpnInterface = vpnInterface,
+            interfaceManager = interfaceManager,
             runtimeFactory = runtimeFactory,
         )
 
@@ -50,12 +50,12 @@ class VpnUserspaceRuntimeIntegrationTest {
     @Test
     fun runtimeStartFailureRollsBackToCreatedState() {
         val runtimeFactory = RecordingRuntimeFactory(failOnCreate = true)
-        val vpnInterface = RecordingVpnInterface()
-        val sessionManager = InMemorySessionManager(userspaceRuntimeFactory = runtimeFactory::create)
+        val interfaceManager = RecordingInterfaceManager()
+        val tunnelManager = InMemoryTunnelManager(userspaceRuntimeFactory = runtimeFactory::create)
         val vpn = Vpn(
             vpnConfiguration = configuration(interfaceName = "wg-fail"),
-            sessionManager = sessionManager,
-            vpnInterface = vpnInterface,
+            tunnelManager = tunnelManager,
+            interfaceManager = interfaceManager,
         )
 
         val failure = assertFailsWith<IllegalStateException> {
@@ -63,8 +63,8 @@ class VpnUserspaceRuntimeIntegrationTest {
         }
 
         assertTrue(failure.message.orEmpty().contains("Session operation `startRuntime` failed"))
-        assertEquals(1, vpnInterface.downCalls)
-        assertEquals(0, sessionManager.sessions().size)
+        assertEquals(1, interfaceManager.downCalls)
+        assertEquals(0, tunnelManager.sessions().size)
         assertEquals(VpnState.Created, vpn.state())
     }
 
@@ -112,13 +112,13 @@ class VpnUserspaceRuntimeIntegrationTest {
 
     private fun vpn(
         configuration: VpnConfiguration,
-        vpnInterface: RecordingVpnInterface = RecordingVpnInterface(),
+        interfaceManager: RecordingInterfaceManager = RecordingInterfaceManager(),
         runtimeFactory: RecordingRuntimeFactory = RecordingRuntimeFactory(),
     ): Vpn {
         return Vpn(
             vpnConfiguration = configuration,
-            sessionManager = InMemorySessionManager(userspaceRuntimeFactory = runtimeFactory::create),
-            vpnInterface = vpnInterface,
+            tunnelManager = InMemoryTunnelManager(userspaceRuntimeFactory = runtimeFactory::create),
+            interfaceManager = interfaceManager,
         )
     }
 
@@ -187,7 +187,7 @@ class VpnUserspaceRuntimeIntegrationTest {
         }
     }
 
-    private class RecordingVpnInterface : VpnInterface {
+    private class RecordingInterfaceManager : InterfaceManager {
         private var created: Boolean = false
         private var up: Boolean = false
         private var currentConfiguration: VpnConfiguration? = null

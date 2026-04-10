@@ -8,7 +8,7 @@ import com.rafambn.kmpvpn.session.io.TunPort
  *
  * This contract owns both interface lifecycle and interface runtime configuration.
  */
-interface VpnInterface {
+interface InterfaceManager {
 
     /**
      * Checks whether an interface with the provided name exists.

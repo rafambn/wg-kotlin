@@ -1,14 +1,14 @@
 package com.rafambn.kmpvpn.session
 
 import com.rafambn.kmpvpn.VpnConfiguration
-import com.rafambn.kmpvpn.iface.VpnInterface
+import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnPeerStats
 import com.rafambn.kmpvpn.VpnAdapterConfiguration
 
 /**
  * Contract for transport session ownership used by [com.rafambn.kmpvpn.Vpn].
  */
-interface SessionManager {
+interface TunnelManager {
 
     /**
      * Reconciles existing sessions with the desired configuration.
@@ -46,7 +46,7 @@ interface SessionManager {
      */
     fun startRuntime(
         configuration: VpnConfiguration,
-        vpnInterface: VpnInterface,
+        interfaceManager: InterfaceManager,
         onFailure: (Throwable) -> Unit = {},
     )
 

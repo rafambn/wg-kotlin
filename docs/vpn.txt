@@ -1,7 +1,7 @@
 FILE: new-vpn/src/commonMain/kotlin/com/rafambn/kmpvpn/Vpn.kt
 
 REVIEWED
-- Public constructor should expose only engine, config, and onEvent - hides vpnInterfaceFactory to simplify user API and enforce dependency injection through factory defaults
+- Public constructor should expose only engine, config, and onEvent - hides interfaceFactory to simplify user API and enforce dependency injection through factory defaults
 - state() returns the VPN lifecycle status by checking existence then runtime state - distinguishes between NotCreated, Created (exists but down), and Running (active tunnels)
 - exists() on JVM should check if interface actually exists on the OS - ensures accurate lifecycle state reporting across platforms
 - isRunning() checks three conditions together - interface must exist on OS, be up at OS level, and have active userspace TUN sessions (BoringTUN) running
@@ -28,4 +28,4 @@ NEW
 - publishEvent() checks onEvent existence - prevents null pointer when event handler is not provided
 - AutoCloseable implementation delegates to delete() - integrates with try-with-resources for proper cleanup
 
-Review next: SessionManager implementation to understand session lifecycle and reconciliation
+Review next: TunnelManager implementation to understand session lifecycle and reconciliation

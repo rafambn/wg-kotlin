@@ -60,7 +60,6 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.ktor.network)
             implementation(libs.ktor.io)
-            implementation(libs.koin.core)
         }
 
         commonTest.dependencies {
@@ -76,6 +75,7 @@ kotlin {
             implementation(libs.kotlinx.rpc.krpc.ktor.client)
             implementation(libs.ktor.client.cio)
             implementation(libs.ktor.client.websockets)
+            implementation(libs.koin.core)
         }
 
         jvmTest.dependencies {

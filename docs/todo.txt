@@ -1,4 +1,3 @@
 ISSUES AND TASKS
 
 -Change the constructor of DaemonProcessClient so that i don't need the dependencies of it in the main vpn module
--Improve DI of Vpn

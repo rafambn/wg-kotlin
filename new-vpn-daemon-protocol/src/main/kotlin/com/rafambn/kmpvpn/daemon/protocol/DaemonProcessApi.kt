@@ -4,6 +4,7 @@ import com.rafambn.kmpvpn.daemon.protocol.response.ApplyAddressesResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyDnsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyMtuResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyRoutesResponse
+import com.rafambn.kmpvpn.daemon.protocol.response.DeleteInterfaceResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.InterfaceExistsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.PingResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ReadInterfaceInformationResponse
@@ -52,4 +53,8 @@ interface DaemonProcessApi {
     suspend fun readInterfaceInformation(
         interfaceName: String,
     ): CommandResult<ReadInterfaceInformationResponse>
+
+    suspend fun deleteInterface(
+        interfaceName: String,
+    ): CommandResult<DeleteInterfaceResponse>
 }

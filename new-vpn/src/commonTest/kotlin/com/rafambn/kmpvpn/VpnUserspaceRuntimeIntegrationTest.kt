@@ -49,13 +49,11 @@ class VpnUserspaceRuntimeIntegrationTest {
 
     @Test
     fun runtimeStartFailureRollsBackToCreatedState() {
-        val emittedEvents = mutableListOf<VpnEvent>()
         val runtimeFactory = RecordingRuntimeFactory(failOnCreate = true)
         val vpnInterface = RecordingVpnInterface()
         val sessionManager = InMemorySessionManager(userspaceRuntimeFactory = runtimeFactory::create)
         val vpn = Vpn(
             vpnConfiguration = configuration(interfaceName = "wg-fail"),
-            onEvent = { event -> emittedEvents += event },
             sessionManager = sessionManager,
             vpnInterface = vpnInterface,
         )
@@ -68,7 +66,6 @@ class VpnUserspaceRuntimeIntegrationTest {
         assertEquals(1, vpnInterface.downCalls)
         assertEquals(0, sessionManager.sessions().size)
         assertEquals(VpnState.Created, vpn.state())
-        assertTrue(emittedEvents.any { event -> event is VpnEvent.Failure })
     }
 
     @Test
@@ -120,7 +117,6 @@ class VpnUserspaceRuntimeIntegrationTest {
     ): Vpn {
         return Vpn(
             vpnConfiguration = configuration,
-            onEvent = null,
             sessionManager = InMemorySessionManager(userspaceRuntimeFactory = runtimeFactory::create),
             vpnInterface = vpnInterface,
         )

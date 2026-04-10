@@ -21,4 +21,6 @@ interface InterfaceCommandExecutor {
     fun applyDns(interfaceName: String, dnsDomainPool: Pair<List<String>, List<String>>)
 
     fun readInformation(interfaceName: String): VpnInterfaceInformation?
+
+    fun deleteInterface(interfaceName: String)
 }

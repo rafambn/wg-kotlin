@@ -51,3 +51,9 @@ internal data class ReadInterfaceInformation(
 ) : DaemonOperation {
     override val label: String = "READ_INTERFACE_INFORMATION"
 }
+
+internal data class DeleteInterface(
+    override val interfaceName: String,
+) : DaemonOperation {
+    override val label: String = "DELETE_INTERFACE"
+}

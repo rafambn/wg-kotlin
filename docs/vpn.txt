@@ -4,9 +4,10 @@ REVIEWED
 - Public constructor should expose only engine, config, and onEvent - hides vpnInterfaceFactory to simplify user API and enforce dependency injection through factory defaults
 - state() returns the VPN lifecycle status by checking existence then runtime state - distinguishes between NotCreated, Created (exists but down), and Running (active tunnels)
 - exists() on JVM should check if interface actually exists on the OS - ensures accurate lifecycle state reporting across platforms
+- isRunning() checks three conditions together - interface must exist on OS, be up at OS level, and have active userspace TUN sessions (BoringTUN) running
+- close() function should not delete the interface - prevents data loss on unexpected closes and allows interface reuse, only delete() should remove the interface permanently
 
 NEW
-- isRunning() checks both interface existence and active sessions - clarifies that running requires both conditions
 - create() wraps exceptions and publishes events - ensures all failures are observable and throwable
 - start() calls create() first - guarantees interface exists before attempting to bring it up
 - start() checks isRunning() before proceeding - prevents attempting to start already running interfaces

@@ -6,6 +6,7 @@ import com.rafambn.kmpvpn.daemon.planner.ApplyAddresses
 import com.rafambn.kmpvpn.daemon.planner.ApplyDns
 import com.rafambn.kmpvpn.daemon.planner.ApplyMtu
 import com.rafambn.kmpvpn.daemon.planner.ApplyRoutes
+import com.rafambn.kmpvpn.daemon.planner.DeleteInterface
 import com.rafambn.kmpvpn.daemon.planner.InterfaceExists
 import com.rafambn.kmpvpn.daemon.planner.PlanExecutor
 import com.rafambn.kmpvpn.daemon.planner.PlatformOperationPlanner
@@ -21,6 +22,7 @@ import com.rafambn.kmpvpn.daemon.protocol.response.ApplyAddressesResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyDnsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyMtuResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyRoutesResponse
+import com.rafambn.kmpvpn.daemon.protocol.response.DeleteInterfaceResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.InterfaceExistsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.PingResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ReadInterfaceInformationResponse
@@ -205,6 +207,21 @@ class DaemonProcessApiImpl internal constructor(
         } catch (failure: Throwable) {
             toFailureResult(
                 commandType = "READ_INTERFACE_INFORMATION",
+                failure = failure,
+            )
+        }
+    }
+
+    override suspend fun deleteInterface(
+        interfaceName: String,
+    ): CommandResult<DeleteInterfaceResponse> {
+        return try {
+            DaemonPayloadValidator.validateInterfaceName(interfaceName)
+            planExecutor.run(DeleteInterface(interfaceName = interfaceName))
+            CommandResult.success(DeleteInterfaceResponse(interfaceName = interfaceName))
+        } catch (failure: Throwable) {
+            toFailureResult(
+                commandType = "DELETE_INTERFACE",
                 failure = failure,
             )
         }

@@ -82,6 +82,12 @@ class DaemonBackedInterfaceCommandExecutor(
         }
     }
 
+    override fun deleteInterface(interfaceName: String) {
+        expectSuccess(operation = "deleteInterface", interfaceName = interfaceName) { client ->
+            client.deleteInterface(interfaceName = interfaceName)
+        }
+    }
+
     private fun <S> expectSuccess(
         operation: String,
         interfaceName: String,

@@ -96,6 +96,7 @@ class JvmVpnInterface(
             safeRun { commandExecutor.setInterfaceUp(interfaceName, false) }
         }
 
+        commandExecutor.deleteInterface(interfaceName)
         clearState(closeTunPort = true)
     }
 

@@ -157,6 +157,15 @@ internal class WindowsOperationPlanner : PlatformOperationPlanner {
                     arguments = listOf("interface", "show", "interface", "name=${operation.interfaceName}"),
                 ),
             )
+
+            is DeleteInterface -> operation.executionPlanOf(
+                clearNrptRulesStep(interfaceName = operation.interfaceName),
+                executionStep(
+                    binary = CommandBinary.NETSH,
+                    arguments = listOf("interface", "delete", "interface", "name=${operation.interfaceName}"),
+                    acceptedExitCodes = setOf(0, 1),
+                ),
+            )
         }
     }
 

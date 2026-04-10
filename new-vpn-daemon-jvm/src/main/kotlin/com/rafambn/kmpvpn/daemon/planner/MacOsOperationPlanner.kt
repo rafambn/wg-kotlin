@@ -120,7 +120,15 @@ internal class MacOsOperationPlanner : PlatformOperationPlanner {
                     arguments = listOf(operation.interfaceName),
                 ),
             )
+
+            is DeleteInterface -> operation.executionPlanOf(
+                executionStep(
+                    binary = CommandBinary.IFCONFIG,
+                    arguments = listOf(operation.interfaceName, "destroy"),
+                    acceptedExitCodes = setOf(0, 1),
+                ),
+            )
         }
-            }
+    }
 
 }

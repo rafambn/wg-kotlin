@@ -8,6 +8,7 @@ import com.rafambn.kmpvpn.daemon.protocol.response.ApplyAddressesResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyDnsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyMtuResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyRoutesResponse
+import com.rafambn.kmpvpn.daemon.protocol.response.DeleteInterfaceResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.InterfaceExistsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.PingResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ReadInterfaceInformationResponse
@@ -121,6 +122,14 @@ class DaemonProcessClient(
     ): CommandResult<ReadInterfaceInformationResponse> {
         return callWithTimeout(timeout) {
             service.readInterfaceInformation(interfaceName = interfaceName)
+        }
+    }
+
+    override suspend fun deleteInterface(
+        interfaceName: String,
+    ): CommandResult<DeleteInterfaceResponse> {
+        return callWithTimeout(timeout) {
+            service.deleteInterface(interfaceName = interfaceName)
         }
     }
 

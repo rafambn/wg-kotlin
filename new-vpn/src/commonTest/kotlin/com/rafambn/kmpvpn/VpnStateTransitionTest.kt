@@ -47,12 +47,9 @@ class VpnStateTransitionTest {
     }
 
     @Test
-    fun interfaceFailureEmitsFailureEventWithoutPersistingSyntheticState() {
-        val emittedEvents: MutableList<VpnEvent> = mutableListOf()
-
+    fun interfaceFailureDoesNotPersistSyntheticState() {
         val vpn = Vpn(
             vpnConfiguration = baseConfiguration(interfaceName = "wg2"),
-            onEvent = { event -> emittedEvents += event },
             sessionManager = InMemorySessionManager(),
             vpnInterface = FailingUpVpnInterface(),
         )
@@ -62,7 +59,6 @@ class VpnStateTransitionTest {
         }
 
         assertEquals(VpnState.Created, vpn.state())
-        assertTrue(emittedEvents.any { event -> event is VpnEvent.Failure })
     }
 
     private fun baseConfiguration(interfaceName: String): VpnConfiguration {

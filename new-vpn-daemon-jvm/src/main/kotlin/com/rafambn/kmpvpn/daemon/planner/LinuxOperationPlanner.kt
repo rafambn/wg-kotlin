@@ -93,6 +93,14 @@ internal class LinuxOperationPlanner : PlatformOperationPlanner {
                     arguments = listOf("-details", "link", "show", "dev", operation.interfaceName),
                 ),
             )
+
+            is DeleteInterface -> operation.executionPlanOf(
+                executionStep(
+                    binary = CommandBinary.IP,
+                    arguments = listOf("link", "delete", "dev", operation.interfaceName),
+                    acceptedExitCodes = setOf(0, 1),
+                ),
+            )
         }
     }
 

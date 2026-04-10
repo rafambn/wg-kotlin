@@ -17,7 +17,7 @@ class VpnStateTransitionTest {
 
     @Test
     fun lifecycleTransitionsFollowContract() {
-        val vpn = Vpn(vpnConfiguration = baseConfiguration(interfaceName = "wg0"))
+        val vpn = Vpn.create(vpnConfiguration = baseConfiguration(interfaceName = "wg0"))
 
         assertEquals(VpnState.NotCreated, vpn.state())
 
@@ -36,7 +36,7 @@ class VpnStateTransitionTest {
 
     @Test
     fun stopAndDeleteAreIdempotent() {
-        val vpn = Vpn(vpnConfiguration = baseConfiguration(interfaceName = "wg1"))
+        val vpn = Vpn.create(vpnConfiguration = baseConfiguration(interfaceName = "wg1"))
 
         vpn.stop()
         assertEquals(VpnState.NotCreated, vpn.state())

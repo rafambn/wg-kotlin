@@ -16,6 +16,7 @@ dependencies {
     implementation(libs.kotlinx.rpc.krpc.ktor.client)
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.websockets)
+    implementation(libs.koin.core.jvm)
 
     testImplementation(kotlin("test-junit5"))
     testImplementation(libs.kotlinx.coroutines.test)

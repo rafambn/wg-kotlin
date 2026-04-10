@@ -8,6 +8,7 @@ import com.rafambn.kmpvpn.daemon.protocol.response.ApplyAddressesResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyDnsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyMtuResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyRoutesResponse
+import com.rafambn.kmpvpn.daemon.protocol.response.DeleteInterfaceResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.InterfaceExistsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.PingResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ReadInterfaceInformationResponse
@@ -224,6 +225,10 @@ class DaemonBackedInterfaceCommandExecutorTest {
         override suspend fun readInterfaceInformation(
             interfaceName: String,
         ): CommandResult<ReadInterfaceInformationResponse> = failure("unsupported")
+
+        override suspend fun deleteInterface(
+            interfaceName: String,
+        ): CommandResult<DeleteInterfaceResponse> = failure("unsupported")
     }
 
     private fun randomPort(): Int {

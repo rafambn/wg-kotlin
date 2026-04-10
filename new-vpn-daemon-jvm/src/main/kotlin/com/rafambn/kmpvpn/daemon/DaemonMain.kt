@@ -7,6 +7,7 @@ import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
+import com.rafambn.kmpvpn.daemon.di.DaemonKoinBootstrap
 import com.rafambn.kmpvpn.daemon.planner.PlatformOperationPlanner
 import com.rafambn.kmpvpn.daemon.protocol.DAEMON_RPC_PATH
 import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_HOST
@@ -24,6 +25,7 @@ import java.util.concurrent.TimeUnit
 import kotlinx.rpc.krpc.ktor.server.Krpc
 import kotlinx.rpc.krpc.ktor.server.rpc
 import kotlinx.rpc.krpc.serialization.json.json
+import org.koin.core.context.GlobalContext
 
 fun main(args: Array<String>) {
     DaemonCli().main(args)
@@ -71,7 +73,9 @@ private class DaemonCli : CliktCommand(name = "vpn-daemon") {
                 "Refusing to bind daemon to non-loopback host `$host`. Pass `--allow-remote` if you really want remote exposure.",
             )
         }
-        val operationPlanner = PlatformOperationPlanner.fromOs()
+        DaemonKoinBootstrap.ensureKoinStarted()
+        val koin = GlobalContext.get()
+        val operationPlanner = koin.get<PlatformOperationPlanner>()
 
         val isPrivileged = hasRequiredPrivileges()
         if (!isPrivileged) {
@@ -93,7 +97,7 @@ private class DaemonCli : CliktCommand(name = "vpn-daemon") {
         createDaemonServer(
             host = host,
             port = port,
-            service = DaemonProcessApiImpl(operationPlanner = operationPlanner),
+            service = koin.get(),
         ).start(wait = true)
     }
 }

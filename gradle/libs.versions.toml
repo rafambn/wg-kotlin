@@ -11,6 +11,7 @@ ktor = "3.4.1"
 clikt = "5.1.0"
 mockk = "1.14.9"
 commons-exec = "1.6.0"
+koin = "4.1.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
@@ -31,6 +32,8 @@ ktor-io = { module = "io.ktor:ktor-io", version.ref = "ktor" }
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 commons-exec = { module = "org.apache.commons:commons-exec", version.ref = "commons-exec" }
+koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
+koin-core-jvm = { module = "io.insert-koin:koin-core-jvm", version.ref = "koin" }
 
 [plugins]
 

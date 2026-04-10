@@ -1,5 +1,6 @@
 package com.rafambn.kmpvpn.iface
 
+import com.rafambn.kmpvpn.daemon.client.DaemonClientConfig
 import com.rafambn.kmpvpn.daemon.client.DaemonProcessClient
 import com.rafambn.kmpvpn.daemon.protocol.CommandResult
 import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_HOST
@@ -14,10 +15,12 @@ class DaemonBackedInterfaceCommandExecutor(
         System.getProperty(JvmPlatformProperties.DAEMON_TIMEOUT_MILLIS)?.toLongOrNull() ?: 15_000L,
     ),
     private val clientFactory: (String, Int, Duration) -> DaemonProcessClient = { resolvedHost, resolvedPort, resolvedTimeout ->
-        DaemonProcessClient(
-            host = resolvedHost,
-            port = resolvedPort,
-            timeout = resolvedTimeout,
+        DaemonProcessClient.create(
+            config = DaemonClientConfig(
+                host = resolvedHost,
+                port = resolvedPort,
+                timeout = resolvedTimeout,
+            ),
         )
     },
 ) : InterfaceCommandExecutor {

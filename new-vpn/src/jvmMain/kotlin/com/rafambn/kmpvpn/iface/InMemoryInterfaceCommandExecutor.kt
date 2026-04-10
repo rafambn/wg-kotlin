@@ -57,12 +57,19 @@ class InMemoryInterfaceCommandExecutor : InterfaceCommandExecutor {
         )
     }
 
+    override fun deleteInterface(interfaceName: String) {
+        callLog += "deleteInterface:$interfaceName"
+        interfaces.remove(interfaceName)
+        observedInterfaces.remove(interfaceName)
+    }
+
     fun setPeerStats(interfaceName: String, peerStats: List<VpnPeerStats>) {
         val state = stateFor(interfaceName)
         state.peerStats = peerStats.toList()
     }
 
     private fun stateFor(interfaceName: String): InterfaceState {
+        observedInterfaces += interfaceName
         return interfaces.getOrPut(interfaceName) { InterfaceState() }
     }
 

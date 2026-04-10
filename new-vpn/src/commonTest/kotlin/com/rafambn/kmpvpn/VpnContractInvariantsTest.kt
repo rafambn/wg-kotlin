@@ -12,7 +12,7 @@ class VpnContractInvariantsTest {
     @Test
     fun rejectsBlankInterfaceName() {
         assertFailsWith<IllegalArgumentException> {
-            Vpn(
+            Vpn.create(
                 vpnConfiguration = DefaultVpnConfiguration(
                     interfaceName = " ",
                     privateKey = privateKey,
@@ -30,7 +30,7 @@ class VpnContractInvariantsTest {
         )
 
         assertFailsWith<IllegalArgumentException> {
-            Vpn(
+            Vpn.create(
                 vpnConfiguration = DefaultVpnConfiguration(
                     interfaceName = "wg0",
                     privateKey = privateKey,
@@ -43,7 +43,7 @@ class VpnContractInvariantsTest {
 
     @Test
     fun reconfigureRejectsDuplicatedPeerPublicKeys() {
-        val vpn = Vpn(
+        val vpn = Vpn.create(
             vpnConfiguration = DefaultVpnConfiguration(
                 interfaceName = "wg0",
                 privateKey = privateKey,
@@ -71,7 +71,7 @@ class VpnContractInvariantsTest {
 
     @Test
     fun reconfigureRejectsInterfaceNameChange() {
-        val vpn = Vpn(
+        val vpn = Vpn.create(
             vpnConfiguration = DefaultVpnConfiguration(
                 interfaceName = "wg0",
                 privateKey = privateKey,

@@ -1,5 +1,6 @@
 package com.rafambn.kmpvpn.daemon
 
+import com.rafambn.kmpvpn.daemon.client.DaemonClientConfig
 import com.rafambn.kmpvpn.daemon.client.DaemonProcessClient
 import com.rafambn.kmpvpn.daemon.command.ProcessInvocationModel
 import com.rafambn.kmpvpn.daemon.command.ProcessLauncher
@@ -32,7 +33,7 @@ class DaemonClientIntegrationTest {
         engine.start(wait = false)
         delay(200)
 
-        val client = DaemonProcessClient(port = port)
+        val client = DaemonProcessClient.create(config = DaemonClientConfig(port = port))
         try {
             val hello = client.handshake()
             assertTrue(hello.isSuccess)

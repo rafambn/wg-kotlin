@@ -3,7 +3,6 @@ package com.rafambn.kmpvpn.daemon.client
 import com.rafambn.kmpvpn.daemon.protocol.CommandResult
 import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_HOST
 import com.rafambn.kmpvpn.daemon.protocol.DaemonProcessApi
-import com.rafambn.kmpvpn.daemon.protocol.daemonRpcUrl
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyAddressesResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyDnsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyMtuResponse
@@ -13,39 +12,41 @@ import com.rafambn.kmpvpn.daemon.protocol.response.InterfaceExistsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.PingResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ReadInterfaceInformationResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.SetInterfaceStateResponse
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.websocket.WebSockets
 import java.time.Duration
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
-import kotlinx.rpc.krpc.ktor.client.installKrpc
-import kotlinx.rpc.krpc.ktor.client.rpc
-import kotlinx.rpc.krpc.serialization.json.json
-import kotlinx.rpc.withService
+import org.koin.core.context.GlobalContext
+import org.koin.core.module.Module
 
-class DaemonProcessClient(
-    host: String = DEFAULT_DAEMON_HOST,
-    port: Int,
-    val timeout: Duration = Duration.ofSeconds(15)
+class DaemonProcessClient private constructor(
+    private val service: DaemonProcessApi,
+    private val resourceCloser: () -> Unit,
+    val timeout: Duration,
 ) : DaemonProcessApi, AutoCloseable {
-    init {
-        require(host.isNotBlank()) { "Daemon host cannot be blank" }
-        require(port in 1..65535) { "Daemon port must be between 1 and 65535" }
-    }
 
-    private val httpClient: HttpClient = HttpClient(CIO) {
-        install(WebSockets)
-        installKrpc {
-            serialization {
-                // TODO(vpn-rebuild): migrate kRPC serialization to Protobuf once protocol models are stable and annotated with @ProtoNumber.
-                json()
-            }
+    companion object {
+        fun create(
+            config: DaemonClientConfig,
+            overrideModules: List<Module> = emptyList(),
+        ): DaemonProcessClient {
+            DaemonClientKoinBootstrap.ensureKoinStarted(overrideModules)
+            val koin = GlobalContext.get()
+            val httpClientFactory = koin.get<DaemonClientHttpClientFactory>()
+            val serviceFactory = koin.get<DaemonClientServiceFactory>()
+            val httpClient = httpClientFactory.create()
+            val service = serviceFactory.create(httpClient = httpClient, config = config)
+
+            return DaemonProcessClient(
+                service = service,
+                resourceCloser = { httpClient.close() },
+                timeout = config.timeout,
+            )
+        }
+
+        internal fun resetKoinForTests() {
+            DaemonClientKoinBootstrap.resetForTests()
         }
     }
-
-    private val rpcClient = httpClient.rpc(daemonRpcUrl(host = host, port = port))
-    private val service = rpcClient.withService<DaemonProcessApi>()
 
     suspend fun handshake(timeout: Duration = Duration.ofSeconds(5)): CommandResult<PingResponse> {
         val response = callWithTimeout(timeout) { service.ping() }
@@ -154,6 +155,18 @@ class DaemonProcessClient(
     }
 
     override fun close() {
-        httpClient.close()
+        resourceCloser()
+    }
+}
+
+data class DaemonClientConfig(
+    val host: String = DEFAULT_DAEMON_HOST,
+    val port: Int,
+    val timeout: Duration = Duration.ofSeconds(15),
+) {
+    init {
+        require(host.isNotBlank()) { "Daemon host cannot be blank" }
+        require(port in 1..65535) { "Daemon port must be between 1 and 65535" }
+        require(timeout.toMillis() > 0L) { "Timeout must be positive" }
     }
 }

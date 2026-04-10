@@ -13,7 +13,7 @@ class VpnFoundationWiringTest {
 
     @Test
     fun inMemoryLifecycleStillWorks() {
-        val vpn = Vpn(
+        val vpn = Vpn.create(
             vpnConfiguration = DefaultVpnConfiguration(
                 interfaceName = "wg0",
                 privateKey = privateKey,
@@ -39,7 +39,7 @@ class VpnFoundationWiringTest {
 
     @Test
     fun createRemainsIdempotent() {
-        val vpn = Vpn(
+        val vpn = Vpn.create(
             vpnConfiguration = DefaultVpnConfiguration(
                 interfaceName = "wg1",
                 privateKey = privateKey,
@@ -56,7 +56,7 @@ class VpnFoundationWiringTest {
 
     @Test
     fun reconfigureAllowsFullConfigurationUpdate() {
-        val vpn = Vpn(
+        val vpn = Vpn.create(
             vpnConfiguration = DefaultVpnConfiguration(
                 interfaceName = "wg2",
                 dnsDomainPool = (listOf("corp.local") to listOf("1.1.1.1")),

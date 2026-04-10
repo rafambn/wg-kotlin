@@ -8,6 +8,7 @@ import com.rafambn.kmpvpn.daemon.protocol.response.ApplyRoutesResponse
 import com.rafambn.kmpvpn.daemon.protocol.CommandResult
 import com.rafambn.kmpvpn.daemon.protocol.DaemonProcessApi
 import com.rafambn.kmpvpn.daemon.protocol.DaemonErrorKind
+import com.rafambn.kmpvpn.daemon.protocol.response.DeleteInterfaceResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.InterfaceExistsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.PingResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ReadInterfaceInformationResponse
@@ -26,12 +27,24 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.rpc.krpc.ktor.server.Krpc
 import kotlinx.rpc.krpc.ktor.server.rpc
 import kotlinx.rpc.krpc.serialization.json.json
+import org.koin.dsl.module
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class DaemonClientSmokeTest {
+    @BeforeTest
+    fun setUp() {
+        DaemonProcessClient.resetKoinForTests()
+    }
+
+    @AfterTest
+    fun tearDown() {
+        DaemonProcessClient.resetKoinForTests()
+    }
 
     @Test
     fun krpcClientPerformsHandshakeAndRoundTrip() = runBlocking {
@@ -57,8 +70,8 @@ class DaemonClientSmokeTest {
             },
         )
 
-        val client = DaemonProcessClient(
-            port = port,
+        val client = DaemonProcessClient.create(
+            config = DaemonClientConfig(port = port),
         )
 
         try {
@@ -92,9 +105,11 @@ class DaemonClientSmokeTest {
             },
         )
 
-        val client = DaemonProcessClient(
-            port = port,
-            timeout = Duration.ofMillis(50),
+        val client = DaemonProcessClient.create(
+            config = DaemonClientConfig(
+                port = port,
+                timeout = Duration.ofMillis(50),
+            ),
         )
 
         try {
@@ -123,8 +138,8 @@ class DaemonClientSmokeTest {
             },
         )
 
-        val client = DaemonProcessClient(
-            port = port,
+        val client = DaemonProcessClient.create(
+            config = DaemonClientConfig(port = port),
         )
 
         try {
@@ -136,6 +151,37 @@ class DaemonClientSmokeTest {
         } finally {
             client.close()
             engine.stop(100, 1_000)
+        }
+    }
+
+    @Test
+    fun globalBootstrapSupportsOverridesAndMultipleClientConfigs() = runBlocking {
+        val stubService = object : StubDaemonProcessApi() {
+            override suspend fun ping(): CommandResult<PingResponse> {
+                return success(PingResponse)
+            }
+        }
+        val overrideModule = module {
+            single<DaemonClientServiceFactory> {
+                DaemonClientServiceFactory { _, _ -> stubService }
+            }
+        }
+
+        val first = DaemonProcessClient.create(
+            config = DaemonClientConfig(port = 8787),
+            overrideModules = listOf(overrideModule),
+        )
+        val second = DaemonProcessClient.create(
+            config = DaemonClientConfig(port = 8788),
+            overrideModules = listOf(overrideModule),
+        )
+
+        try {
+            assertTrue(first.ping().isSuccess)
+            assertTrue(second.ping().isSuccess)
+        } finally {
+            first.close()
+            second.close()
         }
     }
 
@@ -221,6 +267,10 @@ class DaemonClientSmokeTest {
         override suspend fun readInterfaceInformation(
             interfaceName: String,
         ): CommandResult<ReadInterfaceInformationResponse> = unsupported("READ_INTERFACE_INFORMATION")
+
+        override suspend fun deleteInterface(
+            interfaceName: String,
+        ): CommandResult<DeleteInterfaceResponse> = unsupported("DELETE_INTERFACE")
     }
 
     private fun randomPort(): Int {

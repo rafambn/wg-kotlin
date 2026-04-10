@@ -15,6 +15,20 @@ class Vpn internal constructor(
     private val tunnelManager: TunnelManager,
     private val interfaceManager: InterfaceManager,
 ) : AutoCloseable {
+    constructor(
+        configuration: VpnConfiguration,
+        engine: Engine = Engine.BORINGTUN,
+    ) : this(
+        vpnConfiguration = configuration,
+        tunnelManager = VpnKoinBootstrap.resolveDependencies(
+            configuration = configuration,
+            engine = engine,
+        ).tunnelManager,
+        interfaceManager = VpnKoinBootstrap.resolveDependencies(
+            configuration = configuration,
+            engine = engine,
+        ).interfaceManager,
+    )
 
     init {
         requireValidConfiguration(vpnConfiguration)

@@ -25,7 +25,6 @@ import java.util.concurrent.TimeUnit
 import kotlinx.rpc.krpc.ktor.server.Krpc
 import kotlinx.rpc.krpc.ktor.server.rpc
 import kotlinx.rpc.krpc.serialization.json.json
-import org.koin.core.context.GlobalContext
 
 fun main(args: Array<String>) {
     DaemonCli().main(args)
@@ -73,9 +72,8 @@ private class DaemonCli : CliktCommand(name = "vpn-daemon") {
                 "Refusing to bind daemon to non-loopback host `$host`. Pass `--allow-remote` if you really want remote exposure.",
             )
         }
-        DaemonKoinBootstrap.ensureKoinStarted()
-        val koin = GlobalContext.get()
-        val operationPlanner = koin.get<PlatformOperationPlanner>()
+        val dependencies = DaemonKoinBootstrap.resolveDependencies()
+        val operationPlanner = dependencies.operationPlanner
 
         val isPrivileged = hasRequiredPrivileges()
         if (!isPrivileged) {
@@ -97,7 +95,7 @@ private class DaemonCli : CliktCommand(name = "vpn-daemon") {
         createDaemonServer(
             host = host,
             port = port,
-            service = koin.get(),
+            service = dependencies.service,
         ).start(wait = true)
     }
 }

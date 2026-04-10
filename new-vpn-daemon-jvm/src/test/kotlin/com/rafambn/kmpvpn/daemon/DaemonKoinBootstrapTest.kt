@@ -4,37 +4,37 @@ import com.rafambn.kmpvpn.daemon.command.ProcessInvocationModel
 import com.rafambn.kmpvpn.daemon.command.ProcessLauncher
 import com.rafambn.kmpvpn.daemon.command.ProcessOutputModel
 import com.rafambn.kmpvpn.daemon.di.DaemonKoinBootstrap
-import com.rafambn.kmpvpn.daemon.protocol.DaemonProcessApi
 import kotlinx.coroutines.runBlocking
-import org.koin.core.context.GlobalContext
 import org.koin.dsl.module
-import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotSame
 import kotlin.test.assertTrue
 
 class DaemonKoinBootstrapTest {
 
-    @AfterTest
-    fun tearDown() {
-        DaemonKoinBootstrap.resetForTests()
-    }
-
     @Test
-    fun bootstrappingIsIdempotentAndAcceptsOverrides() = runBlocking {
-        val launcher = RecordingLauncher()
+    fun resolvingDependenciesAcceptsOverridesWithoutGlobalState() = runBlocking {
+        val firstLauncher = RecordingLauncher()
+        val secondLauncher = RecordingLauncher()
         val overrideModule = module {
-            single<ProcessLauncher> { launcher }
+            single<ProcessLauncher> { firstLauncher }
+        }
+        val secondOverrideModule = module {
+            single<ProcessLauncher> { secondLauncher }
         }
 
-        DaemonKoinBootstrap.ensureKoinStarted(overrideModules = listOf(overrideModule))
-        DaemonKoinBootstrap.ensureKoinStarted(overrideModules = listOf(overrideModule))
+        val firstDependencies = DaemonKoinBootstrap.resolveDependencies(overrideModules = listOf(overrideModule))
+        val secondDependencies = DaemonKoinBootstrap.resolveDependencies(overrideModules = listOf(secondOverrideModule))
 
-        val service = GlobalContext.get().get<DaemonProcessApi>()
-        val result = service.setInterfaceState(interfaceName = "utun0", up = true)
+        val firstResult = firstDependencies.service.setInterfaceState(interfaceName = "utun0", up = true)
+        val secondResult = secondDependencies.service.setInterfaceState(interfaceName = "utun1", up = true)
 
-        assertTrue(result.isSuccess)
-        assertEquals(1, launcher.invocations.size)
+        assertTrue(firstResult.isSuccess)
+        assertTrue(secondResult.isSuccess)
+        assertEquals(1, firstLauncher.invocations.size)
+        assertEquals(1, secondLauncher.invocations.size)
+        assertNotSame(firstDependencies.service, secondDependencies.service)
     }
 
     private class RecordingLauncher : ProcessLauncher {

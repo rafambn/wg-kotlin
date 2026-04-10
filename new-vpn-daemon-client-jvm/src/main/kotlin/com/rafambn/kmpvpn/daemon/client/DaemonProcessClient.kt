@@ -12,39 +12,33 @@ import com.rafambn.kmpvpn.daemon.protocol.response.InterfaceExistsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.PingResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.ReadInterfaceInformationResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.SetInterfaceStateResponse
+import io.ktor.client.HttpClient
 import java.time.Duration
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
-import org.koin.core.context.GlobalContext
 import org.koin.core.module.Module
 
-class DaemonProcessClient private constructor(
-    private val service: DaemonProcessApi,
-    private val resourceCloser: () -> Unit,
-    val timeout: Duration,
+class DaemonProcessClient(
+    val service: DaemonProcessApi,
+    val timeout: Duration = Duration.ofSeconds(15),
+    val resourceCloser: () -> Unit = {}
 ) : DaemonProcessApi, AutoCloseable {
 
     companion object {
-        fun create(
+        internal fun create(
             config: DaemonClientConfig,
             overrideModules: List<Module> = emptyList(),
         ): DaemonProcessClient {
-            DaemonClientKoinBootstrap.ensureKoinStarted(overrideModules)
-            val koin = GlobalContext.get()
-            val httpClientFactory = koin.get<DaemonClientHttpClientFactory>()
-            val serviceFactory = koin.get<DaemonClientServiceFactory>()
-            val httpClient = httpClientFactory.create()
-            val service = serviceFactory.create(httpClient = httpClient, config = config)
+            val dependencies = DaemonClientKoinBootstrap.resolveDependencies(
+                config = config,
+                overrideModules = overrideModules,
+            )
 
             return DaemonProcessClient(
-                service = service,
-                resourceCloser = { httpClient.close() },
                 timeout = config.timeout,
+                service = dependencies.service,
+                resourceCloser = dependencies::close,
             )
-        }
-
-        internal fun resetKoinForTests() {
-            DaemonClientKoinBootstrap.resetForTests()
         }
     }
 

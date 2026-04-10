@@ -1,12 +1,20 @@
 package com.rafambn.kmpvpn.iface
 
-import com.rafambn.kmpvpn.daemon.client.DaemonClientConfig
 import com.rafambn.kmpvpn.daemon.client.DaemonProcessClient
 import com.rafambn.kmpvpn.daemon.protocol.CommandResult
 import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_HOST
 import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_PORT
+import com.rafambn.kmpvpn.daemon.protocol.DaemonProcessApi
+import com.rafambn.kmpvpn.daemon.protocol.daemonRpcUrl
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.websocket.WebSockets
 import java.time.Duration
 import kotlinx.coroutines.runBlocking
+import kotlinx.rpc.krpc.ktor.client.installKrpc
+import kotlinx.rpc.krpc.ktor.client.rpc
+import kotlinx.rpc.krpc.serialization.json.json
+import kotlinx.rpc.withService
 
 class DaemonBackedInterfaceCommandExecutor(
     private val host: String = System.getProperty(JvmPlatformProperties.DAEMON_HOST, DEFAULT_DAEMON_HOST),
@@ -15,12 +23,10 @@ class DaemonBackedInterfaceCommandExecutor(
         System.getProperty(JvmPlatformProperties.DAEMON_TIMEOUT_MILLIS)?.toLongOrNull() ?: 15_000L,
     ),
     private val clientFactory: (String, Int, Duration) -> DaemonProcessClient = { resolvedHost, resolvedPort, resolvedTimeout ->
-        DaemonProcessClient.create(
-            config = DaemonClientConfig(
-                host = resolvedHost,
-                port = resolvedPort,
-                timeout = resolvedTimeout,
-            ),
+        createDaemonProcessClient(
+            host = resolvedHost,
+            port = resolvedPort,
+            timeout = resolvedTimeout,
         )
     },
 ) : InterfaceCommandExecutor {
@@ -129,4 +135,26 @@ class DaemonBackedInterfaceCommandExecutor(
             "Daemon operation `$operation` failed for `$interfaceName`: ${failure.kind} ${failure.message}",
         )
     }
+}
+
+internal fun createDaemonProcessClient(
+    host: String,
+    port: Int,
+    timeout: Duration,
+): DaemonProcessClient {
+    val httpClient = HttpClient(CIO) {
+        install(WebSockets)
+        installKrpc {
+            serialization {
+                json()
+            }
+        }
+    }
+    val rpcClient = httpClient.rpc(daemonRpcUrl(host = host, port = port))
+
+    return DaemonProcessClient(
+        service = rpcClient.withService<DaemonProcessApi>(),
+        timeout = timeout,
+        resourceCloser = { httpClient.close() },
+    )
 }

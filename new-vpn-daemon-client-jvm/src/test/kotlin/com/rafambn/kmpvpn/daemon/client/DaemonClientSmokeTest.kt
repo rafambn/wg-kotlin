@@ -28,24 +28,12 @@ import kotlinx.rpc.krpc.ktor.server.Krpc
 import kotlinx.rpc.krpc.ktor.server.rpc
 import kotlinx.rpc.krpc.serialization.json.json
 import org.koin.dsl.module
-import kotlin.test.AfterTest
-import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class DaemonClientSmokeTest {
-    @BeforeTest
-    fun setUp() {
-        DaemonProcessClient.resetKoinForTests()
-    }
-
-    @AfterTest
-    fun tearDown() {
-        DaemonProcessClient.resetKoinForTests()
-    }
-
     @Test
     fun krpcClientPerformsHandshakeAndRoundTrip() = runBlocking {
         val port = randomPort()
@@ -162,9 +150,7 @@ class DaemonClientSmokeTest {
             }
         }
         val overrideModule = module {
-            single<DaemonClientServiceFactory> {
-                DaemonClientServiceFactory { _, _ -> stubService }
-            }
+            factory<DaemonProcessApi> { stubService }
         }
 
         val first = DaemonProcessClient.create(
@@ -183,6 +169,45 @@ class DaemonClientSmokeTest {
             first.close()
             second.close()
         }
+    }
+
+    @Test
+    fun overridesDoNotLeakAcrossClientCreationCalls() = runBlocking {
+        val stubService = object : StubDaemonProcessApi() {
+            override suspend fun ping(): CommandResult<PingResponse> {
+                return success(PingResponse)
+            }
+        }
+        val overrideModule = module {
+            factory<DaemonProcessApi> { stubService }
+        }
+
+        val overridden = DaemonProcessClient.create(
+            config = DaemonClientConfig(port = 8787),
+            overrideModules = listOf(overrideModule),
+        )
+
+        try {
+            assertTrue(overridden.ping().isSuccess)
+        } finally {
+            overridden.close()
+        }
+
+        val failure = assertFailsWith<DaemonClientException.Timeout> {
+            DaemonProcessClient.create(
+                config = DaemonClientConfig(
+                    host = "203.0.113.1",
+                    port = 8787,
+                    timeout = Duration.ofMillis(10),
+                ),
+            ).use { client ->
+                runBlocking {
+                    client.ping()
+                }
+            }
+        }
+
+        assertEquals(10L, failure.timeout.toMillis())
     }
 
     private fun startServer(

@@ -9,90 +9,60 @@ import kotlinx.rpc.krpc.ktor.client.installKrpc
 import kotlinx.rpc.krpc.ktor.client.rpc
 import kotlinx.rpc.krpc.serialization.json.json
 import kotlinx.rpc.withService
-import org.koin.core.context.GlobalContext
-import org.koin.core.context.loadKoinModules
-import org.koin.core.context.startKoin
-import org.koin.core.context.stopKoin
 import org.koin.core.module.Module
+import org.koin.core.parameter.parametersOf
+import org.koin.dsl.koinApplication
 import org.koin.dsl.module
 
-fun interface DaemonClientHttpClientFactory {
-    fun create(): HttpClient
-}
-
-fun interface DaemonClientServiceFactory {
-    fun create(httpClient: HttpClient, config: DaemonClientConfig): DaemonProcessApi
-}
-
 internal object DaemonClientKoinBootstrap {
-    private val lock = Any()
-    private val loadedModuleIds: MutableSet<Int> = linkedSetOf()
-
     private val baseModule: Module = module {
-        single<DaemonClientHttpClientFactory> {
-            DaemonClientHttpClientFactory {
-                HttpClient(CIO) {
-                    install(WebSockets)
-                    installKrpc {
-                        serialization {
-                            // TODO(vpn-rebuild): migrate kRPC serialization to Protobuf once protocol models are stable and annotated with @ProtoNumber.
-                            json()
-                        }
+        factory<HttpClient> {
+            HttpClient(CIO) {
+                install(WebSockets)
+                installKrpc {
+                    serialization {
+                        // TODO(vpn-rebuild): migrate kRPC serialization to Protobuf once protocol models are stable and annotated with @ProtoNumber.
+                        json()
                     }
                 }
             }
         }
 
-        single<DaemonClientServiceFactory> {
-            DaemonClientServiceFactory { httpClient, config ->
-                val rpcClient = httpClient.rpc(daemonRpcUrl(host = config.host, port = config.port))
-                rpcClient.withService<DaemonProcessApi>()
-            }
+        factory<DaemonProcessApi> { params ->
+            val httpClient = params.get<HttpClient>()
+            val config = params.get<DaemonClientConfig>()
+            val rpcClient = httpClient.rpc(daemonRpcUrl(host = config.host, port = config.port))
+            rpcClient.withService<DaemonProcessApi>()
         }
     }
 
-    fun ensureKoinStarted(overrideModules: List<Module> = emptyList()) {
-        synchronized(lock) {
-            if (runCatching { GlobalContext.get() }.isFailure) {
-                loadedModuleIds.clear()
-            }
+    fun resolveDependencies(
+        config: DaemonClientConfig,
+        overrideModules: List<Module> = emptyList(),
+    ): DaemonClientDependencies {
+        val app = koinApplication {
+            allowOverride(true)
+            modules(listOf(baseModule) + overrideModules)
+        }
 
-            val requestedModules = listOf(baseModule) + overrideModules
-            val pendingModules = requestedModules.filter { candidate ->
-                loadedModuleIds.add(System.identityHashCode(candidate))
-            }
-
-            if (pendingModules.isEmpty()) {
-                return
-            }
-
-            val existing = runCatching { GlobalContext.get() }.getOrNull()
-            if (existing == null) {
-                val started = runCatching {
-                    startKoin {
-                        allowOverride(true)
-                        modules(pendingModules)
-                    }
-                }
-
-                if (started.isSuccess) {
-                    return
-                }
-
-                val nowExisting = runCatching { GlobalContext.get() }.getOrNull()
-                if (nowExisting == null) {
-                    throw checkNotNull(started.exceptionOrNull())
-                }
-            }
-
-            loadKoinModules(pendingModules)
+        return try {
+            val httpClient: HttpClient = app.koin.get()
+            DaemonClientDependencies(
+                httpClient = httpClient,
+                service = app.koin.get(parameters = { parametersOf(httpClient, config) }),
+            )
+        } catch (failure: Throwable) {
+            app.close()
+            throw failure
         }
     }
+}
 
-    fun resetForTests() {
-        synchronized(lock) {
-            runCatching { stopKoin() }
-            loadedModuleIds.clear()
-        }
+internal data class DaemonClientDependencies(
+    val httpClient: HttpClient,
+    val service: DaemonProcessApi,
+) {
+    fun close() {
+        httpClient.close()
     }
 }

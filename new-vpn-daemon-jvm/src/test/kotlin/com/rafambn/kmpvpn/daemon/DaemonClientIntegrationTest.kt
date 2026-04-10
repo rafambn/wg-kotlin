@@ -1,15 +1,23 @@
 package com.rafambn.kmpvpn.daemon
 
-import com.rafambn.kmpvpn.daemon.client.DaemonClientConfig
 import com.rafambn.kmpvpn.daemon.client.DaemonProcessClient
 import com.rafambn.kmpvpn.daemon.command.ProcessInvocationModel
 import com.rafambn.kmpvpn.daemon.command.ProcessLauncher
 import com.rafambn.kmpvpn.daemon.command.ProcessOutputModel
 import com.rafambn.kmpvpn.daemon.planner.LinuxOperationPlanner
+import com.rafambn.kmpvpn.daemon.protocol.DaemonProcessApi
 import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_HOST
+import com.rafambn.kmpvpn.daemon.protocol.daemonRpcUrl
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.websocket.WebSockets
 import java.net.ServerSocket
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.rpc.krpc.ktor.client.installKrpc
+import kotlinx.rpc.krpc.ktor.client.rpc
+import kotlinx.rpc.krpc.serialization.json.json
+import kotlinx.rpc.withService
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -33,7 +41,20 @@ class DaemonClientIntegrationTest {
         engine.start(wait = false)
         delay(200)
 
-        val client = DaemonProcessClient.create(config = DaemonClientConfig(port = port))
+        val httpClient = HttpClient(CIO) {
+            install(WebSockets)
+            installKrpc {
+                serialization {
+                    json()
+                }
+            }
+        }
+        val rpcClient = httpClient.rpc(daemonRpcUrl(host = DEFAULT_DAEMON_HOST, port = port))
+        val client = DaemonProcessClient(
+            timeout = java.time.Duration.ofSeconds(15),
+            service = rpcClient.withService<DaemonProcessApi>(),
+            resourceCloser = { httpClient.close() },
+        )
         try {
             val hello = client.handshake()
             assertTrue(hello.isSuccess)

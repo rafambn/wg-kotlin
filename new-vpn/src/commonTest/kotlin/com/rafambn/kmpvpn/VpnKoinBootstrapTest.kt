@@ -5,10 +5,10 @@ import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.session.InMemoryTunnelManager
 import com.rafambn.kmpvpn.session.TunnelManager
 import com.rafambn.kmpvpn.session.io.TunPort
-import org.koin.core.context.GlobalContext
 import org.koin.dsl.module
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotSame
 import kotlin.test.assertTrue
 
 class VpnKoinBootstrapTest {
@@ -17,8 +17,7 @@ class VpnKoinBootstrapTest {
     private val publicKey = "V6w5nNq2WEYLRh3SeDsICoZ6irMIXja+6JGZveHFk/Q="
 
     @Test
-    fun globalBootstrapSupportsOverridesAndIdempotentCreation() {
-        VpnKoinBootstrap.resetForTests()
+    fun createBuildsIndependentVpnGraphsAndSupportsOverrides() {
         var sessionProviderCalls = 0
         var interfaceProviderCalls = 0
 
@@ -33,32 +32,33 @@ class VpnKoinBootstrapTest {
             }
         }
 
-        try {
-            VpnKoinBootstrap.ensureKoinStarted(overrideModules = listOf(overrideModule))
-            val koin = GlobalContext.get()
-            val tunnelManagerOne = koin.get<TunnelManager>()
-            val interfaceManagerOne = koin.get<InterfaceManager>()
-            val tunnelManagerTwo = koin.get<TunnelManager>()
-            val interfaceManagerTwo = koin.get<InterfaceManager>()
+        val firstConfig = configuration(interfaceName = "wg-koin-1")
+        val firstDependencies = VpnKoinBootstrap.resolveDependencies(
+            configuration = firstConfig,
+            overrideModules = listOf(overrideModule),
+        )
+        val first = Vpn(
+            vpnConfiguration = firstConfig,
+            tunnelManager = firstDependencies.tunnelManager,
+            interfaceManager = firstDependencies.interfaceManager,
+        )
 
-            val first = Vpn(
-                vpnConfiguration = configuration(interfaceName = "wg-koin-1"),
-                tunnelManager = tunnelManagerOne,
-                interfaceManager = interfaceManagerOne,
-            )
-            val second = Vpn(
-                vpnConfiguration = configuration(interfaceName = "wg-koin-2"),
-                tunnelManager = tunnelManagerTwo,
-                interfaceManager = interfaceManagerTwo,
-            )
+        val secondConfig = configuration(interfaceName = "wg-koin-2")
+        val secondDependencies = VpnKoinBootstrap.resolveDependencies(
+            configuration = secondConfig,
+            overrideModules = listOf(overrideModule),
+        )
+        val second = Vpn(
+            vpnConfiguration = secondConfig,
+            tunnelManager = secondDependencies.tunnelManager,
+            interfaceManager = secondDependencies.interfaceManager,
+        )
 
-            assertTrue(first.exists())
-            assertTrue(second.exists())
-            assertEquals(2, sessionProviderCalls)
-            assertEquals(2, interfaceProviderCalls)
-        } finally {
-            VpnKoinBootstrap.resetForTests()
-        }
+        assertTrue(first.exists())
+        assertTrue(second.exists())
+        assertNotSame(first, second)
+        assertEquals(2, sessionProviderCalls)
+        assertEquals(2, interfaceProviderCalls)
     }
 
     private fun configuration(interfaceName: String): VpnConfiguration {

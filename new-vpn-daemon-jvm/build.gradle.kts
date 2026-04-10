@@ -27,6 +27,10 @@ dependencies {
     testImplementation(kotlin("test-junit5"))
     testImplementation(libs.mockk)
     testImplementation(project(":new-vpn-daemon-client-jvm"))
+    testImplementation(libs.kotlinx.rpc.krpc.client)
+    testImplementation(libs.kotlinx.rpc.krpc.ktor.client)
+    testImplementation(libs.ktor.client.cio)
+    testImplementation(libs.ktor.client.websockets)
 }
 
 tasks.test {

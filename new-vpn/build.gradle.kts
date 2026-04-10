@@ -71,6 +71,11 @@ kotlin {
         jvmMain.dependencies {
             implementation(project(":new-vpn-daemon-protocol"))
             implementation(project(":new-vpn-daemon-client-jvm"))
+            implementation(libs.kotlinx.rpc.krpc.client)
+            implementation(libs.kotlinx.rpc.krpc.serialization.json)
+            implementation(libs.kotlinx.rpc.krpc.ktor.client)
+            implementation(libs.ktor.client.cio)
+            implementation(libs.ktor.client.websockets)
         }
 
         jvmTest.dependencies {

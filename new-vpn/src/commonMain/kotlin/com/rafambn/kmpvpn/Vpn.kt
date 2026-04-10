@@ -2,7 +2,6 @@ package com.rafambn.kmpvpn
 
 import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnInterfaceInformation
-import com.rafambn.kmpvpn.session.SessionManager
 import org.koin.core.context.GlobalContext
 import org.koin.core.module.Module
 import com.rafambn.kmpvpn.session.InMemoryTunnelManager
@@ -335,8 +334,8 @@ class Vpn internal constructor(
 
             return Vpn(
                 vpnConfiguration = vpnConfiguration,
-                sessionManager = sessionManagerProvider.create(engine),
-                vpnInterface = vpnInterfaceProvider.create(vpnConfiguration),
+                tunnelManager = sessionManagerProvider.create(engine),
+                interfaceManager = vpnInterfaceProvider.create(vpnConfiguration),
             )
         }
 

@@ -6,7 +6,6 @@ import kotlin.test.assertFailsWith
 class VpnContractInvariantsTest {
 
     private val privateKey = "oA8gY5Yg7R6pujISiFDUFxIr05o2IaNbS1Ry6j3TzXs="
-    private val publicKey = "V6w5nNq2WEYLRh3SeDsICoZ6irMIXja+6JGZveHFk/Q="
     private val peerKey = "6fX3drXr/7L0KleChX2NDSSSXWMQZnIcXtNCmieYw0I="
 
     @Test
@@ -16,7 +15,6 @@ class VpnContractInvariantsTest {
                 configuration = DefaultVpnConfiguration(
                     interfaceName = " ",
                     privateKey = privateKey,
-                    publicKey = publicKey,
                 ),
             )
         }
@@ -34,7 +32,6 @@ class VpnContractInvariantsTest {
                 configuration = DefaultVpnConfiguration(
                     interfaceName = "wg0",
                     privateKey = privateKey,
-                    publicKey = publicKey,
                     peers = duplicatedPeers,
                 ),
             )
@@ -47,7 +44,6 @@ class VpnContractInvariantsTest {
             configuration = DefaultVpnConfiguration(
                 interfaceName = "wg0",
                 privateKey = privateKey,
-                publicKey = publicKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
             ),
         )
@@ -59,7 +55,6 @@ class VpnContractInvariantsTest {
                 DefaultVpnConfiguration(
                     interfaceName = "wg0",
                     privateKey = privateKey,
-                    publicKey = publicKey,
                     peers = listOf(
                         VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820),
                         VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.2", endpointPort = 51821),
@@ -75,7 +70,6 @@ class VpnContractInvariantsTest {
             configuration = DefaultVpnConfiguration(
                 interfaceName = "wg0",
                 privateKey = privateKey,
-                publicKey = publicKey,
             ),
         )
 
@@ -86,7 +80,6 @@ class VpnContractInvariantsTest {
                 DefaultVpnConfiguration(
                     interfaceName = "wg1",
                     privateKey = privateKey,
-                    publicKey = publicKey,
                 ),
             )
         }

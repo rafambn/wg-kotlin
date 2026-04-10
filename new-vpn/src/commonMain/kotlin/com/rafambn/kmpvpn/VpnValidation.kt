@@ -47,5 +47,5 @@ internal fun requireUniquePeerPublicKeys(peers: List<VpnPeer>) {
 
 internal fun requireValidConfiguration(config: VpnConfiguration) {
     requireNonBlankInterfaceName(config.interfaceName)
-    requireUniquePeerPublicKeys(config.adapter.peers)
+    requireUniquePeerPublicKeys(config.peers)
 }

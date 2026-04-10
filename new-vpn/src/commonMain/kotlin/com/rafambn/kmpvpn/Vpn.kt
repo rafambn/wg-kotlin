@@ -84,7 +84,7 @@ class Vpn internal constructor(
         }
 
         try {
-            tunnelManager.reconcileSessions(interfaceManager.configuration().adapter)
+            tunnelManager.reconcileSessions(interfaceManager.configuration())
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Session operation `reconcileSessions` failed: ${throwable.message ?: "unknown"}",
@@ -130,7 +130,7 @@ class Vpn internal constructor(
         }
 
         try {
-            tunnelManager.reconcileSessions(currentConfiguration.adapter)
+            tunnelManager.reconcileSessions(currentConfiguration)
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Session operation `reconcileSessions` failed: ${throwable.message ?: "unknown"}",
@@ -303,7 +303,7 @@ class Vpn internal constructor(
         }
 
         try {
-            tunnelManager.reconcileSessions(interfaceManager.configuration().adapter)
+            tunnelManager.reconcileSessions(interfaceManager.configuration())
         } catch (throwable: Throwable) {
             throw IllegalStateException(
                 "Session operation `reconcileSessions` failed: ${throwable.message ?: "unknown"}",

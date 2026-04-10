@@ -13,6 +13,10 @@ interface VpnConfiguration {
 
     val addresses: MutableList<String>
 
-    val adapter: VpnAdapterConfiguration
+    val listenPort: Int?
+
+    val privateKey: String
+
+    val peers: List<VpnPeer>
 
 }

@@ -15,7 +15,6 @@ import kotlin.test.assertTrue
 
 class VpnUserspaceRuntimeIntegrationTest {
     private val privateKey = "oA8gY5Yg7R6pujISiFDUFxIr05o2IaNbS1Ry6j3TzXs="
-    private val publicKey = "V6w5nNq2WEYLRh3SeDsICoZ6irMIXja+6JGZveHFk/Q="
     private val peerKey = "6fX3drXr/7L0KleChX2NDSSSXWMQZnIcXtNCmieYw0I="
 
     @Test
@@ -130,7 +129,6 @@ class VpnUserspaceRuntimeIntegrationTest {
             interfaceName = interfaceName,
             listenPort = listenPort,
             privateKey = privateKey,
-            publicKey = publicKey,
             peers = listOf(
                 VpnPeer(
                     publicKey = peerKey,
@@ -236,7 +234,7 @@ class VpnUserspaceRuntimeIntegrationTest {
                 addresses = configuration.addresses.toList(),
                 dnsDomainPool = configuration.dnsDomainPool,
                 mtu = configuration.mtu,
-                peerStats = configuration.adapter.peers.map { peer ->
+                peerStats = configuration.peers.map { peer ->
                     VpnPeerStats(
                         publicKey = peer.publicKey,
                         receivedBytes = 0L,

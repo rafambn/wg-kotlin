@@ -14,7 +14,6 @@ import kotlin.test.assertTrue
 class VpnKoinBootstrapTest {
 
     private val privateKey = "oA8gY5Yg7R6pujISiFDUFxIr05o2IaNbS1Ry6j3TzXs="
-    private val publicKey = "V6w5nNq2WEYLRh3SeDsICoZ6irMIXja+6JGZveHFk/Q="
 
     @Test
     fun createBuildsIndependentVpnGraphsAndSupportsOverrides() {
@@ -65,7 +64,6 @@ class VpnKoinBootstrapTest {
         return DefaultVpnConfiguration(
             interfaceName = interfaceName,
             privateKey = privateKey,
-            publicKey = publicKey,
         )
     }
 

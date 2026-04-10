@@ -53,7 +53,7 @@ class InMemoryTunnelManagerDataPlaneTest {
         )
         val udpPort = InMemoryUdpPort()
 
-        manager.reconcileSessions(configuration.adapter)
+        manager.reconcileSessions(configuration)
         manager.startRuntime(configuration, TunOnlyInterfaceManager(tunPort, configuration))
         manager.pollRuntimeOnce(udpPort) { false }
 
@@ -84,7 +84,7 @@ class InMemoryTunnelManagerDataPlaneTest {
         )
         val udpPort = InMemoryUdpPort()
 
-        manager.reconcileSessions(configuration.adapter)
+        manager.reconcileSessions(configuration)
         manager.startRuntime(configuration, TunOnlyInterfaceManager(tunPort, configuration))
         manager.pollRuntimeOnce(udpPort) { false }
 
@@ -131,7 +131,7 @@ class InMemoryTunnelManagerDataPlaneTest {
             ),
         )
 
-        manager.reconcileSessions(configuration.adapter)
+        manager.reconcileSessions(configuration)
         manager.startRuntime(configuration, TunOnlyInterfaceManager(tunPort, configuration))
         manager.pollRuntimeOnce(udpPort) { false }
 
@@ -171,7 +171,7 @@ class InMemoryTunnelManagerDataPlaneTest {
         )
         val udpPort = InMemoryUdpPort()
 
-        manager.reconcileSessions(configuration.adapter)
+        manager.reconcileSessions(configuration)
         manager.startRuntime(configuration, TunOnlyInterfaceManager(InMemoryTunPort(), configuration))
         manager.pollRuntimeOnce(
             udpPort = udpPort,
@@ -200,7 +200,6 @@ class InMemoryTunnelManagerDataPlaneTest {
             interfaceName = "wg-test",
             listenPort = listenPort,
             privateKey = "private-key",
-            publicKey = "public-key",
             peers = peers,
         )
     }
@@ -248,7 +247,7 @@ class InMemoryTunnelManagerDataPlaneTest {
         private val sessionsByKey: Map<String, QueueVpnSession>,
     ) : VpnSessionFactory {
         override fun create(
-            config: com.rafambn.kmpvpn.VpnAdapterConfiguration,
+            config: VpnConfiguration,
             peer: VpnPeer,
             sessionIndex: UInt,
         ): VpnSession {

@@ -1,8 +1,6 @@
 package com.rafambn.kmpvpn.iface
 
-import com.rafambn.kmpvpn.DefaultVpnAdapterConfiguration
 import com.rafambn.kmpvpn.DefaultVpnConfiguration
-import com.rafambn.kmpvpn.VpnAdapterConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.requireValidConfiguration
@@ -183,7 +181,7 @@ class JvmInterfaceManager(
                 },
                 mtu = observedInformation.mtu ?: configuration.mtu,
                 peerStats = observedInformation.peerStats.ifEmpty {
-                    defaultPeerStats(configuration.adapter)
+                    defaultPeerStats(configuration.peers)
                 },
             )
         }
@@ -194,7 +192,7 @@ class JvmInterfaceManager(
             addresses = configuration.addresses.toList(),
             dnsDomainPool = configuration.dnsDomainPool,
             mtu = configuration.mtu,
-            peerStats = defaultPeerStats(configuration.adapter),
+            peerStats = defaultPeerStats(configuration.peers),
         )
     }
 
@@ -225,7 +223,7 @@ class JvmInterfaceManager(
     }
 
     private fun routesFrom(config: VpnConfiguration): List<String> {
-        return config.adapter.peers
+        return config.peers
             .flatMap { peer -> peer.allowedIps }
             .filter { route -> route.isNotBlank() }
             .distinct()
@@ -239,8 +237,8 @@ class JvmInterfaceManager(
         return interfaceName
     }
 
-    private fun defaultPeerStats(adapter: VpnAdapterConfiguration): List<VpnPeerStats> {
-        return adapter.peers.map { peer ->
+    private fun defaultPeerStats(peers: List<VpnPeer>): List<VpnPeerStats> {
+        return peers.map { peer ->
             VpnPeerStats(
                 publicKey = peer.publicKey,
                 receivedBytes = 0L,
@@ -255,13 +253,8 @@ class JvmInterfaceManager(
             first.dnsDomainPool == second.dnsDomainPool &&
             first.mtu == second.mtu &&
             first.addresses.toList() == second.addresses.toList() &&
-            adapterEquivalent(first.adapter, second.adapter)
-    }
-
-    private fun adapterEquivalent(first: VpnAdapterConfiguration, second: VpnAdapterConfiguration): Boolean {
-        return first.listenPort == second.listenPort &&
+            first.listenPort == second.listenPort &&
             first.privateKey == second.privateKey &&
-            first.publicKey == second.publicKey &&
             first.peers == second.peers
     }
 
@@ -271,21 +264,18 @@ class JvmInterfaceManager(
             dnsDomainPool = config.dnsDomainPool.first.toList() to config.dnsDomainPool.second.toList(),
             mtu = config.mtu,
             addresses = config.addresses.toMutableList(),
-            adapter = DefaultVpnAdapterConfiguration(
-                listenPort = config.adapter.listenPort,
-                privateKey = config.adapter.privateKey,
-                publicKey = config.adapter.publicKey,
-                peers = config.adapter.peers.map { peer ->
-                    VpnPeer(
-                        endpointPort = peer.endpointPort,
-                        endpointAddress = peer.endpointAddress,
-                        publicKey = peer.publicKey,
-                        allowedIps = peer.allowedIps.toList(),
-                        persistentKeepalive = peer.persistentKeepalive,
-                        presharedKey = peer.presharedKey,
-                    )
-                },
-            ),
+            listenPort = config.listenPort,
+            privateKey = config.privateKey,
+            peers = config.peers.map { peer ->
+                VpnPeer(
+                    endpointPort = peer.endpointPort,
+                    endpointAddress = peer.endpointAddress,
+                    publicKey = peer.publicKey,
+                    allowedIps = peer.allowedIps.toList(),
+                    persistentKeepalive = peer.persistentKeepalive,
+                    presharedKey = peer.presharedKey,
+                )
+            },
         )
     }
 

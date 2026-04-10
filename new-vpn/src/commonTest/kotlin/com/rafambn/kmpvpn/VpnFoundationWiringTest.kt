@@ -17,7 +17,6 @@ class VpnFoundationWiringTest {
             configuration = DefaultVpnConfiguration(
                 interfaceName = "wg0",
                 privateKey = privateKey,
-                publicKey = publicKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820))
             )
         )
@@ -43,7 +42,6 @@ class VpnFoundationWiringTest {
             configuration = DefaultVpnConfiguration(
                 interfaceName = "wg1",
                 privateKey = privateKey,
-                publicKey = publicKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820))
             )
         )
@@ -61,7 +59,6 @@ class VpnFoundationWiringTest {
                 interfaceName = "wg2",
                 dnsDomainPool = (listOf("corp.local") to listOf("1.1.1.1")),
                 privateKey = privateKey,
-                publicKey = publicKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
             ),
         )
@@ -74,7 +71,6 @@ class VpnFoundationWiringTest {
                 dnsDomainPool = (listOf("corp.local") to listOf("9.9.9.9")),
                 addresses = mutableListOf("10.20.30.2/32"),
                 privateKey = privateKey,
-                publicKey = publicKey,
                 peers = listOf(VpnPeer(publicKey = publicKey, endpointAddress = "198.51.100.2", endpointPort = 51821)),
             ),
         )
@@ -83,6 +79,6 @@ class VpnFoundationWiringTest {
 
         assertEquals(listOf("corp.local") to listOf("9.9.9.9"), current.dnsDomainPool)
         assertEquals(listOf("10.20.30.2/32"), current.addresses)
-        assertEquals(listOf(publicKey), current.adapter.peers.map { peer -> peer.publicKey })
+        assertEquals(listOf(publicKey), current.peers.map { peer -> peer.publicKey })
     }
 }

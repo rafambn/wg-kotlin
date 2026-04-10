@@ -1,7 +1,6 @@
 package com.rafambn.kmpvpn.session
 
 import com.rafambn.kmpvpn.Engine
-import com.rafambn.kmpvpn.VpnAdapterConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.Vpn
@@ -34,7 +33,7 @@ internal class InMemoryTunnelManager(
     private var runtimeKey: RuntimeKey? = null
     private var runtimeTunPort: TunPort? = null
 
-    override fun reconcileSessions(config: VpnAdapterConfiguration) {
+    override fun reconcileSessions(config: VpnConfiguration) {
         requireUniquePeerPublicKeys(config.peers)
         requireUserspacePeerEndpoints(config.peers)
         requireDistinctAllowedIpOwnership(config.peers)
@@ -154,7 +153,7 @@ internal class InMemoryTunnelManager(
 
         val desiredKey = RuntimeKey(
             interfaceName = configuration.interfaceName,
-            listenPort = configuration.adapter.listenPort ?: Vpn.DEFAULT_PORT,
+            listenPort = configuration.listenPort ?: Vpn.DEFAULT_PORT,
         )
         val currentRuntime = runtimeHandle
         if (currentRuntime != null && runtimeKey == desiredKey && currentRuntime.isRunning()) {
@@ -225,7 +224,7 @@ internal class InMemoryTunnelManager(
     }
 
     private fun createManagedSession(
-        config: VpnAdapterConfiguration,
+        config: VpnConfiguration,
         peerPublicKey: String,
         desiredPeer: VpnPeer,
         desiredIndex: UInt,

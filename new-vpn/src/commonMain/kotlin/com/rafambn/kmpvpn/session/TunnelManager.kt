@@ -3,7 +3,6 @@ package com.rafambn.kmpvpn.session
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnPeerStats
-import com.rafambn.kmpvpn.VpnAdapterConfiguration
 
 /**
  * Contract for transport session ownership used by [com.rafambn.kmpvpn.Vpn].
@@ -13,7 +12,7 @@ interface TunnelManager {
     /**
      * Reconciles existing sessions with the desired configuration.
      */
-    fun reconcileSessions(config: VpnAdapterConfiguration)
+    fun reconcileSessions(config: VpnConfiguration)
 
     /**
      * Returns snapshots for all known sessions.

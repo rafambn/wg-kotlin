@@ -1,6 +1,7 @@
 package com.rafambn.kmpvpn.session
 
-import com.rafambn.kmpvpn.DefaultVpnAdapterConfiguration
+import com.rafambn.kmpvpn.DefaultVpnConfiguration
+import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.session.factory.VpnSessionFactory
 import kotlin.test.Test
@@ -120,10 +121,10 @@ class InMemoryTunnelManagerTest {
         assertEquals(2u, second["peer-b"])
     }
 
-    private fun configurationWithPeers(vararg peerKeys: String): DefaultVpnAdapterConfiguration {
-        return DefaultVpnAdapterConfiguration(
+    private fun configurationWithPeers(vararg peerKeys: String): DefaultVpnConfiguration {
+        return DefaultVpnConfiguration(
+            interfaceName = "wg-test",
             privateKey = "private-key",
-            publicKey = "public-key",
             peers = peerKeys.mapIndexed { index, key ->
                 VpnPeer(
                     publicKey = key,
@@ -134,10 +135,10 @@ class InMemoryTunnelManagerTest {
         )
     }
 
-    private fun configurationWithPeer(vararg peers: VpnPeer): DefaultVpnAdapterConfiguration {
-        return DefaultVpnAdapterConfiguration(
+    private fun configurationWithPeer(vararg peers: VpnPeer): DefaultVpnConfiguration {
+        return DefaultVpnConfiguration(
+            interfaceName = "wg-test",
             privateKey = "private-key",
-            publicKey = "public-key",
             peers = peers.toList(),
         )
     }
@@ -148,7 +149,7 @@ class InMemoryTunnelManagerTest {
         val createdSessions: MutableList<TestVpnSession> = mutableListOf()
 
         override fun create(
-            config: com.rafambn.kmpvpn.VpnAdapterConfiguration,
+            config: VpnConfiguration,
             peer: VpnPeer,
             sessionIndex: UInt,
         ): VpnSession {

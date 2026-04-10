@@ -77,7 +77,7 @@ class JvmInterfaceManagerTest {
         val current = interfaceManager.configuration()
         assertEquals(baseConfiguration.dnsDomainPool, current.dnsDomainPool)
         assertEquals(baseConfiguration.addresses, current.addresses)
-        assertEquals(baseConfiguration.adapter.peers, current.adapter.peers)
+        assertEquals(baseConfiguration.peers, current.peers)
 
         val info = interfaceManager.readInformation()
         assertEquals(baseConfiguration.dnsDomainPool, info.dnsDomainPool)
@@ -135,7 +135,6 @@ class JvmInterfaceManagerTest {
             dnsDomainPool = dnsDomainPool,
             addresses = addresses.toMutableList(),
             privateKey = LOCAL_PRIVATE_KEY,
-            publicKey = LOCAL_PUBLIC_KEY,
             peers = peers,
         )
     }
@@ -157,6 +156,5 @@ class JvmInterfaceManagerTest {
 
     private companion object {
         const val LOCAL_PRIVATE_KEY = "oA8gY5Yg7R6pujISiFDUFxIr05o2IaNbS1Ry6j3TzXs="
-        const val LOCAL_PUBLIC_KEY = "V6w5nNq2WEYLRh3SeDsICoZ6irMIXja+6JGZveHFk/Q="
     }
 }

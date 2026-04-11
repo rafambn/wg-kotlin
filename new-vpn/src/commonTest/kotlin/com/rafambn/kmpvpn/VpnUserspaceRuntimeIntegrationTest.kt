@@ -234,9 +234,13 @@ class VpnUserspaceRuntimeIntegrationTest {
                 addresses = configuration.addresses.toList(),
                 dnsDomainPool = configuration.dnsDomainPool,
                 mtu = configuration.mtu,
+                listenPort = configuration.listenPort,
                 peerStats = configuration.peers.map { peer ->
                     VpnPeerStats(
                         publicKey = peer.publicKey,
+                        endpointAddress = peer.endpointAddress,
+                        endpointPort = peer.endpointPort,
+                        allowedIps = peer.allowedIps.toList(),
                         receivedBytes = 0L,
                         transmittedBytes = 0L,
                         lastHandshakeEpochSeconds = null,

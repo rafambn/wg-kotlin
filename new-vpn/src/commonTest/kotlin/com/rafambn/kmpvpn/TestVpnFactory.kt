@@ -63,6 +63,7 @@ internal class TestInterfaceManager(
             addresses = currentConfiguration.addresses,
             dnsDomainPool = currentConfiguration.dnsDomainPool,
             mtu = currentConfiguration.mtu,
+            listenPort = currentConfiguration.listenPort,
         )
     }
 }

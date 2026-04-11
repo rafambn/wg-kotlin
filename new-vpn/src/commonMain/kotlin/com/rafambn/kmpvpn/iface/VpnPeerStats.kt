@@ -8,4 +8,7 @@ data class VpnPeerStats(
     val receivedBytes: Long,
     val transmittedBytes: Long,
     val lastHandshakeEpochSeconds: Long?,
+    val endpointAddress: String? = null,
+    val endpointPort: Int? = null,
+    val allowedIps: List<String> = emptyList(),
 )

@@ -53,6 +53,7 @@ class InMemoryInterfaceCommandExecutor : InterfaceCommandExecutor {
             addresses = state.addresses.toList(),
             dnsDomainPool = state.dnsDomainPool.first.toList() to state.dnsDomainPool.second.toList(),
             mtu = state.mtu,
+            listenPort = null,
             peerStats = state.peerStats.toList(),
         )
     }

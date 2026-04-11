@@ -25,6 +25,7 @@ internal object DaemonInterfaceInformationParser {
             addresses = inferAddresses(dump),
             dnsDomainPool = (emptyList<String>() to emptyList()),
             mtu = mtuRegex.find(dump)?.groupValues?.getOrNull(1)?.toIntOrNull(),
+            listenPort = null,
         )
     }
 

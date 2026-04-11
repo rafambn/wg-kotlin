@@ -100,11 +100,6 @@ class Vpn internal constructor(
         } else {
             create()
         }
-        if (isRunning()) {
-            throw IllegalStateException(
-                "`${vpnConfiguration.interfaceName}` already exists and is up"
-            )
-        }
 
         val currentConfiguration = try {
             managedInterface.configuration()
@@ -165,11 +160,6 @@ class Vpn internal constructor(
      * Stops the interface. This operation is idempotent.
      */
     fun stop() {
-        if (!exists()) {
-            tunnelManager.closeAll()
-            return
-        }
-
         try {
             tunnelManager.closeAll()
         } catch (throwable: Throwable) {
@@ -193,42 +183,13 @@ class Vpn internal constructor(
      * Deletes the interface. This operation is idempotent.
      */
     fun delete() {
-        if (!exists()) {
+        try {
             tunnelManager.closeAll()
-            return
-        }
-
-        var sessionsClosed = false
-        if (interfaceManager.isUp()) {
-            try {
-                tunnelManager.closeAll()
-            } catch (throwable: Throwable) {
-                throw IllegalStateException(
-                    "Session operation `closeAll` failed: ${throwable.message ?: "unknown"}",
-                    throwable,
-                )
-            }
-            sessionsClosed = true
-
-            try {
-                interfaceManager.down()
-            } catch (throwable: Throwable) {
-                throw IllegalStateException(
-                    "Interface operation `down` failed: ${throwable.message ?: "unknown"}",
-                    throwable,
-                )
-            }
-        }
-
-        if (!sessionsClosed) {
-            try {
-                tunnelManager.closeAll()
-            } catch (throwable: Throwable) {
-                throw IllegalStateException(
-                    "Session operation `closeAll` failed: ${throwable.message ?: "unknown"}",
-                    throwable,
-                )
-            }
+        } catch (throwable: Throwable) {
+            throw IllegalStateException(
+                "Session operation `closeAll` failed: ${throwable.message ?: "unknown"}",
+                throwable,
+            )
         }
 
         try {

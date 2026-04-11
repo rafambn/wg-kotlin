@@ -9,5 +9,6 @@ data class VpnInterfaceInformation(
     val addresses: List<String>,
     val dnsDomainPool: Pair<List<String>, List<String>>,
     val mtu: Int?,
+    val listenPort: Int? = null,
     val peerStats: List<VpnPeerStats> = emptyList(),
 )

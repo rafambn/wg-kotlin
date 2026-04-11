@@ -180,6 +180,7 @@ class JvmInterfaceManager(
                     observedInformation.dnsDomainPool
                 },
                 mtu = observedInformation.mtu ?: configuration.mtu,
+                listenPort = observedInformation.listenPort ?: configuration.listenPort,
                 peerStats = observedInformation.peerStats.ifEmpty {
                     defaultPeerStats(configuration.peers)
                 },
@@ -192,6 +193,7 @@ class JvmInterfaceManager(
             addresses = configuration.addresses.toList(),
             dnsDomainPool = configuration.dnsDomainPool,
             mtu = configuration.mtu,
+            listenPort = configuration.listenPort,
             peerStats = defaultPeerStats(configuration.peers),
         )
     }
@@ -241,6 +243,9 @@ class JvmInterfaceManager(
         return peers.map { peer ->
             VpnPeerStats(
                 publicKey = peer.publicKey,
+                endpointAddress = peer.endpointAddress,
+                endpointPort = peer.endpointPort,
+                allowedIps = peer.allowedIps.toList(),
                 receivedBytes = 0L,
                 transmittedBytes = 0L,
                 lastHandshakeEpochSeconds = null,

@@ -134,6 +134,7 @@ class VpnStateTransitionTest {
                 addresses = emptyList(),
                 dnsDomainPool = (emptyList<String>() to emptyList()),
                 mtu = null,
+                listenPort = null,
             )
         }
     }
@@ -179,6 +180,7 @@ class VpnStateTransitionTest {
                 addresses = currentConfiguration.addresses,
                 dnsDomainPool = currentConfiguration.dnsDomainPool,
                 mtu = currentConfiguration.mtu,
+                listenPort = currentConfiguration.listenPort,
             )
         }
     }

@@ -190,6 +190,9 @@ internal class InMemoryTunnelManager(
                 val stats = peerStatsByPublicKey[managed.peer.publicKey] ?: MutablePeerStats()
                 VpnPeerStats(
                     publicKey = managed.peer.publicKey,
+                    endpointAddress = managed.peer.endpointAddress,
+                    endpointPort = managed.peer.endpointPort,
+                    allowedIps = managed.peer.allowedIps.toList(),
                     receivedBytes = stats.receivedBytes,
                     transmittedBytes = stats.transmittedBytes,
                     lastHandshakeEpochSeconds = null,

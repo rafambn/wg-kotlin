@@ -5,47 +5,37 @@ package com.rafambn.kmpvpn.iface
  */
 class InMemoryInterfaceCommandExecutor : InterfaceCommandExecutor {
     private val interfaces: LinkedHashMap<String, InterfaceState> = linkedMapOf()
-    private val observedInterfaces: MutableSet<String> = linkedSetOf()
-
-    val callLog: MutableList<String> = mutableListOf()
 
     override fun interfaceExists(interfaceName: String): Boolean {
-        callLog += "interfaceExists:$interfaceName"
-        return observedInterfaces.contains(interfaceName)
+        return interfaces.contains(interfaceName)
     }
 
     override fun setInterfaceUp(interfaceName: String, up: Boolean) {
-        callLog += "setInterfaceUp:$interfaceName:$up"
         val state = stateFor(interfaceName)
         state.isUp = up
     }
 
     override fun applyMtu(interfaceName: String, mtu: Int) {
-        callLog += "applyMtu:$interfaceName:$mtu"
         val state = stateFor(interfaceName)
         state.mtu = mtu
     }
 
     override fun applyAddresses(interfaceName: String, addresses: List<String>) {
-        callLog += "applyAddresses:$interfaceName:${addresses.joinToString(",")}"
         val state = stateFor(interfaceName)
         state.addresses = addresses.toList()
     }
 
     override fun applyRoutes(interfaceName: String, routes: List<String>) {
-        callLog += "applyRoutes:$interfaceName:${routes.joinToString(",")}"
         val state = stateFor(interfaceName)
         state.routes = routes.toList()
     }
 
     override fun applyDns(interfaceName: String, dnsDomainPool: Pair<List<String>, List<String>>) {
-        callLog += "applyDns:$interfaceName:domains=${dnsDomainPool.first.joinToString(",")};dns=${dnsDomainPool.second.joinToString(",")}"
         val state = stateFor(interfaceName)
         state.dnsDomainPool = dnsDomainPool.first.toList() to dnsDomainPool.second.toList()
     }
 
     override fun readInformation(interfaceName: String): VpnInterfaceInformation? {
-        callLog += "readInformation:$interfaceName"
         val state = interfaces[interfaceName] ?: return null
         return VpnInterfaceInformation(
             interfaceName = interfaceName,
@@ -59,9 +49,7 @@ class InMemoryInterfaceCommandExecutor : InterfaceCommandExecutor {
     }
 
     override fun deleteInterface(interfaceName: String) {
-        callLog += "deleteInterface:$interfaceName"
         interfaces.remove(interfaceName)
-        observedInterfaces.remove(interfaceName)
     }
 
     fun setPeerStats(interfaceName: String, peerStats: List<VpnPeerStats>) {
@@ -70,7 +58,6 @@ class InMemoryInterfaceCommandExecutor : InterfaceCommandExecutor {
     }
 
     private fun stateFor(interfaceName: String): InterfaceState {
-        observedInterfaces += interfaceName
         return interfaces.getOrPut(interfaceName) { InterfaceState() }
     }
 

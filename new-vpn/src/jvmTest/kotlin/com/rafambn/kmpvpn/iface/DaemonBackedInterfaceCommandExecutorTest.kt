@@ -85,10 +85,9 @@ class DaemonBackedInterfaceCommandExecutorTest {
                     return success(
                         ReadInterfaceInformationResponse(
                             interfaceName = interfaceName,
-                            dump = """
-                                7: $interfaceName: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1420 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 500
-                                    inet 10.20.30.40/32 scope global $interfaceName
-                            """.trimIndent(),
+                            isUp = true,
+                            addresses = listOf("10.20.30.40/32"),
+                            mtu = 1420,
                         ),
                     )
                 }

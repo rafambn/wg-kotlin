@@ -102,8 +102,13 @@ class PlatformOperationPlannerTest {
         val mac = MacOsOperationPlanner()
         val windows = WindowsOperationPlanner()
 
-        assertEquals(CommandBinary.IP, linux.plan(ReadInterfaceInformation("wg0")).steps.single().invocation.binary)
-        assertEquals(CommandBinary.IFCONFIG, mac.plan(ReadInterfaceInformation("wg0")).steps.single().invocation.binary)
-        assertEquals(CommandBinary.NETSH, windows.plan(ReadInterfaceInformation("wg0")).steps.single().invocation.binary)
+        val linuxReadStep = linux.plan(ReadInterfaceInformation("wg0")).steps.single().invocation
+        val macReadStep = mac.plan(ReadInterfaceInformation("wg0")).steps.single().invocation
+        val windowsReadStep = windows.plan(ReadInterfaceInformation("wg0")).steps.single().invocation
+
+        assertEquals(CommandBinary.IP, linuxReadStep.binary)
+        assertEquals(listOf("-details", "address", "show", "dev", "wg0"), linuxReadStep.arguments)
+        assertEquals(CommandBinary.IFCONFIG, macReadStep.binary)
+        assertEquals(CommandBinary.NETSH, windowsReadStep.binary)
     }
 }

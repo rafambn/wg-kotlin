@@ -90,7 +90,7 @@ internal class LinuxOperationPlanner : PlatformOperationPlanner {
             is ReadInterfaceInformation -> operation.executionPlanOf(
                 executionStep(
                     binary = CommandBinary.IP,
-                    arguments = listOf("-details", "link", "show", "dev", operation.interfaceName),
+                    arguments = listOf("-details", "address", "show", "dev", operation.interfaceName),
                 ),
             )
 

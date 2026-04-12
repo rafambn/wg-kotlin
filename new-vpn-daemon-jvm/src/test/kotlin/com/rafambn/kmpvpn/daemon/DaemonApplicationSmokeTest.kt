@@ -13,6 +13,7 @@ import com.rafambn.kmpvpn.daemon.protocol.CommandResult
 import com.rafambn.kmpvpn.daemon.protocol.DaemonErrorKind
 import com.rafambn.kmpvpn.daemon.protocol.response.ApplyDnsResponse
 import com.rafambn.kmpvpn.daemon.protocol.response.PingResponse
+import com.rafambn.kmpvpn.daemon.protocol.response.ReadInterfaceInformationResponse
 import java.time.Duration
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -91,6 +92,36 @@ class DaemonProcessApiSmokeTest {
         val payload = (response as CommandResult.Success).data
         assertFalse(payload.exists)
         assertEquals("utun9", payload.interfaceName)
+    }
+
+    @Test
+    fun readInterfaceInformationParsesLinuxDumpIntoStructuredPayload() = runBlocking {
+        val launcher = RecordingLauncher(
+            outputs = ArrayDeque(
+                listOf(
+                    ProcessOutputModel(
+                        exitCode = 0,
+                        stdout = """
+                            7: utun0: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1420 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 500
+                                link/none
+                                inet 10.20.30.40/32 scope global utun0
+                        """.trimIndent(),
+                        stderr = "",
+                    ),
+                ),
+            ),
+        )
+
+        val response = daemonApi(
+            launcher = launcher,
+        ).readInterfaceInformation(interfaceName = "utun0")
+
+        val success = response as CommandResult.Success<ReadInterfaceInformationResponse>
+        assertEquals("utun0", success.data.interfaceName)
+        assertTrue(success.data.isUp)
+        assertEquals(1420, success.data.mtu)
+        assertEquals(listOf("10.20.30.40/32"), success.data.addresses)
+        assertEquals(listOf("-details", "address", "show", "dev", "utun0"), launcher.invocations.single().arguments)
     }
 
     @Test

@@ -90,9 +90,13 @@ class DaemonBackedInterfaceCommandExecutor(
         }.getOrNull() ?: return null
 
         return when (result) {
-            is CommandResult.Success -> DaemonInterfaceInformationParser.parse(
-                interfaceName = interfaceName,
-                dump = result.data.dump,
+            is CommandResult.Success -> VpnInterfaceInformation(
+                interfaceName = result.data.interfaceName,
+                isUp = result.data.isUp,
+                addresses = result.data.addresses,
+                dnsDomainPool = result.data.dnsDomainPool,
+                mtu = result.data.mtu,
+                listenPort = result.data.listenPort,
             )
 
             is CommandResult.Failure -> null

@@ -14,7 +14,8 @@ class JvmInterfaceManagerTest {
 
     @Test
     fun createAndDeleteRemainIdempotent() {
-        val executor = InMemoryInterfaceCommandExecutor()
+        val delegate = InMemoryInterfaceCommandExecutor()
+        val executor = CountingExecutor(delegate)
         val tunProvider = InMemoryTunProvider()
         val interfaceManager = JvmInterfaceManager(
             interfaceName = "utun150",
@@ -37,8 +38,8 @@ class JvmInterfaceManagerTest {
         interfaceManager.delete()
         interfaceManager.delete()
 
-        assertEquals(1, executor.callLog.count { call -> call == "setInterfaceUp:utun150:true" })
-        assertEquals(1, executor.callLog.count { call -> call == "setInterfaceUp:utun150:false" })
+        assertEquals(1, executor.setInterfaceUpCalls.count { call -> call == ("utun150" to true) })
+        assertEquals(1, executor.setInterfaceUpCalls.count { call -> call == ("utun150" to false) })
         assertEquals(1, tunProvider.callLog.count { call -> call == "openTun:utun150" })
         assertEquals(1, tunProvider.callLog.count { call -> call == "closeTun:utun150" })
         assertFalse(interfaceManager.exists())
@@ -84,9 +85,15 @@ class JvmInterfaceManagerTest {
         assertEquals(baseConfiguration.dnsDomainPool, info.dnsDomainPool)
         assertEquals(baseConfiguration.addresses, info.addresses)
 
-        val dnsOperations = delegate.callLog.filter { call -> call.startsWith("applyDns:utun151:") }
-        assertTrue(dnsOperations.any { call -> call.contains("domains=corp.local") && call.contains("dns=9.9.9.9") })
-        assertTrue(dnsOperations.last().contains("domains=corp.local") && dnsOperations.last().contains("dns=1.1.1.1"))
+        assertTrue(
+            executor.appliedDnsCalls.any { call ->
+                call == ("utun151" to (listOf("corp.local") to listOf("9.9.9.9")))
+            },
+        )
+        assertEquals(
+            "utun151" to (listOf("corp.local") to listOf("1.1.1.1")),
+            executor.appliedDnsCalls.last(),
+        )
     }
 
     @Test
@@ -144,14 +151,27 @@ class JvmInterfaceManagerTest {
         private val delegate: InMemoryInterfaceCommandExecutor,
     ) : InterfaceCommandExecutor by delegate {
         var failOnDns: Boolean = false
+        val appliedDnsCalls: MutableList<Pair<String, Pair<List<String>, List<String>>>> = mutableListOf()
 
         override fun applyDns(interfaceName: String, dnsDomainPool: Pair<List<String>, List<String>>) {
+            appliedDnsCalls += interfaceName to (dnsDomainPool.first.toList() to dnsDomainPool.second.toList())
             if (failOnDns) {
                 failOnDns = false
                 delegate.applyDns(interfaceName, dnsDomainPool)
                 throw IllegalStateException("forced dns failure")
             }
             delegate.applyDns(interfaceName, dnsDomainPool)
+        }
+    }
+
+    private class CountingExecutor(
+        private val delegate: InterfaceCommandExecutor,
+    ) : InterfaceCommandExecutor by delegate {
+        val setInterfaceUpCalls: MutableList<Pair<String, Boolean>> = mutableListOf()
+
+        override fun setInterfaceUp(interfaceName: String, up: Boolean) {
+            setInterfaceUpCalls += interfaceName to up
+            delegate.setInterfaceUp(interfaceName, up)
         }
     }
 

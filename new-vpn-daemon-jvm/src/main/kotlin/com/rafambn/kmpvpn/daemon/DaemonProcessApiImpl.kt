@@ -29,7 +29,7 @@ import com.rafambn.kmpvpn.daemon.protocol.response.ReadInterfaceInformationRespo
 import com.rafambn.kmpvpn.daemon.protocol.response.SetInterfaceStateResponse
 
 class DaemonProcessApiImpl internal constructor(
-    operationPlanner: PlatformOperationPlanner = PlatformOperationPlanner.fromOs(),
+    private val operationPlanner: PlatformOperationPlanner = PlatformOperationPlanner.fromOs(),
     processLauncher: ProcessLauncher = CommonsExecProcessLauncher(),
 ) : DaemonProcessApi {
     private val planExecutor = PlanExecutor(
@@ -198,12 +198,14 @@ class DaemonProcessApiImpl internal constructor(
             DaemonPayloadValidator.validateInterfaceName(interfaceName)
             val output = planExecutor.run(ReadInterfaceInformation(interfaceName = interfaceName)).lastOutput
                 ?: error("READ_INTERFACE_INFORMATION must produce an execution output.")
-            CommandResult.success(
-                ReadInterfaceInformationResponse(
-                    interfaceName = interfaceName,
-                    dump = output.stdout,
-                ),
+            val parsedInformation = DaemonInterfaceInformationParser.parse(
+                platformId = operationPlanner.platformId,
+                interfaceName = interfaceName,
+                dump = output.stdout,
+            ) ?: error(
+                "Unable to parse interface information for `${operationPlanner.platformId}` from daemon command output.",
             )
+            CommandResult.success(parsedInformation,)
         } catch (failure: Throwable) {
             toFailureResult(
                 commandType = "READ_INTERFACE_INFORMATION",

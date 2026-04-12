@@ -75,17 +75,25 @@ class DaemonProtocolSmokeTest {
     }
 
     @Test
-    fun readInterfaceInformationPayloadRoundTripPreservesDump() {
+    fun readInterfaceInformationPayloadRoundTripPreservesStructuredData() {
         val original = ReadInterfaceInformationResponse(
             interfaceName = "wg0",
-            dump = "wg0: flags=8051<UP,POINTOPOINT,RUNNING>",
+            isUp = true,
+            addresses = listOf("10.20.30.40/32"),
+            dnsDomainPool = (listOf("corp.local") to listOf("1.1.1.1")),
+            mtu = 1420,
+            listenPort = 51820,
         )
 
         val encoded = json.encodeToString(original)
         val decoded = json.decodeFromString<ReadInterfaceInformationResponse>(encoded)
 
         assertEquals("wg0", decoded.interfaceName)
-        assertEquals("wg0: flags=8051<UP,POINTOPOINT,RUNNING>", decoded.dump)
+        assertEquals(true, decoded.isUp)
+        assertEquals(listOf("10.20.30.40/32"), decoded.addresses)
+        assertEquals(listOf("corp.local") to listOf("1.1.1.1"), decoded.dnsDomainPool)
+        assertEquals(1420, decoded.mtu)
+        assertEquals(51820, decoded.listenPort)
     }
 
     @Test

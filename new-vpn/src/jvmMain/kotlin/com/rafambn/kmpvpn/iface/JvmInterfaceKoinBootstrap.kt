@@ -1,8 +1,11 @@
 package com.rafambn.kmpvpn.iface
 
 import com.rafambn.kmpvpn.VpnConfiguration
+import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_HOST
+import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_PORT
 import com.rafambn.kmpvpn.session.io.InMemoryTunProvider
 import com.rafambn.kmpvpn.session.io.TunProvider
+import java.time.Duration
 import org.koin.core.module.Module
 import org.koin.core.parameter.parametersOf
 import org.koin.dsl.koinApplication
@@ -10,11 +13,6 @@ import org.koin.dsl.module
 
 internal object JvmInterfaceKoinBootstrap {
     private val baseModule: Module = module {
-        factory<DaemonBackedInterfaceCommandExecutor> {
-            DaemonBackedInterfaceCommandExecutor(
-                clientFactory = ::createDaemonProcessClient,
-            )
-        }
 
         factory<InterfaceCommandExecutor> {
             when (
@@ -24,7 +22,14 @@ internal object JvmInterfaceKoinBootstrap {
                 ).lowercase()
             ) {
                 JvmInterfaceProperties.INTERFACE_MODE_IN_MEMORY -> InMemoryInterfaceCommandExecutor()
-                else -> get<DaemonBackedInterfaceCommandExecutor>()
+                else -> DaemonBackedInterfaceCommandExecutor(
+                    host = System.getProperty(JvmInterfaceProperties.DAEMON_HOST, DEFAULT_DAEMON_HOST),
+                    port = System.getProperty(JvmInterfaceProperties.DAEMON_PORT)?.toIntOrNull() ?: DEFAULT_DAEMON_PORT,
+                    timeout = Duration.ofMillis(
+                        System.getProperty(JvmInterfaceProperties.DAEMON_TIMEOUT_MILLIS)?.toLongOrNull() ?: 15_000L,
+                    ),
+                    clientFactory = ::createDaemonProcessClient,
+                )
             }
         }
 

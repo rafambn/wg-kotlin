@@ -2,8 +2,6 @@ package com.rafambn.kmpvpn.iface
 
 import com.rafambn.kmpvpn.daemon.client.DaemonProcessClient
 import com.rafambn.kmpvpn.daemon.protocol.CommandResult
-import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_HOST
-import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_PORT
 import com.rafambn.kmpvpn.daemon.protocol.DaemonProcessApi
 import com.rafambn.kmpvpn.daemon.protocol.daemonRpcUrl
 import io.ktor.client.HttpClient
@@ -17,11 +15,9 @@ import kotlinx.rpc.krpc.serialization.json.json
 import kotlinx.rpc.withService
 
 class DaemonBackedInterfaceCommandExecutor(
-    private val host: String = System.getProperty(JvmInterfaceProperties.DAEMON_HOST, DEFAULT_DAEMON_HOST),
-    private val port: Int = System.getProperty(JvmInterfaceProperties.DAEMON_PORT)?.toIntOrNull() ?: DEFAULT_DAEMON_PORT,
-    private val timeout: Duration = Duration.ofMillis(
-        System.getProperty(JvmInterfaceProperties.DAEMON_TIMEOUT_MILLIS)?.toLongOrNull() ?: 15_000L,
-    ),
+    private val host: String,
+    private val port: Int,
+    private val timeout: Duration,
     private val clientFactory: (String, Int, Duration) -> DaemonProcessClient = { resolvedHost, resolvedPort, resolvedTimeout ->
         createDaemonProcessClient(
             host = resolvedHost,

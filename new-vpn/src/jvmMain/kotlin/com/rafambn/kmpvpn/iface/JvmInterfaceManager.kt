@@ -17,13 +17,13 @@ class JvmInterfaceManager(
     private val commandExecutor: InterfaceCommandExecutor,
 ) : InterfaceManager {
     private var currentConfiguration: VpnConfiguration? = null
-    private var currentTunPort: OwnedTunPort? = null
     private var up: Boolean = false
 
     override fun exists(): Boolean {
         val observedExists = commandExecutor.interfaceExists(interfaceName)
         if (!observedExists) {
-            clearState(closeTunPort = true)
+            currentConfiguration = null
+            up = false
         }
         return observedExists
     }
@@ -34,19 +34,16 @@ class JvmInterfaceManager(
             "Cannot create interface `${config.interfaceName}` on a manager for `$interfaceName`"
         }
 
-        if (currentTunPort != null) {
-            if (currentConfiguration == null) currentConfiguration = snapshot(config)
+        if (currentConfiguration == null) {
+            currentConfiguration = snapshot(config)
             return
         }
 
-        val tunPort = InMemoryOwnedTunPort(interfaceName = interfaceName, onClose = {})
-
         try {
-            currentTunPort = tunPort
             applyConfiguration(config)
         } catch (throwable: Throwable) {
-            safeRun { tunPort.close() }
-            clearState(closeTunPort = false)
+            currentConfiguration = null
+            up = false
             throw IllegalStateException(
                 "Failed to create interface `$interfaceName`: ${throwable.message ?: "unknown"}",
                 throwable,
@@ -68,9 +65,6 @@ class JvmInterfaceManager(
     }
 
     override fun down() {
-        if (currentTunPort == null) {
-            return
-        }
         if (!up) {
             return
         }
@@ -80,22 +74,16 @@ class JvmInterfaceManager(
     }
 
     override fun delete() {
-        if (currentTunPort == null) {
-            return
-        }
-
         if (up) {
-            safeRun { commandExecutor.setInterfaceUp(interfaceName, false) }
+            commandExecutor.setInterfaceUp(interfaceName, false)
         }
 
         commandExecutor.deleteInterface(interfaceName)
-        clearState(closeTunPort = true)
+        currentConfiguration = null
+        up = false
     }
 
     override fun isUp(): Boolean {
-        if (currentTunPort == null) {
-            return false
-        }
         val observed = commandExecutor.readInformation(interfaceName)?.isUp
         if (observed != null) {
             up = observed
@@ -112,7 +100,7 @@ class JvmInterfaceManager(
     }
 
     override fun tunPort(): TunPort {
-        return currentTunPort ?: throw IllegalStateException("Cannot access tunPort before create()")
+        return throw IllegalStateException("Cannot access tunPort before create()")
     }
 
     override fun reconfigure(config: VpnConfiguration) {
@@ -132,16 +120,16 @@ class JvmInterfaceManager(
 
         val rollbackActions: MutableList<() -> Unit> = mutableListOf()
         try {
-            rollbackActions += { safeRun { applyMtu(previousConfiguration) } }
+            rollbackActions += { applyMtu(previousConfiguration) }
             applyMtu(config)
 
-            rollbackActions += { safeRun { applyAddresses(previousConfiguration) } }
+            rollbackActions += { applyAddresses(previousConfiguration) }
             applyAddresses(config)
 
-            rollbackActions += { safeRun { applyRoutes(previousConfiguration) } }
+            rollbackActions += { applyRoutes(previousConfiguration) }
             applyRoutes(config)
 
-            rollbackActions += { safeRun { applyDns(previousConfiguration) } }
+            rollbackActions += { applyDns(previousConfiguration) }
             applyDns(config)
         } catch (throwable: Throwable) {
             rollbackActions.asReversed().forEach { rollback -> rollback() }
@@ -228,9 +216,6 @@ class JvmInterfaceManager(
     }
 
     private fun requireCreatedInterface(): String {
-        if (currentTunPort == null) {
-            throw IllegalStateException("Interface `$interfaceName` was not created")
-        }
         return interfaceName
     }
 
@@ -250,12 +235,12 @@ class JvmInterfaceManager(
 
     private fun configurationsEquivalent(first: VpnConfiguration, second: VpnConfiguration): Boolean {
         return first.interfaceName == second.interfaceName &&
-            first.dnsDomainPool == second.dnsDomainPool &&
-            first.mtu == second.mtu &&
-            first.addresses.toList() == second.addresses.toList() &&
-            first.listenPort == second.listenPort &&
-            first.privateKey == second.privateKey &&
-            first.peers == second.peers
+                first.dnsDomainPool == second.dnsDomainPool &&
+                first.mtu == second.mtu &&
+                first.addresses.toList() == second.addresses.toList() &&
+                first.listenPort == second.listenPort &&
+                first.privateKey == second.privateKey &&
+                first.peers == second.peers
     }
 
     private fun snapshot(config: VpnConfiguration): VpnConfiguration {
@@ -277,22 +262,5 @@ class JvmInterfaceManager(
                 )
             },
         )
-    }
-
-    private fun safeRun(block: () -> Unit) {
-        try {
-            block()
-        } catch (_: Throwable) {
-            // best-effort cleanup
-        }
-    }
-
-    private fun clearState(closeTunPort: Boolean) {
-        if (closeTunPort) {
-            safeRun { currentTunPort?.close() }
-        }
-        currentTunPort = null
-        currentConfiguration = null
-        up = false
     }
 }

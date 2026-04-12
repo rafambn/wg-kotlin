@@ -15,7 +15,7 @@ class VpnFoundationWiringTest {
     fun inMemoryLifecycleStillWorks() {
         val vpn = testVpn(
             configuration = DefaultVpnConfiguration(
-                interfaceName = "wg0",
+                interfaceName = "utun120",
                 privateKey = privateKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820))
             )
@@ -40,7 +40,7 @@ class VpnFoundationWiringTest {
     fun createRemainsIdempotent() {
         val vpn = testVpn(
             configuration = DefaultVpnConfiguration(
-                interfaceName = "wg1",
+                interfaceName = "utun121",
                 privateKey = privateKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820))
             )
@@ -56,7 +56,7 @@ class VpnFoundationWiringTest {
     fun reconfigureAllowsFullConfigurationUpdate() {
         val vpn = testVpn(
             configuration = DefaultVpnConfiguration(
-                interfaceName = "wg2",
+                interfaceName = "utun122",
                 dnsDomainPool = (listOf("corp.local") to listOf("1.1.1.1")),
                 privateKey = privateKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
@@ -67,7 +67,7 @@ class VpnFoundationWiringTest {
 
         vpn.reconfigure(
             DefaultVpnConfiguration(
-                interfaceName = "wg2",
+                interfaceName = "utun122",
                 dnsDomainPool = (listOf("corp.local") to listOf("9.9.9.9")),
                 addresses = mutableListOf("10.20.30.2/32"),
                 privateKey = privateKey,

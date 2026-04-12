@@ -30,7 +30,7 @@ class VpnContractInvariantsTest {
         assertFailsWith<IllegalArgumentException> {
             testVpn(
                 configuration = DefaultVpnConfiguration(
-                    interfaceName = "wg0",
+                    interfaceName = "utun110",
                     privateKey = privateKey,
                     peers = duplicatedPeers,
                 ),
@@ -42,7 +42,7 @@ class VpnContractInvariantsTest {
     fun reconfigureRejectsDuplicatedPeerPublicKeys() {
         val vpn = testVpn(
             configuration = DefaultVpnConfiguration(
-                interfaceName = "wg0",
+                interfaceName = "utun111",
                 privateKey = privateKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
             ),
@@ -53,7 +53,7 @@ class VpnContractInvariantsTest {
         assertFailsWith<IllegalArgumentException> {
             vpn.reconfigure(
                 DefaultVpnConfiguration(
-                    interfaceName = "wg0",
+                    interfaceName = "utun111",
                     privateKey = privateKey,
                     peers = listOf(
                         VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820),
@@ -68,7 +68,7 @@ class VpnContractInvariantsTest {
     fun reconfigureRejectsInterfaceNameChange() {
         val vpn = testVpn(
             configuration = DefaultVpnConfiguration(
-                interfaceName = "wg0",
+                interfaceName = "utun112",
                 privateKey = privateKey,
             ),
         )
@@ -78,7 +78,7 @@ class VpnContractInvariantsTest {
         assertFailsWith<IllegalArgumentException> {
             vpn.reconfigure(
                 DefaultVpnConfiguration(
-                    interfaceName = "wg1",
+                    interfaceName = "utun113",
                     privateKey = privateKey,
                 ),
             )

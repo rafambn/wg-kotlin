@@ -23,7 +23,7 @@ class VpnUserspaceRuntimeIntegrationTest {
         val runtimeFactory = RecordingRuntimeFactory()
         val interfaceManager = RecordingInterfaceManager()
         val vpn = vpn(
-            configuration = configuration(interfaceName = "wg-runtime", listenPort = 51820),
+            configuration = configuration(interfaceName = "utun140", listenPort = 51820),
             interfaceManager = interfaceManager,
             runtimeFactory = runtimeFactory,
         )
@@ -53,7 +53,7 @@ class VpnUserspaceRuntimeIntegrationTest {
         val interfaceManager = RecordingInterfaceManager()
         val tunnelManager = InMemoryTunnelManager(userspaceRuntimeFactory = runtimeFactory::create)
         val vpn = Vpn(
-            vpnConfiguration = configuration(interfaceName = "wg-fail"),
+            vpnConfiguration = configuration(interfaceName = "utun141"),
             tunnelManager = tunnelManager,
             interfaceManager = interfaceManager,
         )
@@ -80,7 +80,7 @@ class VpnUserspaceRuntimeIntegrationTest {
         )
         val runtimeFactory = RecordingRuntimeFactory(stats = expectedStats)
         val vpn = vpn(
-            configuration = configuration(interfaceName = "wg-info"),
+            configuration = configuration(interfaceName = "utun142"),
             runtimeFactory = runtimeFactory,
         )
 
@@ -93,7 +93,7 @@ class VpnUserspaceRuntimeIntegrationTest {
     @Test
     fun informationIncludesDefinedConfigurationAlongsideObservedInterfaceState() {
         val definedConfiguration = configuration(
-            interfaceName = "wg-drift",
+            interfaceName = "utun143",
             listenPort = 51820,
             addresses = listOf("10.20.30.2/32"),
         )
@@ -128,7 +128,7 @@ class VpnUserspaceRuntimeIntegrationTest {
     fun reconfigureRestartsRuntimeWhenListenPortChanges() {
         val runtimeFactory = RecordingRuntimeFactory()
         val vpn = vpn(
-            configuration = configuration(interfaceName = "wg-port", listenPort = 51820),
+            configuration = configuration(interfaceName = "utun144", listenPort = 51820),
             runtimeFactory = runtimeFactory,
         )
 
@@ -136,7 +136,7 @@ class VpnUserspaceRuntimeIntegrationTest {
         val firstHandle = runtimeFactory.handles.single()
 
         vpn.reconfigure(
-            configuration(interfaceName = "wg-port", listenPort = 51821),
+            configuration(interfaceName = "utun144", listenPort = 51821),
         )
 
         assertEquals(2, runtimeFactory.handles.size)
@@ -185,14 +185,14 @@ class VpnUserspaceRuntimeIntegrationTest {
         private val observedListenPort: Int?,
     ) : InterfaceManager {
         private var created: Boolean = false
-        private var currentConfiguration: VpnConfiguration = initialConfiguration
+        private var currentConfiguration: VpnConfiguration = snapshotConfiguration(initialConfiguration)
         private val tun = InMemoryTunPort()
 
         override fun exists(): Boolean = created
 
         override fun create(config: VpnConfiguration) {
             created = true
-            currentConfiguration = config
+            currentConfiguration = snapshotConfiguration(config)
         }
 
         override fun up() = Unit
@@ -205,12 +205,12 @@ class VpnUserspaceRuntimeIntegrationTest {
 
         override fun isUp(): Boolean = true
 
-        override fun configuration(): VpnConfiguration = currentConfiguration
+        override fun configuration(): VpnConfiguration = snapshotConfiguration(currentConfiguration)
 
         override fun tunPort(): TunPort = tun
 
         override fun reconfigure(config: VpnConfiguration) {
-            currentConfiguration = config
+            currentConfiguration = snapshotConfiguration(config)
         }
 
         override fun readInformation(): VpnInterfaceInformation {
@@ -281,7 +281,7 @@ class VpnUserspaceRuntimeIntegrationTest {
 
         override fun create(config: VpnConfiguration) {
             created = true
-            currentConfiguration = config
+            currentConfiguration = snapshotConfiguration(config)
         }
 
         override fun up() {
@@ -302,13 +302,13 @@ class VpnUserspaceRuntimeIntegrationTest {
         override fun isUp(): Boolean = up
 
         override fun configuration(): VpnConfiguration {
-            return checkNotNull(currentConfiguration)
+            return snapshotConfiguration(checkNotNull(currentConfiguration))
         }
 
         override fun tunPort(): TunPort = tun
 
         override fun reconfigure(config: VpnConfiguration) {
-            currentConfiguration = config
+            currentConfiguration = snapshotConfiguration(config)
         }
 
         override fun readInformation(): VpnInterfaceInformation {

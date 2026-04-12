@@ -30,7 +30,7 @@ internal class TestInterfaceManager(
 
     override fun create(config: VpnConfiguration) {
         created = true
-        currentConfiguration = config
+        currentConfiguration = snapshotConfiguration(config)
     }
 
     override fun up() {
@@ -48,12 +48,12 @@ internal class TestInterfaceManager(
 
     override fun isUp(): Boolean = up
 
-    override fun configuration(): VpnConfiguration = currentConfiguration
+    override fun configuration(): VpnConfiguration = snapshotConfiguration(currentConfiguration)
 
     override fun tunPort(): TunPort = tun
 
     override fun reconfigure(config: VpnConfiguration) {
-        currentConfiguration = config
+        currentConfiguration = snapshotConfiguration(config)
     }
 
     override fun readInformation(): VpnInterfaceInformation {
@@ -66,4 +66,25 @@ internal class TestInterfaceManager(
             listenPort = currentConfiguration.listenPort,
         )
     }
+}
+
+internal fun snapshotConfiguration(config: VpnConfiguration): VpnConfiguration {
+    return DefaultVpnConfiguration(
+        interfaceName = config.interfaceName,
+        dnsDomainPool = config.dnsDomainPool.first.toList() to config.dnsDomainPool.second.toList(),
+        mtu = config.mtu,
+        addresses = config.addresses.toMutableList(),
+        listenPort = config.listenPort,
+        privateKey = config.privateKey,
+        peers = config.peers.map { peer ->
+            VpnPeer(
+                endpointPort = peer.endpointPort,
+                endpointAddress = peer.endpointAddress,
+                publicKey = peer.publicKey,
+                allowedIps = peer.allowedIps.toList(),
+                persistentKeepalive = peer.persistentKeepalive,
+                presharedKey = peer.presharedKey,
+            )
+        },
+    )
 }

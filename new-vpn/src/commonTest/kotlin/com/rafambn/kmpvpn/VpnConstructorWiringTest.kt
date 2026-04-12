@@ -13,8 +13,8 @@ class VpnConstructorWiringTest {
 
     @Test
     fun secondaryConstructorBuildsIndependentInstances() {
-        val first = Vpn(configuration(interfaceName = "wg-constructor-1"))
-        val second = Vpn(configuration(interfaceName = "wg-constructor-2"))
+        val first = Vpn(configuration(interfaceName = "utun101"))
+        val second = Vpn(configuration(interfaceName = "utun102"))
 
         assertNotSame(first, second)
         assertFalse(first.exists())
@@ -31,7 +31,7 @@ class VpnConstructorWiringTest {
     @Test
     fun explicitEngineStillSupportsLifecycle() {
         val vpn = Vpn(
-            configuration = configuration(interfaceName = "wg-engine"),
+            configuration = configuration(interfaceName = "utun103"),
             engine = Engine.BORINGTUN,
         )
 

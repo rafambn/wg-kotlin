@@ -17,7 +17,7 @@ class VpnStateTransitionTest {
 
     @Test
     fun lifecycleTransitionsFollowContract() {
-        val vpn = testVpn(configuration = baseConfiguration(interfaceName = "wg0"))
+        val vpn = testVpn(configuration = baseConfiguration(interfaceName = "utun130"))
 
         assertEquals(VpnState.NotCreated, vpn.state())
 
@@ -36,7 +36,7 @@ class VpnStateTransitionTest {
 
     @Test
     fun stopAndDeleteAreIdempotent() {
-        val vpn = testVpn(configuration = baseConfiguration(interfaceName = "wg1"))
+        val vpn = testVpn(configuration = baseConfiguration(interfaceName = "utun131"))
 
         vpn.stop()
         assertEquals(VpnState.NotCreated, vpn.state())
@@ -49,7 +49,7 @@ class VpnStateTransitionTest {
     @Test
     fun interfaceFailureDoesNotPersistSyntheticState() {
         val vpn = Vpn(
-            vpnConfiguration = baseConfiguration(interfaceName = "wg2"),
+            vpnConfiguration = baseConfiguration(interfaceName = "utun132"),
             tunnelManager = InMemoryTunnelManager(),
             interfaceManager = FailingUpInterfaceManager(),
         )
@@ -63,7 +63,7 @@ class VpnStateTransitionTest {
 
     @Test
     fun startSkipsCreateWhenInterfaceAlreadyExists() {
-        val configuration = baseConfiguration(interfaceName = "wg3")
+        val configuration = baseConfiguration(interfaceName = "utun133")
         val interfaceManager = ExistingInterfaceManager(configuration)
         val vpn = Vpn(
             vpnConfiguration = configuration,
@@ -129,7 +129,7 @@ class VpnStateTransitionTest {
 
         override fun readInformation(): VpnInterfaceInformation {
             return VpnInterfaceInformation(
-                interfaceName = "wg-failing",
+                interfaceName = "utun132",
                 isUp = false,
                 addresses = emptyList(),
                 dnsDomainPool = (emptyList<String>() to emptyList()),

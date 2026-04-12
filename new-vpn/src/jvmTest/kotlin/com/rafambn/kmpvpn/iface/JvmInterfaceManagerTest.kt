@@ -16,12 +16,12 @@ class JvmInterfaceManagerTest {
         val executor = InMemoryInterfaceCommandExecutor()
         val tunProvider = InMemoryTunProvider()
         val interfaceManager = JvmInterfaceManager(
-            interfaceName = "wg0",
+            interfaceName = "utun150",
             commandExecutor = executor,
             tunProvider = tunProvider,
         )
         val config = configuration(
-            interfaceName = "wg0",
+            interfaceName = "utun150",
             dnsDomainPool = (listOf("corp.local") to listOf("1.1.1.1")),
             addresses = listOf("10.0.0.1/32"),
             peers = listOf(VpnPeer(publicKey = "peer-a", allowedIps = listOf("0.0.0.0/0"))),
@@ -36,10 +36,10 @@ class JvmInterfaceManagerTest {
         interfaceManager.delete()
         interfaceManager.delete()
 
-        assertEquals(1, executor.callLog.count { call -> call == "setInterfaceUp:wg0:true" })
-        assertEquals(1, executor.callLog.count { call -> call == "setInterfaceUp:wg0:false" })
-        assertEquals(1, tunProvider.callLog.count { call -> call == "openTun:wg0" })
-        assertEquals(1, tunProvider.callLog.count { call -> call == "closeTun:wg0" })
+        assertEquals(1, executor.callLog.count { call -> call == "setInterfaceUp:utun150:true" })
+        assertEquals(1, executor.callLog.count { call -> call == "setInterfaceUp:utun150:false" })
+        assertEquals(1, tunProvider.callLog.count { call -> call == "openTun:utun150" })
+        assertEquals(1, tunProvider.callLog.count { call -> call == "closeTun:utun150" })
         assertFalse(interfaceManager.exists())
     }
 
@@ -49,19 +49,19 @@ class JvmInterfaceManagerTest {
         val tunProvider = InMemoryTunProvider()
         val executor = FailureInjectingExecutor(delegate)
         val interfaceManager = JvmInterfaceManager(
-            interfaceName = "wg1",
+            interfaceName = "utun151",
             commandExecutor = executor,
             tunProvider = tunProvider,
         )
 
         val baseConfiguration = configuration(
-            interfaceName = "wg1",
+            interfaceName = "utun151",
             dnsDomainPool = (listOf("corp.local") to listOf("1.1.1.1")),
             addresses = listOf("10.10.0.1/32"),
             peers = listOf(VpnPeer(publicKey = "peer-a", allowedIps = listOf("10.200.0.0/24"))),
         )
         val updatedConfiguration = configuration(
-            interfaceName = "wg1",
+            interfaceName = "utun151",
             dnsDomainPool = (listOf("corp.local") to listOf("9.9.9.9")),
             addresses = listOf("10.10.0.2/32"),
             peers = listOf(VpnPeer(publicKey = "peer-b", allowedIps = listOf("10.201.0.0/24"))),
@@ -83,7 +83,7 @@ class JvmInterfaceManagerTest {
         assertEquals(baseConfiguration.dnsDomainPool, info.dnsDomainPool)
         assertEquals(baseConfiguration.addresses, info.addresses)
 
-        val dnsOperations = delegate.callLog.filter { call -> call.startsWith("applyDns:wg1:") }
+        val dnsOperations = delegate.callLog.filter { call -> call.startsWith("applyDns:utun151:") }
         assertTrue(dnsOperations.any { call -> call.contains("domains=corp.local") && call.contains("dns=9.9.9.9") })
         assertTrue(dnsOperations.last().contains("domains=corp.local") && dnsOperations.last().contains("dns=1.1.1.1"))
     }
@@ -92,12 +92,12 @@ class JvmInterfaceManagerTest {
     fun readInformationIncludesExecutorPeerStats() {
         val executor = InMemoryInterfaceCommandExecutor()
         val interfaceManager = JvmInterfaceManager(
-            interfaceName = "wg2",
+            interfaceName = "utun152",
             commandExecutor = executor,
             tunProvider = InMemoryTunProvider(),
         )
         val config = configuration(
-            interfaceName = "wg2",
+            interfaceName = "utun152",
             peers = listOf(
                 VpnPeer(publicKey = "peer-a"),
                 VpnPeer(publicKey = "peer-b"),
@@ -106,7 +106,7 @@ class JvmInterfaceManagerTest {
 
         interfaceManager.create(config)
         executor.setPeerStats(
-            interfaceName = "wg2",
+            interfaceName = "utun152",
             peerStats = listOf(
                 VpnPeerStats(
                     publicKey = "peer-a",

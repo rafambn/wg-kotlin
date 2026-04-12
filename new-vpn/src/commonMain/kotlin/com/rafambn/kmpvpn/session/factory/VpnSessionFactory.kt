@@ -8,6 +8,6 @@ interface VpnSessionFactory {
     fun create(
         config: VpnConfiguration,
         peer: VpnPeer,
-        sessionIndex: UInt,
+        sessionIndex: Int,
     ): VpnSession
 }

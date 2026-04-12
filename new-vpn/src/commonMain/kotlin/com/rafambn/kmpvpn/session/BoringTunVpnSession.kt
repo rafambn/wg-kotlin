@@ -6,7 +6,7 @@ import uniffi.new_vpn.TunnelSession
 
 class BoringTunVpnSession(
     override val peerPublicKey: String,
-    override val sessionIndex: UInt,
+    override val sessionIndex: Int,
     private val tunnel: TunnelSession,
 ) : VpnSession {
     private var active: Boolean = true

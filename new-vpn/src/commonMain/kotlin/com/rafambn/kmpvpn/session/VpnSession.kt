@@ -5,7 +5,7 @@ import com.rafambn.kmpvpn.session.io.VpnPacketResult
 interface VpnSession : AutoCloseable {
     val peerPublicKey: String
 
-    val sessionIndex: UInt
+    val sessionIndex: Int
 
     val isActive: Boolean
 

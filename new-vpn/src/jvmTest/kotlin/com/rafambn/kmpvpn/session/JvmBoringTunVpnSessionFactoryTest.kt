@@ -29,7 +29,7 @@ class JvmBoringTunVpnSessionFactoryTest {
             factory.create(
                 config = config,
                 peer = config.peers.first(),
-                sessionIndex = 1u,
+                sessionIndex = 1,
             )
         }
     }
@@ -50,7 +50,7 @@ class JvmBoringTunVpnSessionFactoryTest {
         val session = factory.create(
             config = config,
             peer = config.peers.first(),
-            sessionIndex = 1u,
+            sessionIndex = 1,
         )
 
         assertTrue(session.isActive)

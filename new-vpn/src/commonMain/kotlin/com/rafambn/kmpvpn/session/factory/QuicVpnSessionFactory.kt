@@ -8,7 +8,7 @@ class QuicVpnSessionFactory : VpnSessionFactory {
     override fun create(
         config: VpnConfiguration,
         peer: VpnPeer,
-        sessionIndex: UInt,
+        sessionIndex: Int,
     ): VpnSession {
         throw UnsupportedOperationException("QUIC engine is not supported yet")
     }

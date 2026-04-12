@@ -40,7 +40,7 @@ internal class InMemoryTunnelManager(
         val desiredPeers = config.peers.associateBy { peer -> peer.publicKey }
         val desiredIndexes = desiredPeers.keys
             .toSortedSet()
-            .mapIndexed { index, key -> key to (index + 1).toUInt() }
+            .mapIndexed { index, key -> key to (index + 1) }
             .toMap()
         val previousSessions = sessionsByPeer.toMap()
         val nextSessions: LinkedHashMap<String, ManagedSession> = linkedMapOf()
@@ -89,7 +89,7 @@ internal class InMemoryTunnelManager(
 
     override fun sessions(): List<SessionSnapshot> {
         return sessionsByPeer.values
-            .sortedBy { managed -> managed.session.sessionIndex.toInt() }
+            .sortedBy { managed -> managed.session.sessionIndex }
             .map { managed ->
                 SessionSnapshot(
                     peerPublicKey = managed.peer.publicKey,
@@ -104,7 +104,7 @@ internal class InMemoryTunnelManager(
 
     override fun managedSessions(): List<ManagedSession> {
         return sessionsByPeer.values
-            .sortedBy { managed -> managed.session.sessionIndex.toInt() }
+            .sortedBy { managed -> managed.session.sessionIndex }
             .map { managed -> managed.copy() }
     }
 
@@ -183,7 +183,7 @@ internal class InMemoryTunnelManager(
 
     private fun currentPeerStats(): List<VpnPeerStats> {
         return sessionsByPeer.values
-            .sortedBy { managed -> managed.session.sessionIndex.toInt() }
+            .sortedBy { managed -> managed.session.sessionIndex }
             .map { managed ->
                 val stats = peerStatsByPublicKey[managed.peer.publicKey] ?: MutablePeerStats()
                 VpnPeerStats(
@@ -214,7 +214,7 @@ internal class InMemoryTunnelManager(
     private fun shouldReuse(
         previous: ManagedSession?,
         desiredPeer: VpnPeer,
-        desiredIndex: UInt,
+        desiredIndex: Int,
     ): Boolean {
         return previous != null &&
             previous.peer == desiredPeer &&
@@ -226,7 +226,7 @@ internal class InMemoryTunnelManager(
         config: VpnConfiguration,
         peerPublicKey: String,
         desiredPeer: VpnPeer,
-        desiredIndex: UInt,
+        desiredIndex: Int,
     ): ManagedSession {
         val createdSession = sessionFactory.create(
             config = config,

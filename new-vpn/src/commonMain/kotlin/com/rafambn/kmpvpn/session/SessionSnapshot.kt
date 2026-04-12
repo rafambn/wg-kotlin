@@ -8,6 +8,6 @@ data class SessionSnapshot(
     val endpointAddress: String?,
     val endpointPort: Int?,
     val allowedIps: List<String>,
-    val sessionIndex: UInt,
+    val sessionIndex: Int,
     val isActive: Boolean,
 )

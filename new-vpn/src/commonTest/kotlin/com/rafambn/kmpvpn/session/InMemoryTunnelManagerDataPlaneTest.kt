@@ -251,7 +251,7 @@ class InMemoryTunnelManagerDataPlaneTest {
         override fun create(
             config: VpnConfiguration,
             peer: VpnPeer,
-            sessionIndex: UInt,
+            sessionIndex: Int,
         ): VpnSession {
             val session = checkNotNull(sessionsByKey[peer.publicKey]) {
                 "Missing test session for `${peer.publicKey}`"
@@ -267,7 +267,7 @@ class InMemoryTunnelManagerDataPlaneTest {
         private val decryptResults: ArrayDeque<VpnPacketResult> = ArrayDeque(),
         private val periodicResults: ArrayDeque<VpnPacketResult> = ArrayDeque(),
     ) : VpnSession {
-        override var sessionIndex: UInt = 0u
+        override var sessionIndex: Int = 0
         override val isActive: Boolean = true
 
         val encryptInputs: MutableList<ByteArray> = mutableListOf()

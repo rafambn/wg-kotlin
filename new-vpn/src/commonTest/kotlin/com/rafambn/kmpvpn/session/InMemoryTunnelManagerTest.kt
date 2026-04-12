@@ -116,8 +116,8 @@ class InMemoryTunnelManagerTest {
         val second = manager.sessions().associate { it.peerPublicKey to it.sessionIndex }
 
         assertEquals(first, second)
-        assertEquals(1u, second["peer-a"])
-        assertEquals(2u, second["peer-b"])
+        assertEquals(1, second["peer-a"])
+        assertEquals(2, second["peer-b"])
     }
 
     private fun configurationWithPeers(vararg peerKeys: String): VpnConfiguration {
@@ -150,7 +150,7 @@ class InMemoryTunnelManagerTest {
         override fun create(
             config: VpnConfiguration,
             peer: VpnPeer,
-            sessionIndex: UInt,
+            sessionIndex: Int,
         ): VpnSession {
             if (peer.publicKey == failOnPeer) {
                 throw IllegalStateException("factory forced failure for `${peer.publicKey}`")
@@ -171,7 +171,7 @@ class InMemoryTunnelManagerTest {
 
     private class TestVpnSession(
         override val peerPublicKey: String,
-        override val sessionIndex: UInt,
+        override val sessionIndex: Int,
     ) : VpnSession {
         var closeCalls: Int = 0
 

@@ -46,7 +46,7 @@ class VpnConstructorWiringTest {
     }
 
     private fun configuration(interfaceName: String): VpnConfiguration {
-        return DefaultVpnConfiguration(
+        return VpnConfiguration(
             interfaceName = interfaceName,
             privateKey = privateKey,
             peers = listOf(

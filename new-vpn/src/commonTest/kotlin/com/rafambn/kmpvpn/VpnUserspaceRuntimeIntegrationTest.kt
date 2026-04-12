@@ -161,7 +161,7 @@ class VpnUserspaceRuntimeIntegrationTest {
         listenPort: Int? = null,
         addresses: List<String> = emptyList(),
     ): VpnConfiguration {
-        return DefaultVpnConfiguration(
+        return VpnConfiguration(
             interfaceName = interfaceName,
             listenPort = listenPort,
             addresses = addresses.toMutableList(),

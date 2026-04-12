@@ -1,6 +1,5 @@
 package com.rafambn.kmpvpn.session
 
-import com.rafambn.kmpvpn.DefaultVpnConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.iface.InterfaceManager
@@ -196,7 +195,7 @@ class InMemoryTunnelManagerDataPlaneTest {
         peers: List<VpnPeer>,
         listenPort: Int = 51820,
     ): VpnConfiguration {
-        return DefaultVpnConfiguration(
+        return VpnConfiguration(
             interfaceName = "wg-test",
             listenPort = listenPort,
             privateKey = "private-key",

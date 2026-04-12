@@ -12,7 +12,7 @@ class VpnContractInvariantsTest {
     fun rejectsBlankInterfaceName() {
         assertFailsWith<IllegalArgumentException> {
             testVpn(
-                configuration = DefaultVpnConfiguration(
+                configuration = VpnConfiguration(
                     interfaceName = " ",
                     privateKey = privateKey,
                 ),
@@ -29,7 +29,7 @@ class VpnContractInvariantsTest {
 
         assertFailsWith<IllegalArgumentException> {
             testVpn(
-                configuration = DefaultVpnConfiguration(
+                configuration = VpnConfiguration(
                     interfaceName = "utun110",
                     privateKey = privateKey,
                     peers = duplicatedPeers,
@@ -41,7 +41,7 @@ class VpnContractInvariantsTest {
     @Test
     fun reconfigureRejectsDuplicatedPeerPublicKeys() {
         val vpn = testVpn(
-            configuration = DefaultVpnConfiguration(
+            configuration = VpnConfiguration(
                 interfaceName = "utun111",
                 privateKey = privateKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
@@ -52,7 +52,7 @@ class VpnContractInvariantsTest {
 
         assertFailsWith<IllegalArgumentException> {
             vpn.reconfigure(
-                DefaultVpnConfiguration(
+                VpnConfiguration(
                     interfaceName = "utun111",
                     privateKey = privateKey,
                     peers = listOf(
@@ -67,7 +67,7 @@ class VpnContractInvariantsTest {
     @Test
     fun reconfigureRejectsInterfaceNameChange() {
         val vpn = testVpn(
-            configuration = DefaultVpnConfiguration(
+            configuration = VpnConfiguration(
                 interfaceName = "utun112",
                 privateKey = privateKey,
             ),
@@ -77,7 +77,7 @@ class VpnContractInvariantsTest {
 
         assertFailsWith<IllegalArgumentException> {
             vpn.reconfigure(
-                DefaultVpnConfiguration(
+                VpnConfiguration(
                     interfaceName = "utun113",
                     privateKey = privateKey,
                 ),

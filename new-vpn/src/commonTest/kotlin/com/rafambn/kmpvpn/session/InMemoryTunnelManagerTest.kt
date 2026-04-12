@@ -1,6 +1,5 @@
 package com.rafambn.kmpvpn.session
 
-import com.rafambn.kmpvpn.DefaultVpnConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.session.factory.VpnSessionFactory
@@ -121,8 +120,8 @@ class InMemoryTunnelManagerTest {
         assertEquals(2u, second["peer-b"])
     }
 
-    private fun configurationWithPeers(vararg peerKeys: String): DefaultVpnConfiguration {
-        return DefaultVpnConfiguration(
+    private fun configurationWithPeers(vararg peerKeys: String): VpnConfiguration {
+        return VpnConfiguration(
             interfaceName = "wg-test",
             privateKey = "private-key",
             peers = peerKeys.mapIndexed { index, key ->
@@ -135,8 +134,8 @@ class InMemoryTunnelManagerTest {
         )
     }
 
-    private fun configurationWithPeer(vararg peers: VpnPeer): DefaultVpnConfiguration {
-        return DefaultVpnConfiguration(
+    private fun configurationWithPeer(vararg peers: VpnPeer): VpnConfiguration {
+        return VpnConfiguration(
             interfaceName = "wg-test",
             privateKey = "private-key",
             peers = peers.toList(),

@@ -1,6 +1,5 @@
 package com.rafambn.kmpvpn.iface
 
-import com.rafambn.kmpvpn.DefaultVpnConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import kotlin.test.Test
@@ -134,7 +133,7 @@ class JvmInterfaceManagerTest {
         addresses: List<String> = emptyList(),
         peers: List<VpnPeer> = emptyList(),
     ): VpnConfiguration {
-        return DefaultVpnConfiguration(
+        return VpnConfiguration(
             interfaceName = interfaceName,
             dnsDomainPool = dnsDomainPool,
             addresses = addresses.toMutableList(),

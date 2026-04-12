@@ -78,7 +78,7 @@ class VpnStateTransitionTest {
     }
 
     private fun baseConfiguration(interfaceName: String): VpnConfiguration {
-        return DefaultVpnConfiguration(
+        return VpnConfiguration(
             interfaceName = interfaceName,
             privateKey = privateKey,
             peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),

@@ -1,6 +1,5 @@
 package com.rafambn.kmpvpn.iface
 
-import com.rafambn.kmpvpn.DefaultVpnConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.requireValidConfiguration
@@ -244,7 +243,7 @@ class JvmInterfaceManager(
     }
 
     private fun snapshot(config: VpnConfiguration): VpnConfiguration {
-        return DefaultVpnConfiguration(
+        return VpnConfiguration(
             interfaceName = config.interfaceName,
             dnsDomainPool = config.dnsDomainPool.first.toList() to config.dnsDomainPool.second.toList(),
             mtu = config.mtu,

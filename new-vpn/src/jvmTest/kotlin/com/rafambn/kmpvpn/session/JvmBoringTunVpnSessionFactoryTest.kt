@@ -1,6 +1,6 @@
 package com.rafambn.kmpvpn.session
 
-import com.rafambn.kmpvpn.DefaultVpnConfiguration
+import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.session.factory.BoringTunVpnSessionFactory
 import com.rafambn.kmpvpn.session.factory.QuicVpnSessionFactory
@@ -19,7 +19,7 @@ class JvmBoringTunVpnSessionFactoryTest {
     @Test
     fun quicStrategyIsExplicitlyUnsupported() {
         val factory = QuicVpnSessionFactory()
-        val config = DefaultVpnConfiguration(
+        val config = VpnConfiguration(
             interfaceName = "wg-test",
             privateKey = "private-key",
             peers = listOf(VpnPeer(publicKey = "peer-key")),
@@ -39,7 +39,7 @@ class JvmBoringTunVpnSessionFactoryTest {
         val localPrivateKey = toBase64(generateSecretKey())
         val remotePublicKey = toBase64(checkNotNull(generatePublicKey(generateSecretKey())))
 
-        val config = DefaultVpnConfiguration(
+        val config = VpnConfiguration(
             interfaceName = "wg-test",
             privateKey = localPrivateKey,
             peers = listOf(VpnPeer(publicKey = remotePublicKey)),

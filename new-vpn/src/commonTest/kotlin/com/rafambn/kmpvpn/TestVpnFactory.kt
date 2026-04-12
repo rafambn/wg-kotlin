@@ -69,7 +69,7 @@ internal class TestInterfaceManager(
 }
 
 internal fun snapshotConfiguration(config: VpnConfiguration): VpnConfiguration {
-    return DefaultVpnConfiguration(
+    return VpnConfiguration(
         interfaceName = config.interfaceName,
         dnsDomainPool = config.dnsDomainPool.first.toList() to config.dnsDomainPool.second.toList(),
         mtu = config.mtu,

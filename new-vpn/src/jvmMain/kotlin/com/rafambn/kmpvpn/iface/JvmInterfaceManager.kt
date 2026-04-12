@@ -4,18 +4,17 @@ import com.rafambn.kmpvpn.DefaultVpnConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.requireValidConfiguration
+import com.rafambn.kmpvpn.session.io.InMemoryOwnedTunPort
 import com.rafambn.kmpvpn.session.io.OwnedTunPort
 import com.rafambn.kmpvpn.session.io.TunPort
-import com.rafambn.kmpvpn.session.io.TunProvider
 
 /**
- * JVM-backed [InterfaceManager] implementation using a local [TunProvider] plus
+ * JVM-backed [InterfaceManager] implementation using a local TUN handle plus
  * privileged [InterfaceCommandExecutor] operations.
  */
 class JvmInterfaceManager(
     private val interfaceName: String,
     private val commandExecutor: InterfaceCommandExecutor,
-    private val tunProvider: TunProvider,
 ) : InterfaceManager {
     private var currentConfiguration: VpnConfiguration? = null
     private var currentTunPort: OwnedTunPort? = null
@@ -40,14 +39,7 @@ class JvmInterfaceManager(
             return
         }
 
-        val tunPort = try {
-            tunProvider.open(interfaceName)
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Failed to open tun interface `$interfaceName`: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
-        }
+        val tunPort = InMemoryOwnedTunPort(interfaceName = interfaceName, onClose = {})
 
         try {
             currentTunPort = tunPort

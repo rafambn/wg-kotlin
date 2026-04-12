@@ -3,8 +3,6 @@ package com.rafambn.kmpvpn.iface
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_HOST
 import com.rafambn.kmpvpn.daemon.protocol.DEFAULT_DAEMON_PORT
-import com.rafambn.kmpvpn.session.io.InMemoryTunProvider
-import com.rafambn.kmpvpn.session.io.TunProvider
 import java.time.Duration
 import org.koin.core.module.Module
 import org.koin.core.parameter.parametersOf
@@ -32,14 +30,11 @@ internal object JvmInterfaceKoinBootstrap {
             }
         }
 
-        factory<TunProvider> { InMemoryTunProvider() }
-
         factory<InterfaceManager> { params ->
             val configuration = params.get<VpnConfiguration>()
             JvmInterfaceManager(
                 interfaceName = configuration.interfaceName,
                 commandExecutor = get(),
-                tunProvider = get(),
             )
         }
     }

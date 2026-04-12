@@ -44,4 +44,5 @@ In `docs/rules.txt` you will find instructions on how this rules behave
 
 You should always read the rules of the file that you are about change
 
+## Communication
 Use your caveman skill. Default communication mode is `/caveman full` unless explicitly changed by the user.

@@ -3,7 +3,6 @@ package com.rafambn.kmpvpn.iface
 import com.rafambn.kmpvpn.DefaultVpnConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
-import com.rafambn.kmpvpn.session.io.InMemoryTunProvider
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -16,11 +15,9 @@ class JvmInterfaceManagerTest {
     fun createAndDeleteRemainIdempotent() {
         val delegate = InMemoryInterfaceCommandExecutor()
         val executor = CountingExecutor(delegate)
-        val tunProvider = InMemoryTunProvider()
         val interfaceManager = JvmInterfaceManager(
             interfaceName = "utun150",
             commandExecutor = executor,
-            tunProvider = tunProvider,
         )
         val config = configuration(
             interfaceName = "utun150",
@@ -30,7 +27,9 @@ class JvmInterfaceManagerTest {
         )
 
         interfaceManager.create(config)
+        val firstTunPort = interfaceManager.tunPort()
         interfaceManager.create(config)
+        val secondTunPort = interfaceManager.tunPort()
         interfaceManager.up()
         interfaceManager.up()
         interfaceManager.down()
@@ -38,22 +37,20 @@ class JvmInterfaceManagerTest {
         interfaceManager.delete()
         interfaceManager.delete()
 
+        assertTrue(firstTunPort === secondTunPort)
         assertEquals(1, executor.setInterfaceUpCalls.count { call -> call == ("utun150" to true) })
         assertEquals(1, executor.setInterfaceUpCalls.count { call -> call == ("utun150" to false) })
-        assertEquals(1, tunProvider.callLog.count { call -> call == "openTun:utun150" })
-        assertEquals(1, tunProvider.callLog.count { call -> call == "closeTun:utun150" })
+        assertFailsWith<IllegalStateException> { interfaceManager.tunPort() }
         assertFalse(interfaceManager.exists())
     }
 
     @Test
     fun reconfigureRollsBackOnDnsApplyFailure() {
         val delegate = InMemoryInterfaceCommandExecutor()
-        val tunProvider = InMemoryTunProvider()
         val executor = FailureInjectingExecutor(delegate)
         val interfaceManager = JvmInterfaceManager(
             interfaceName = "utun151",
             commandExecutor = executor,
-            tunProvider = tunProvider,
         )
 
         val baseConfiguration = configuration(
@@ -102,7 +99,6 @@ class JvmInterfaceManagerTest {
         val interfaceManager = JvmInterfaceManager(
             interfaceName = "utun152",
             commandExecutor = executor,
-            tunProvider = InMemoryTunProvider(),
         )
         val config = configuration(
             interfaceName = "utun152",

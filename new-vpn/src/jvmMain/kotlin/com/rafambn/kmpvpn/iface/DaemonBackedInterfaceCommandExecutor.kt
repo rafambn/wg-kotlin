@@ -17,10 +17,10 @@ import kotlinx.rpc.krpc.serialization.json.json
 import kotlinx.rpc.withService
 
 class DaemonBackedInterfaceCommandExecutor(
-    private val host: String = System.getProperty(JvmPlatformProperties.DAEMON_HOST, DEFAULT_DAEMON_HOST),
-    private val port: Int = System.getProperty(JvmPlatformProperties.DAEMON_PORT)?.toIntOrNull() ?: DEFAULT_DAEMON_PORT,
+    private val host: String = System.getProperty(JvmInterfaceProperties.DAEMON_HOST, DEFAULT_DAEMON_HOST),
+    private val port: Int = System.getProperty(JvmInterfaceProperties.DAEMON_PORT)?.toIntOrNull() ?: DEFAULT_DAEMON_PORT,
     private val timeout: Duration = Duration.ofMillis(
-        System.getProperty(JvmPlatformProperties.DAEMON_TIMEOUT_MILLIS)?.toLongOrNull() ?: 15_000L,
+        System.getProperty(JvmInterfaceProperties.DAEMON_TIMEOUT_MILLIS)?.toLongOrNull() ?: 15_000L,
     ),
     private val clientFactory: (String, Int, Duration) -> DaemonProcessClient = { resolvedHost, resolvedPort, resolvedTimeout ->
         createDaemonProcessClient(

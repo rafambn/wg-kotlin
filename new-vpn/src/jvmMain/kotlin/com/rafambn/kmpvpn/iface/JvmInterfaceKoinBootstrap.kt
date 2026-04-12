@@ -1,6 +1,8 @@
 package com.rafambn.kmpvpn.iface
 
 import com.rafambn.kmpvpn.VpnConfiguration
+import com.rafambn.kmpvpn.session.io.InMemoryTunProvider
+import com.rafambn.kmpvpn.session.io.TunProvider
 import org.koin.core.module.Module
 import org.koin.core.parameter.parametersOf
 import org.koin.dsl.koinApplication
@@ -17,11 +19,11 @@ internal object JvmInterfaceKoinBootstrap {
         factory<InterfaceCommandExecutor> {
             when (
                 System.getProperty(
-                    JvmPlatformProperties.INTERFACE_MODE,
-                    JvmPlatformProperties.INTERFACE_MODE_PRODUCTION,
+                    JvmInterfaceProperties.INTERFACE_MODE,
+                    JvmInterfaceProperties.INTERFACE_MODE_PRODUCTION,
                 ).lowercase()
             ) {
-                JvmPlatformProperties.INTERFACE_MODE_IN_MEMORY -> InMemoryInterfaceCommandExecutor()
+                JvmInterfaceProperties.INTERFACE_MODE_IN_MEMORY -> InMemoryInterfaceCommandExecutor()
                 else -> get<DaemonBackedInterfaceCommandExecutor>()
             }
         }

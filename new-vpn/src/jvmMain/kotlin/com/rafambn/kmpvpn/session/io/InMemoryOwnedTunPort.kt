@@ -1,4 +1,4 @@
-package com.rafambn.kmpvpn.iface
+package com.rafambn.kmpvpn.session.io
 
 class InMemoryOwnedTunPort internal constructor(
     override val interfaceName: String,

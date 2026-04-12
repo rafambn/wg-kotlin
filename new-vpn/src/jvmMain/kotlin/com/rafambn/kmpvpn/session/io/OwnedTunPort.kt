@@ -1,6 +1,4 @@
-package com.rafambn.kmpvpn.iface
-
-import com.rafambn.kmpvpn.session.io.TunPort
+package com.rafambn.kmpvpn.session.io
 
 interface OwnedTunPort : TunPort, AutoCloseable {
     val interfaceName: String

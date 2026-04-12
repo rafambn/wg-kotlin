@@ -1,4 +1,4 @@
-package com.rafambn.kmpvpn.iface
+package com.rafambn.kmpvpn.session.io
 
 interface TunProvider {
     fun exists(interfaceName: String): Boolean

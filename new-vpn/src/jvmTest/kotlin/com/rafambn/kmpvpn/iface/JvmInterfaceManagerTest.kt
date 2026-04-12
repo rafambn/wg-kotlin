@@ -3,6 +3,7 @@ package com.rafambn.kmpvpn.iface
 import com.rafambn.kmpvpn.DefaultVpnConfiguration
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
+import com.rafambn.kmpvpn.session.io.InMemoryTunProvider
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

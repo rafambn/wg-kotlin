@@ -33,6 +33,13 @@ internal fun requireNonBlankInterfaceName(interfaceName: String) {
     }
 }
 
+internal fun requireValidRegex(interfaceName: String) {
+    val interfaceNameRegex = Regex("utun[0-9]+")
+    require(interfaceNameRegex.matches(interfaceName)) {
+        "Interface name must match `${interfaceNameRegex.pattern}`."
+    }
+}
+
 internal fun requireUniquePeerPublicKeys(peers: List<VpnPeer>) {
     val duplicatedKeys = peers
         .groupingBy { peer -> peer.publicKey }
@@ -47,5 +54,6 @@ internal fun requireUniquePeerPublicKeys(peers: List<VpnPeer>) {
 
 internal fun requireValidConfiguration(config: VpnConfiguration) {
     requireNonBlankInterfaceName(config.interfaceName)
+    requireValidRegex(config.interfaceName)
     requireUniquePeerPublicKeys(config.peers)
 }

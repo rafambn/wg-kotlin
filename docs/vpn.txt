@@ -6,6 +6,8 @@ REVIEWED
 - exists() on JVM should check if interface actually exists on the OS - ensures accurate lifecycle state reporting across platforms
 - isRunning() checks three conditions together - interface must exist on OS, be up at OS level, and have active userspace TUN sessions (BoringTUN) running
 - close() function should not delete the interface - prevents data loss on unexpected closes and allows interface reuse, only delete() should remove the interface permanently
+- Public constructor should not be changes unless told to
+- interface name is restricted to the allowed tun of macOS for all platforms for simpler code - utun[0-9]+
 
 NEW
 

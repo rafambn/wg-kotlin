@@ -20,8 +20,8 @@ class InMemoryInterfaceCommandExecutor : InterfaceCommandExecutor {
         state.isUp = up
     }
 
-    override fun applyMtu(interfaceName: String, mtu: Int?) {
-        callLog += "applyMtu:$interfaceName:${mtu ?: "none"}"
+    override fun applyMtu(interfaceName: String, mtu: Int) {
+        callLog += "applyMtu:$interfaceName:$mtu"
         val state = stateFor(interfaceName)
         state.mtu = mtu
     }

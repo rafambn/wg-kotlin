@@ -208,7 +208,8 @@ class JvmInterfaceManager(
     }
 
     private fun applyMtu(config: VpnConfiguration) {
-        commandExecutor.applyMtu(config.interfaceName, config.mtu)
+        val mtu = config.mtu ?: return
+        commandExecutor.applyMtu(config.interfaceName, mtu)
     }
 
     private fun applyAddresses(config: VpnConfiguration) {

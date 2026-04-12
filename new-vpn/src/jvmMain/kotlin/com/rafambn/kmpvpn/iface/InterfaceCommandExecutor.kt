@@ -12,7 +12,7 @@ interface InterfaceCommandExecutor {
 
     fun setInterfaceUp(interfaceName: String, up: Boolean)
 
-    fun applyMtu(interfaceName: String, mtu: Int?)
+    fun applyMtu(interfaceName: String, mtu: Int)
 
     fun applyAddresses(interfaceName: String, addresses: List<String>)
 

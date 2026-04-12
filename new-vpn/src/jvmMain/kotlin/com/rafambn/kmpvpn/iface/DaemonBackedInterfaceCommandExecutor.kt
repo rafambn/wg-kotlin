@@ -42,11 +42,7 @@ class DaemonBackedInterfaceCommandExecutor(
         }
     }
 
-    override fun applyMtu(interfaceName: String, mtu: Int?) {
-        if (mtu == null) {
-            return
-        }
-
+    override fun applyMtu(interfaceName: String, mtu: Int) {
         expectSuccess(operation = "applyMtu", interfaceName = interfaceName) { client ->
             client.applyMtu(interfaceName = interfaceName, mtu = mtu)
         }

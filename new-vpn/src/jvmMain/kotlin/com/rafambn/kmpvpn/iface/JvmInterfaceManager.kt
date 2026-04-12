@@ -3,13 +3,10 @@ package com.rafambn.kmpvpn.iface
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.requireValidConfiguration
-import com.rafambn.kmpvpn.session.io.InMemoryOwnedTunPort
-import com.rafambn.kmpvpn.session.io.OwnedTunPort
-import com.rafambn.kmpvpn.session.io.TunPort
 
 /**
- * JVM-backed [InterfaceManager] implementation using a local TUN handle plus
- * privileged [InterfaceCommandExecutor] operations.
+ * JVM-backed [InterfaceManager] implementation using privileged
+ * [InterfaceCommandExecutor] operations.
  */
 class JvmInterfaceManager(
     private val interfaceName: String,
@@ -33,8 +30,7 @@ class JvmInterfaceManager(
             "Cannot create interface `${config.interfaceName}` on a manager for `$interfaceName`"
         }
 
-        if (currentConfiguration == null) {
-            currentConfiguration = config.copy()
+        if (currentConfiguration == config && commandExecutor.interfaceExists(interfaceName)) {
             return
         }
 
@@ -96,10 +92,6 @@ class JvmInterfaceManager(
         return configuration.copy()
     }
 
-    override fun tunPort(): TunPort {
-        return throw IllegalStateException("Cannot access tunPort before create()")
-    }
-
     override fun reconfigure(config: VpnConfiguration) {
         val previousConfiguration = currentConfiguration
             ?: throw IllegalStateException("Cannot reconfigure before create()")
@@ -120,6 +112,7 @@ class JvmInterfaceManager(
             applyRoutes(config)
             applyDns(config)
         } catch (throwable: Throwable) {
+            restoreConfiguration(previousConfiguration)
             throw IllegalStateException(
                 "Failed to reconfigure interface `$interfaceName`: ${throwable.message ?: "unknown"}",
                 throwable,
@@ -160,5 +153,16 @@ class JvmInterfaceManager(
 
     private fun applyDns(config: VpnConfiguration) {
         commandExecutor.applyDns(config.interfaceName, config.dnsDomainPool)
+    }
+
+    private fun restoreConfiguration(config: VpnConfiguration) {
+        try {
+            applyMtu(config)
+            applyAddresses(config)
+            applyRoutes(config)
+            applyDns(config)
+        } catch (_: Throwable) {
+            // rollback is best-effort; original failure remains primary
+        }
     }
 }

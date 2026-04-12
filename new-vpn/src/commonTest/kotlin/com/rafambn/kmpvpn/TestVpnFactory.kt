@@ -4,8 +4,6 @@ import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnInterfaceInformation
 import com.rafambn.kmpvpn.session.InMemoryTunnelManager
 import com.rafambn.kmpvpn.session.TunnelManager
-import com.rafambn.kmpvpn.session.io.InMemoryTunPort
-import com.rafambn.kmpvpn.session.io.TunPort
 
 internal fun testVpn(
     configuration: VpnConfiguration,
@@ -24,7 +22,6 @@ internal class TestInterfaceManager(
 ) : InterfaceManager {
     private var created: Boolean = false
     private var up: Boolean = false
-    private val tun = InMemoryTunPort()
 
     override fun exists(): Boolean = created
 
@@ -49,8 +46,6 @@ internal class TestInterfaceManager(
     override fun isUp(): Boolean = up
 
     override fun configuration(): VpnConfiguration = snapshotConfiguration(currentConfiguration)
-
-    override fun tunPort(): TunPort = tun
 
     override fun reconfigure(config: VpnConfiguration) {
         currentConfiguration = snapshotConfiguration(config)

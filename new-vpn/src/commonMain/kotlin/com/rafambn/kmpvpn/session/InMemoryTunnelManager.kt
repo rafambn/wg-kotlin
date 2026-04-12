@@ -4,7 +4,6 @@ import com.rafambn.kmpvpn.Engine
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.Vpn
-import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnPeerStats
 import com.rafambn.kmpvpn.matches
 import com.rafambn.kmpvpn.parseCidr
@@ -15,23 +14,23 @@ import com.rafambn.kmpvpn.requireUniquePeerPublicKeys
 import com.rafambn.kmpvpn.session.factory.BoringTunVpnSessionFactory
 import com.rafambn.kmpvpn.session.factory.QuicVpnSessionFactory
 import com.rafambn.kmpvpn.session.factory.VpnSessionFactory
-import com.rafambn.kmpvpn.session.io.TunPort
+import com.rafambn.kmpvpn.session.io.TunnelPacketPort
 import com.rafambn.kmpvpn.session.io.UdpDatagram
 import com.rafambn.kmpvpn.session.io.UdpEndpoint
 import com.rafambn.kmpvpn.session.io.UdpPort
-import com.rafambn.kmpvpn.session.io.VpnPacketLoop
 import com.rafambn.kmpvpn.session.io.VpnPacketResult
 
 internal class InMemoryTunnelManager(
     engine: Engine = Engine.BORINGTUN,
     private val sessionFactory: VpnSessionFactory = defaultFactory(engine),
     private val userspaceRuntimeFactory: UserspaceRuntimeFactory = PlatformUserspaceRuntimeFactory::create,
+    private val tunnelPacketPortProvider: (VpnConfiguration) -> TunnelPacketPort = { DiscardingTunnelPacketPort },
 ) : TunnelManager {
     private val sessionsByPeer: LinkedHashMap<String, ManagedSession> = linkedMapOf()
     private val peerStatsByPublicKey: MutableMap<String, MutablePeerStats> = linkedMapOf()
     private var runtimeHandle: UserspaceRuntimeHandle? = null
     private var runtimeKey: RuntimeKey? = null
-    private var runtimeTunPort: TunPort? = null
+    private var runtimeTunnelPacketPort: TunnelPacketPort = DiscardingTunnelPacketPort
 
     override fun reconcileSessions(config: VpnConfiguration) {
         requireUniquePeerPublicKeys(config.peers)
@@ -143,7 +142,6 @@ internal class InMemoryTunnelManager(
 
     override fun startRuntime(
         configuration: VpnConfiguration,
-        interfaceManager: InterfaceManager,
         onFailure: (Throwable) -> Unit,
     ) {
         if (sessionsByPeer.isEmpty()) {
@@ -161,7 +159,7 @@ internal class InMemoryTunnelManager(
         }
 
         safeStopRuntime()
-        runtimeTunPort = interfaceManager.tunPort()
+        runtimeTunnelPacketPort = tunnelPacketPortProvider(configuration)
         peerStatsByPublicKey.clear()
 
         val createdRuntime = userspaceRuntimeFactory(
@@ -204,11 +202,9 @@ internal class InMemoryTunnelManager(
         udpPort: UdpPort,
         periodicTicker: () -> Boolean,
     ): Boolean {
-        val tunPort = runtimeTunPort ?: return false
-
         var didWork = false
-        didWork = processTunInput(tunPort = tunPort, udpPort = udpPort) || didWork
-        didWork = processUdpInput(tunPort = tunPort, udpPort = udpPort) || didWork
+        didWork = processTunInput(tunnelPacketPort = runtimeTunnelPacketPort, udpPort = udpPort) || didWork
+        didWork = processUdpInput(tunnelPacketPort = runtimeTunnelPacketPort, udpPort = udpPort) || didWork
         if (periodicTicker()) {
             didWork = processPeriodicTasks(udpPort = udpPort) || didWork
         }
@@ -263,19 +259,19 @@ internal class InMemoryTunnelManager(
     }
 
     private suspend fun processTunInput(
-        tunPort: TunPort,
+        tunnelPacketPort: TunnelPacketPort,
         udpPort: UdpPort,
     ): Boolean {
-        val packet = tunPort.readPacket() ?: return false
+        val packet = tunnelPacketPort.readPacket() ?: return false
         val selected = selectSessionForPacket(
             packet = packet,
             sessions = managedSessions(),
         ) ?: return true
 
         applyPacketResult(
-            tunPort = tunPort,
+            tunnelPacketPort = tunnelPacketPort,
             udpPort = udpPort,
-            result = selected.session.encryptRawPacket(packet, VpnPacketLoop.DEFAULT_PACKET_BUFFER_SIZE),
+            result = selected.session.encryptRawPacket(packet, DEFAULT_PACKET_BUFFER_SIZE),
             managed = selected,
             endpoint = selected.peerEndpoint(),
             operation = "encryptRawPacket",
@@ -284,7 +280,7 @@ internal class InMemoryTunnelManager(
     }
 
     private suspend fun processUdpInput(
-        tunPort: TunPort,
+        tunnelPacketPort: TunnelPacketPort,
         udpPort: UdpPort,
     ): Boolean {
         val datagram = udpPort.receiveDatagram() ?: return false
@@ -297,13 +293,13 @@ internal class InMemoryTunnelManager(
 
         var result = selected.session.decryptToRawPacket(
             datagram.packet,
-            VpnPacketLoop.DEFAULT_PACKET_BUFFER_SIZE,
+            DEFAULT_PACKET_BUFFER_SIZE,
         )
         var iterations = 0
 
         while (result !is VpnPacketResult.Done) {
             applyPacketResult(
-                tunPort = tunPort,
+                tunnelPacketPort = tunnelPacketPort,
                 udpPort = udpPort,
                 result = result,
                 managed = selected,
@@ -312,7 +308,7 @@ internal class InMemoryTunnelManager(
             )
 
             iterations += 1
-            if (iterations >= VpnPacketLoop.DEFAULT_MAX_FLUSH_ITERATIONS) {
+            if (iterations >= DEFAULT_MAX_FLUSH_ITERATIONS) {
                 throw IllegalStateException(
                     "Session `${selected.session.peerPublicKey}` exceeded flush limit while decrypting packets",
                 )
@@ -320,7 +316,7 @@ internal class InMemoryTunnelManager(
 
             result = selected.session.decryptToRawPacket(
                 ByteArray(0),
-                VpnPacketLoop.DEFAULT_PACKET_BUFFER_SIZE,
+                DEFAULT_PACKET_BUFFER_SIZE,
             )
         }
 
@@ -330,13 +326,12 @@ internal class InMemoryTunnelManager(
     private suspend fun processPeriodicTasks(
         udpPort: UdpPort,
     ): Boolean {
-        val tunPort = runtimeTunPort ?: return false
         var didWork = false
         managedSessions().forEach { managed ->
             applyPacketResult(
-                tunPort = tunPort,
+                tunnelPacketPort = runtimeTunnelPacketPort,
                 udpPort = udpPort,
-                result = managed.session.runPeriodicTask(VpnPacketLoop.DEFAULT_PACKET_BUFFER_SIZE),
+                result = managed.session.runPeriodicTask(DEFAULT_PACKET_BUFFER_SIZE),
                 managed = managed,
                 endpoint = managed.peerEndpoint(),
                 operation = "runPeriodicTask",
@@ -347,7 +342,7 @@ internal class InMemoryTunnelManager(
     }
 
     private suspend fun applyPacketResult(
-        tunPort: TunPort,
+        tunnelPacketPort: TunnelPacketPort,
         udpPort: UdpPort,
         result: VpnPacketResult,
         managed: ManagedSession,
@@ -361,8 +356,8 @@ internal class InMemoryTunnelManager(
                 peerStatsByPublicKey.getOrPut(managed.peer.publicKey) { MutablePeerStats() }.transmittedBytes += result.packet.size.toLong()
             }
 
-            is VpnPacketResult.WriteToTunnelIpv4 -> tunPort.writePacket(result.packet)
-            is VpnPacketResult.WriteToTunnelIpv6 -> tunPort.writePacket(result.packet)
+            is VpnPacketResult.WriteToTunnelIpv4 -> tunnelPacketPort.writePacket(result.packet)
+            is VpnPacketResult.WriteToTunnelIpv6 -> tunnelPacketPort.writePacket(result.packet)
             is VpnPacketResult.Error -> {
                 throw IllegalStateException(
                     "Session `${managed.session.peerPublicKey}` returned error code `${result.code}` for `$operation`",
@@ -428,7 +423,7 @@ internal class InMemoryTunnelManager(
     private fun clearRuntimeState() {
         runtimeHandle = null
         runtimeKey = null
-        runtimeTunPort = null
+        runtimeTunnelPacketPort = DiscardingTunnelPacketPort
         peerStatsByPublicKey.clear()
     }
 
@@ -443,11 +438,20 @@ internal class InMemoryTunnelManager(
     }
 
     private companion object {
+        val DEFAULT_PACKET_BUFFER_SIZE: UInt = 65535u
+        const val DEFAULT_MAX_FLUSH_ITERATIONS: Int = 16
+
         fun defaultFactory(engine: Engine): VpnSessionFactory {
             return when (engine) {
                 Engine.BORINGTUN -> BoringTunVpnSessionFactory()
                 Engine.QUIC -> QuicVpnSessionFactory()
             }
         }
+    }
+
+    private data object DiscardingTunnelPacketPort : TunnelPacketPort {
+        override suspend fun readPacket(): ByteArray? = null
+
+        override suspend fun writePacket(packet: ByteArray) = Unit
     }
 }

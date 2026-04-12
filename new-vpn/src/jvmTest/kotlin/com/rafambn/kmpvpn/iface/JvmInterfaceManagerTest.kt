@@ -27,9 +27,7 @@ class JvmInterfaceManagerTest {
         )
 
         interfaceManager.create(config)
-        val firstTunPort = interfaceManager.tunPort()
         interfaceManager.create(config)
-        val secondTunPort = interfaceManager.tunPort()
         interfaceManager.up()
         interfaceManager.up()
         interfaceManager.down()
@@ -37,10 +35,8 @@ class JvmInterfaceManagerTest {
         interfaceManager.delete()
         interfaceManager.delete()
 
-        assertTrue(firstTunPort === secondTunPort)
         assertEquals(1, executor.setInterfaceUpCalls.count { call -> call == ("utun150" to true) })
         assertEquals(1, executor.setInterfaceUpCalls.count { call -> call == ("utun150" to false) })
-        assertFailsWith<IllegalStateException> { interfaceManager.tunPort() }
         assertFalse(interfaceManager.exists())
     }
 

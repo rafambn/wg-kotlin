@@ -1,8 +1,8 @@
 package com.rafambn.kmpvpn.session.io
 
-class InMemoryTunPort(
+class InMemoryTunnelPacketPort(
     private val incomingPackets: ArrayDeque<ByteArray> = ArrayDeque(),
-) : TunPort {
+) : TunnelPacketPort {
     val writtenPackets: MutableList<ByteArray> = mutableListOf()
 
     override suspend fun readPacket(): ByteArray? {

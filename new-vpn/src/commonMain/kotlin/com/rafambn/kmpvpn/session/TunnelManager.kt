@@ -1,7 +1,6 @@
 package com.rafambn.kmpvpn.session
 
 import com.rafambn.kmpvpn.VpnConfiguration
-import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnPeerStats
 
 /**
@@ -45,7 +44,6 @@ interface TunnelManager {
      */
     fun startRuntime(
         configuration: VpnConfiguration,
-        interfaceManager: InterfaceManager,
         onFailure: (Throwable) -> Unit = {},
     )
 

@@ -2,13 +2,11 @@ package com.rafambn.kmpvpn.session
 
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
-import com.rafambn.kmpvpn.iface.InterfaceManager
-import com.rafambn.kmpvpn.iface.VpnInterfaceInformation
 import com.rafambn.kmpvpn.session.factory.VpnSessionFactory
-import com.rafambn.kmpvpn.session.io.InMemoryTunPort
+import com.rafambn.kmpvpn.session.io.InMemoryTunnelPacketPort
 import com.rafambn.kmpvpn.session.io.InMemoryUdpPort
 import com.rafambn.kmpvpn.session.io.ManualPeriodicTicker
-import com.rafambn.kmpvpn.session.io.TunPort
+import com.rafambn.kmpvpn.session.io.TunnelPacketPort
 import com.rafambn.kmpvpn.session.io.UdpDatagram
 import com.rafambn.kmpvpn.session.io.UdpEndpoint
 import com.rafambn.kmpvpn.session.io.VpnPacketResult
@@ -30,7 +28,10 @@ class InMemoryTunnelManagerDataPlaneTest {
             peerPublicKey = "peer-b",
             encryptResults = ArrayDeque(listOf(VpnPacketResult.WriteToNetwork(byteArrayOf(2)))),
         )
-        val manager = manager(peerA, peerB)
+        val tunnelPacketPort = InMemoryTunnelPacketPort(
+            incomingPackets = ArrayDeque(listOf(ipv4Packet(destination = byteArrayOf(10, 1, 2, 3)))),
+        )
+        val manager = manager(peerA, peerB, tunnelPacketPort = tunnelPacketPort)
         val configuration = configuration(
             peers = listOf(
                 peer(
@@ -47,13 +48,10 @@ class InMemoryTunnelManagerDataPlaneTest {
                 ),
             ),
         )
-        val tunPort = InMemoryTunPort(
-            incomingPackets = ArrayDeque(listOf(ipv4Packet(destination = byteArrayOf(10, 1, 2, 3)))),
-        )
         val udpPort = InMemoryUdpPort()
 
         manager.reconcileSessions(configuration)
-        manager.startRuntime(configuration, TunOnlyInterfaceManager(tunPort, configuration))
+        manager.startRuntime(configuration)
         manager.pollRuntimeOnce(udpPort) { false }
 
         assertEquals(1, udpPort.sentDatagrams.size)
@@ -65,8 +63,12 @@ class InMemoryTunnelManagerDataPlaneTest {
 
     @Test
     fun unknownDestinationPacketsAreDropped() = runTest {
+        val tunnelPacketPort = InMemoryTunnelPacketPort(
+            incomingPackets = ArrayDeque(listOf(ipv4Packet(destination = byteArrayOf(172.toByte(), 16, 0, 1)))),
+        )
         val manager = manager(
             QueueVpnSession(peerPublicKey = "peer-a"),
+            tunnelPacketPort = tunnelPacketPort,
         )
         val configuration = configuration(
             peers = listOf(
@@ -78,13 +80,10 @@ class InMemoryTunnelManagerDataPlaneTest {
                 ),
             ),
         )
-        val tunPort = InMemoryTunPort(
-            incomingPackets = ArrayDeque(listOf(ipv4Packet(destination = byteArrayOf(172.toByte(), 16, 0, 1)))),
-        )
         val udpPort = InMemoryUdpPort()
 
         manager.reconcileSessions(configuration)
-        manager.startRuntime(configuration, TunOnlyInterfaceManager(tunPort, configuration))
+        manager.startRuntime(configuration)
         manager.pollRuntimeOnce(udpPort) { false }
 
         assertTrue(udpPort.sentDatagrams.isEmpty())
@@ -101,7 +100,8 @@ class InMemoryTunnelManagerDataPlaneTest {
             peerPublicKey = "peer-b",
             decryptResults = ArrayDeque(listOf(VpnPacketResult.WriteToTunnelIpv4(byteArrayOf(9, 9, 9)), VpnPacketResult.Done)),
         )
-        val manager = manager(peerA, peerB)
+        val tunnelPacketPort = InMemoryTunnelPacketPort()
+        val manager = manager(peerA, peerB, tunnelPacketPort = tunnelPacketPort)
         val configuration = configuration(
             peers = listOf(
                 peer(
@@ -118,7 +118,6 @@ class InMemoryTunnelManagerDataPlaneTest {
                 ),
             ),
         )
-        val tunPort = InMemoryTunPort()
         val udpPort = InMemoryUdpPort(
             incomingDatagrams = ArrayDeque(
                 listOf(
@@ -131,13 +130,13 @@ class InMemoryTunnelManagerDataPlaneTest {
         )
 
         manager.reconcileSessions(configuration)
-        manager.startRuntime(configuration, TunOnlyInterfaceManager(tunPort, configuration))
+        manager.startRuntime(configuration)
         manager.pollRuntimeOnce(udpPort) { false }
 
         assertEquals(0, peerA.decryptInputs.size)
         assertEquals(2, peerB.decryptInputs.size)
         assertContentEquals(byteArrayOf(7, 8, 9), peerB.decryptInputs.first())
-        assertEquals(1, tunPort.writtenPackets.size)
+        assertEquals(1, tunnelPacketPort.writtenPackets.size)
         assertEquals(3L, manager.peerStats().single { it.publicKey == "peer-b" }.receivedBytes)
     }
 
@@ -171,7 +170,7 @@ class InMemoryTunnelManagerDataPlaneTest {
         val udpPort = InMemoryUdpPort()
 
         manager.reconcileSessions(configuration)
-        manager.startRuntime(configuration, TunOnlyInterfaceManager(InMemoryTunPort(), configuration))
+        manager.startRuntime(configuration)
         manager.pollRuntimeOnce(
             udpPort = udpPort,
             periodicTicker = ManualPeriodicTicker(values = ArrayDeque(listOf(true))),
@@ -184,10 +183,14 @@ class InMemoryTunnelManagerDataPlaneTest {
         assertEquals(1L, manager.peerStats().single { it.publicKey == "peer-b" }.transmittedBytes)
     }
 
-    private fun manager(vararg sessions: QueueVpnSession): InMemoryTunnelManager {
+    private fun manager(
+        vararg sessions: QueueVpnSession,
+        tunnelPacketPort: TunnelPacketPort = InMemoryTunnelPacketPort(),
+    ): InMemoryTunnelManager {
         return InMemoryTunnelManager(
             sessionFactory = RecordingSessionFactory(sessions.associateBy { session -> session.peerPublicKey }),
             userspaceRuntimeFactory = { _, _, _, _, _ -> null },
+            tunnelPacketPortProvider = { tunnelPacketPort },
         )
     }
 
@@ -255,35 +258,6 @@ class InMemoryTunnelManagerDataPlaneTest {
             }
             session.sessionIndex = sessionIndex
             return session
-        }
-    }
-
-    private class TunOnlyInterfaceManager(
-        private val tun: TunPort,
-        private var configuration: VpnConfiguration,
-    ) : InterfaceManager {
-        override fun exists(): Boolean = true
-
-        override fun create(config: VpnConfiguration) = Unit
-
-        override fun up() = Unit
-
-        override fun down() = Unit
-
-        override fun delete() = Unit
-
-        override fun isUp(): Boolean = true
-
-        override fun configuration(): VpnConfiguration = configuration
-
-        override fun tunPort(): TunPort = tun
-
-        override fun reconfigure(config: VpnConfiguration) {
-            configuration = config
-        }
-
-        override fun readInformation(): VpnInterfaceInformation {
-            throw UnsupportedOperationException("readInformation is not used in data-plane tests")
         }
     }
 

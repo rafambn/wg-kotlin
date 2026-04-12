@@ -5,8 +5,6 @@ import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnPeerStats
 import com.rafambn.kmpvpn.session.InMemoryTunnelManager
 import com.rafambn.kmpvpn.session.UserspaceRuntimeHandle
-import com.rafambn.kmpvpn.session.io.InMemoryTunPort
-import com.rafambn.kmpvpn.session.io.TunPort
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -186,7 +184,6 @@ class VpnUserspaceRuntimeIntegrationTest {
     ) : InterfaceManager {
         private var created: Boolean = false
         private var currentConfiguration: VpnConfiguration = snapshotConfiguration(initialConfiguration)
-        private val tun = InMemoryTunPort()
 
         override fun exists(): Boolean = created
 
@@ -206,8 +203,6 @@ class VpnUserspaceRuntimeIntegrationTest {
         override fun isUp(): Boolean = true
 
         override fun configuration(): VpnConfiguration = snapshotConfiguration(currentConfiguration)
-
-        override fun tunPort(): TunPort = tun
 
         override fun reconfigure(config: VpnConfiguration) {
             currentConfiguration = snapshotConfiguration(config)
@@ -274,7 +269,6 @@ class VpnUserspaceRuntimeIntegrationTest {
         private var created: Boolean = false
         private var up: Boolean = false
         private var currentConfiguration: VpnConfiguration? = null
-        private val tun = InMemoryTunPort()
         var downCalls: Int = 0
 
         override fun exists(): Boolean = created
@@ -304,8 +298,6 @@ class VpnUserspaceRuntimeIntegrationTest {
         override fun configuration(): VpnConfiguration {
             return snapshotConfiguration(checkNotNull(currentConfiguration))
         }
-
-        override fun tunPort(): TunPort = tun
 
         override fun reconfigure(config: VpnConfiguration) {
             currentConfiguration = snapshotConfiguration(config)

@@ -140,10 +140,7 @@ class Vpn internal constructor(
         }
 
         try {
-            tunnelManager.startRuntime(
-                configuration = currentConfiguration,
-                interfaceManager = managedInterface,
-            )
+            tunnelManager.startRuntime(configuration = currentConfiguration)
         } catch (throwable: Throwable) {
             managedInterface.down()
             tunnelManager.closeAll()
@@ -278,10 +275,7 @@ class Vpn internal constructor(
 
         if (interfaceManager.isUp()) {
             try {
-                tunnelManager.startRuntime(
-                    configuration = interfaceManager.configuration(),
-                    interfaceManager = interfaceManager,
-                )
+                tunnelManager.startRuntime(configuration = interfaceManager.configuration(),)
             } catch (throwable: Throwable) {
                 throw IllegalStateException(
                     "Session operation `startRuntime` failed: ${throwable.message ?: "unknown"}",

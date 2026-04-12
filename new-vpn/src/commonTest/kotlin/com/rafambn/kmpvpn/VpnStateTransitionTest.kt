@@ -3,8 +3,6 @@ package com.rafambn.kmpvpn
 import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnInterfaceInformation
 import com.rafambn.kmpvpn.session.InMemoryTunnelManager
-import com.rafambn.kmpvpn.session.io.InMemoryTunPort
-import com.rafambn.kmpvpn.session.io.TunPort
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -115,14 +113,6 @@ class VpnStateTransitionTest {
             return checkNotNull(currentConfiguration)
         }
 
-        override fun tunPort(): TunPort {
-            return object : TunPort {
-                override suspend fun readPacket(): ByteArray? = null
-
-                override suspend fun writePacket(packet: ByteArray) = Unit
-            }
-        }
-
         override fun reconfigure(config: VpnConfiguration) {
             currentConfiguration = config
         }
@@ -143,7 +133,6 @@ class VpnStateTransitionTest {
         private var currentConfiguration: VpnConfiguration,
     ) : InterfaceManager {
         private var up: Boolean = false
-        private val tun = InMemoryTunPort()
 
         override fun exists(): Boolean = true
 
@@ -166,8 +155,6 @@ class VpnStateTransitionTest {
         override fun isUp(): Boolean = up
 
         override fun configuration(): VpnConfiguration = currentConfiguration
-
-        override fun tunPort(): TunPort = tun
 
         override fun reconfigure(config: VpnConfiguration) {
             currentConfiguration = config

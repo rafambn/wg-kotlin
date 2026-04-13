@@ -2,7 +2,6 @@ package com.rafambn.kmpvpn.session
 
 import com.rafambn.kmpvpn.Engine
 import com.rafambn.kmpvpn.VpnConfiguration
-import com.rafambn.kmpvpn.VpnPeer
 import com.rafambn.kmpvpn.Vpn
 import com.rafambn.kmpvpn.iface.VpnPeerStats
 import com.rafambn.kmpvpn.matches
@@ -14,6 +13,7 @@ import com.rafambn.kmpvpn.requireUniquePeerPublicKeys
 import com.rafambn.kmpvpn.session.factory.BoringTunPeerSessionFactory
 import com.rafambn.kmpvpn.session.factory.QuicPeerSessionFactory
 import com.rafambn.kmpvpn.session.factory.PeerSessionFactory
+import com.rafambn.kmpvpn.session.io.BufferedTunPacketPort
 import com.rafambn.kmpvpn.session.io.TunPacketPort
 import com.rafambn.kmpvpn.session.io.UdpDatagram
 import com.rafambn.kmpvpn.session.io.UdpEndpoint
@@ -23,7 +23,7 @@ import com.rafambn.kmpvpn.session.io.PacketAction
 internal class TunnelManagerImpl(
     engine: Engine = Engine.BORINGTUN,
     private val peerSessionFactory: PeerSessionFactory = defaultFactory(engine),
-    private val tunPacketPortProvider: (VpnConfiguration) -> TunPacketPort = { DiscardingTunPacketPort },
+    private val tunPacketPortProvider: (VpnConfiguration) -> TunPacketPort = { BufferedTunPacketPort() },
 ) : TunnelManager {
     private val sessionEntriesByPeer: MutableMap<String, PeerSessionEntry> = mutableMapOf()
     private val peerStatsByPublicKey: MutableMap<String, MutablePeerStats> = mutableMapOf()

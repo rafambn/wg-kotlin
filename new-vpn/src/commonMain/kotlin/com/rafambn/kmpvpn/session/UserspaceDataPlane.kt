@@ -19,9 +19,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlin.time.Duration
-import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.TimeSource
 
 private const val DEFAULT_RECEIVE_TIMEOUT_MILLIS: Long = 50L
 private const val DEFAULT_IDLE_DELAY_MILLIS: Long = 10L
@@ -29,20 +26,22 @@ private const val DEFAULT_PERIODIC_INTERVAL_MILLIS: Long = 100L
 
 internal class UserspaceDataPlane(
     configuration: VpnConfiguration,
-    private val onFailure: (Throwable) -> Unit,
     listenPort: Int,
-    receiveTimeoutMillis: Long = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
-    private val idleDelayMillis: Long = DEFAULT_IDLE_DELAY_MILLIS,
-    periodicIntervalMillis: Long = DEFAULT_PERIODIC_INTERVAL_MILLIS,
-    private val pollDataPlaneOnce: suspend (UdpPort, () -> Boolean) -> Boolean,
-    private val peerStatsProvider: () -> List<VpnPeerStats>,
+    private val pollInboundPacketOnce: suspend (UdpPort) -> Boolean,
+    private val pollOutboundPacketOnce: suspend (UdpPort) -> Boolean,
+    private val runPeriodicWorkOnce: suspend (UdpPort) -> Boolean,
+    private val peerStatsProvider: suspend () -> List<VpnPeerStats>,
+    private val onFailure: (Throwable) -> Unit,
 ) : AutoCloseable {
+    private val idleDelayMillis: Long = DEFAULT_IDLE_DELAY_MILLIS
     private val running = MutableStateFlow(true)
     private val peerStatsSnapshot = MutableStateFlow<List<VpnPeerStats>>(emptyList())
+    private val periodicIntervalDelayMillis = DEFAULT_PERIODIC_INTERVAL_MILLIS
+    private val coroutineLabel = "kmpvpn-data-plane-${configuration.interfaceName}"
     private val scope = CoroutineScope(
         SupervisorJob() +
             Dispatchers.Default +
-            CoroutineName("kmpvpn-data-plane-${configuration.interfaceName}"),
+            CoroutineName(coroutineLabel),
     )
     private val selectorManager = SelectorManager(scope.coroutineContext)
     private val socket: BoundDatagramSocket = runBlocking {
@@ -50,17 +49,24 @@ internal class UserspaceDataPlane(
             InetSocketAddress("0.0.0.0", listenPort),
         )
     }
-    private val periodicTicker = FixedIntervalTicker(periodicIntervalMillis)
     private val udpPort = KtorDatagramUdpPort(
         socket = socket,
-        receiveTimeoutMillis = receiveTimeoutMillis,
+        receiveTimeoutMillis = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
     )
-    private val dataPlaneJob = scope.launch {
-        runDataPlaneLoop()
+    private val inboundJob = scope.launch(CoroutineName("$coroutineLabel-inbound")) {
+        runInboundLoop()
+    }
+    private val outboundJob = scope.launch(CoroutineName("$coroutineLabel-outbound")) {
+        runOutboundLoop()
+    }
+    private val periodicJob = scope.launch(CoroutineName("$coroutineLabel-periodic")) {
+        runPeriodicLoop()
     }
 
     init {
-        peerStatsSnapshot.value = peerStatsProvider()
+        peerStatsSnapshot.value = runBlocking {
+            peerStatsProvider()
+        }
     }
 
     fun isRunning(): Boolean {
@@ -80,46 +86,68 @@ internal class UserspaceDataPlane(
             running.value = false
             socket.close()
             selectorManager.close()
-            dataPlaneJob.cancelAndJoin()
+            inboundJob.cancelAndJoin()
+            outboundJob.cancelAndJoin()
+            periodicJob.cancelAndJoin()
             scope.cancel()
             peerStatsSnapshot.value = peerStatsProvider()
         }
     }
 
-    private suspend fun runDataPlaneLoop() {
+    private suspend fun runInboundLoop() {
+        runWorkerLoop {
+            pollInboundPacketOnce(udpPort)
+        }
+    }
+
+    private suspend fun runOutboundLoop() {
+        runWorkerLoop {
+            pollOutboundPacketOnce(udpPort)
+        }
+    }
+
+    private suspend fun runPeriodicLoop() {
+        runWorkerLoop(
+            initialDelayMillis = periodicIntervalDelayMillis,
+            idleDelayMillis = periodicIntervalDelayMillis,
+            delayAfterEachIteration = true,
+            work = {
+                runPeriodicWorkOnce(udpPort)
+            },
+        )
+    }
+
+    private suspend fun runWorkerLoop(
+        initialDelayMillis: Long = 0L,
+        idleDelayMillis: Long = this.idleDelayMillis,
+        delayAfterEachIteration: Boolean = false,
+        work: suspend () -> Boolean,
+    ) {
         try {
+            delay(initialDelayMillis.coerceAtLeast(0L))
             while (running.value) {
-                val didWork = pollDataPlaneOnce(udpPort, periodicTicker::shouldTick)
+                val didWork = work()
                 peerStatsSnapshot.value = peerStatsProvider()
-                if (!didWork) {
+                if (delayAfterEachIteration || !didWork) {
                     delay(idleDelayMillis.coerceAtLeast(0L))
                 }
             }
         } catch (_: CancellationException) {
             // shutdown path
         } catch (throwable: Throwable) {
-            if (running.value) {
-                running.value = false
-                onFailure(throwable)
-            }
-        } finally {
-            peerStatsSnapshot.value = peerStatsProvider()
-            running.value = false
+            handleWorkerFailure(throwable)
         }
     }
 
-    private class FixedIntervalTicker(
-        intervalMillis: Long,
-    ) {
-        private val interval: Duration = intervalMillis.coerceAtLeast(1L).milliseconds
-        private var nextTick = TimeSource.Monotonic.markNow() + interval
-
-        fun shouldTick(): Boolean {
-            if (nextTick.hasNotPassedNow()) {
-                return false
-            }
-            nextTick = TimeSource.Monotonic.markNow() + interval
-            return true
+    private suspend fun handleWorkerFailure(throwable: Throwable) {
+        if (!running.compareAndSet(expect = true, update = false)) {
+            return
         }
+
+        socket.close()
+        selectorManager.close()
+        peerStatsSnapshot.value = peerStatsProvider()
+        onFailure(throwable)
+        scope.cancel("userspace data plane worker failed", throwable)
     }
 }

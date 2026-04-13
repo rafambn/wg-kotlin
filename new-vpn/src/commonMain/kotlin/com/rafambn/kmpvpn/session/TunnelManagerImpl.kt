@@ -14,20 +14,24 @@ import com.rafambn.kmpvpn.session.factory.BoringTunPeerSessionFactory
 import com.rafambn.kmpvpn.session.factory.QuicPeerSessionFactory
 import com.rafambn.kmpvpn.session.factory.PeerSessionFactory
 import com.rafambn.kmpvpn.session.io.BufferedTunPacketPort
+import com.rafambn.kmpvpn.session.io.DiscardingTunPacketPort
 import com.rafambn.kmpvpn.session.io.TunPacketPort
 import com.rafambn.kmpvpn.session.io.UdpDatagram
 import com.rafambn.kmpvpn.session.io.UdpEndpoint
 import com.rafambn.kmpvpn.session.io.UdpPort
 import com.rafambn.kmpvpn.session.io.PacketAction
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 internal class TunnelManagerImpl(
     engine: Engine = Engine.BORINGTUN,
     private val peerSessionFactory: PeerSessionFactory = defaultFactory(engine),
-    private val tunPacketPortProvider: (VpnConfiguration) -> TunPacketPort = { BufferedTunPacketPort() },
 ) : TunnelManager {
+    private val dataPlaneMutex = Mutex()
     private val sessionEntriesByPeer: MutableMap<String, PeerSessionEntry> = mutableMapOf()
-    private val peerStatsByPublicKey: MutableMap<String, MutablePeerStats> = mutableMapOf()
     private var dataPlane: UserspaceDataPlane? = null
+    private val peerStatsByPublicKey: MutableMap<String, MutablePeerStats> = mutableMapOf()
+
     private var dataPlaneTunPacketPort: TunPacketPort = DiscardingTunPacketPort
 
     override fun reconcileSessions(config: VpnConfiguration) {
@@ -125,7 +129,7 @@ internal class TunnelManagerImpl(
         }
 
         stopDataPlaneQuietly()
-        dataPlaneTunPacketPort = tunPacketPortProvider(configuration)
+        dataPlaneTunPacketPort = BufferedTunPacketPort()
         peerStatsByPublicKey.clear()
 
         val createdDataPlane = UserspaceDataPlane(
@@ -135,8 +139,10 @@ internal class TunnelManagerImpl(
                 clearDataPlaneState()
                 closePeerSessionsOnly()
             },
-            pollDataPlaneOnce = ::pollDataPlaneOnce,
-            peerStatsProvider = ::currentPeerStats,
+            pollInboundPacketOnce = ::pollInboundPacketOnce,
+            pollOutboundPacketOnce = ::pollOutboundPacketOnce,
+            runPeriodicWorkOnce = ::runPeriodicWorkOnce,
+            peerStatsProvider = ::currentPeerStatsSnapshot,
         )
 
         dataPlane = createdDataPlane
@@ -162,24 +168,45 @@ internal class TunnelManagerImpl(
             }
     }
 
-    private suspend fun pollDataPlaneOnce(
-        networkPort: UdpPort,
-        periodicTicker: () -> Boolean,
-    ): Boolean {
-        var didWork = false
-        didWork = processTunnelOutboundPacket(tunnelPort = dataPlaneTunPacketPort, networkPort = networkPort) || didWork
-        didWork = processNetworkInboundPacket(tunnelPort = dataPlaneTunPacketPort, networkPort = networkPort) || didWork
-        if (periodicTicker()) {
-            didWork = processPeriodicTasks(networkPort = networkPort) || didWork
+    private suspend fun currentPeerStatsSnapshot(): List<VpnPeerStats> {
+        return dataPlaneMutex.withLock {
+            currentPeerStats()
         }
-        return didWork
+    }
+
+    private suspend fun pollInboundPacketOnce(networkPort: UdpPort): Boolean {
+        val datagram = networkPort.receiveDatagram() ?: return false
+        return dataPlaneMutex.withLock {
+            processNetworkInboundPacket(
+                tunnelPort = dataPlaneTunPacketPort,
+                networkPort = networkPort,
+                datagram = datagram,
+            )
+        }
+    }
+
+    private suspend fun pollOutboundPacketOnce(networkPort: UdpPort): Boolean {
+        val packet = dataPlaneTunPacketPort.readPacket() ?: return false
+        return dataPlaneMutex.withLock {
+            processTunnelOutboundPacket(
+                tunnelPort = dataPlaneTunPacketPort,
+                networkPort = networkPort,
+                packet = packet,
+            )
+        }
+    }
+
+    private suspend fun runPeriodicWorkOnce(networkPort: UdpPort): Boolean {
+        return dataPlaneMutex.withLock {
+            processPeriodicTasks(networkPort = networkPort)
+        }
     }
 
     private suspend fun processTunnelOutboundPacket(
         tunnelPort: TunPacketPort,
         networkPort: UdpPort,
+        packet: ByteArray,
     ): Boolean {
-        val packet = tunnelPort.readPacket() ?: return false
         val selected = selectSessionForPacket(
             packet = packet,
             sessionEntries = sessionEntriesByPeer.values,
@@ -199,8 +226,8 @@ internal class TunnelManagerImpl(
     private suspend fun processNetworkInboundPacket(
         tunnelPort: TunPacketPort,
         networkPort: UdpPort,
+        datagram: UdpDatagram,
     ): Boolean {
-        val datagram = networkPort.receiveDatagram() ?: return false
         val selected = sessionEntriesByPeer.values.firstOrNull { entry ->
             entry.peer.endpointAddress == datagram.remoteEndpoint.address &&
                     entry.peer.endpointPort == datagram.remoteEndpoint.port
@@ -358,11 +385,5 @@ internal class TunnelManagerImpl(
                 Engine.QUIC -> QuicPeerSessionFactory()
             }
         }
-    }
-
-    private data object DiscardingTunPacketPort : TunPacketPort {
-        override suspend fun readPacket(): ByteArray? = null
-
-        override suspend fun writePacket(packet: ByteArray) = Unit
     }
 }

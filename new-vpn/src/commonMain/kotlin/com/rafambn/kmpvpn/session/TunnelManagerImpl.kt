@@ -145,7 +145,7 @@ internal class TunnelManagerImpl(
     }
 
     override fun peerStats(): List<VpnPeerStats> {
-        return sortedSessionEntries()
+        return sessionEntriesByPeer.values.toList()
             .map { entry ->
                 val stats = peerStatsByPublicKey[entry.peer.publicKey] ?: MutablePeerStats()
                 VpnPeerStats(
@@ -226,7 +226,7 @@ internal class TunnelManagerImpl(
     private suspend fun runPeriodicWorkOnce(networkPort: UdpPort): Boolean {
         return dataPlaneMutex.withLock {
             var didWork = false
-            sortedSessionEntries().forEach { entry ->
+            sessionEntriesByPeer.values.toList().forEach { entry ->
                 applyPacketResult(
                     tunnelPort = dataPlaneTunPacketPort,
                     networkPort = networkPort,
@@ -288,17 +288,6 @@ internal class TunnelManagerImpl(
             }
             .maxByOrNull { (_, route) -> route.prefixLength }
             ?.first
-    }
-
-    private fun sortedSessionEntries(): List<PeerSessionEntry> {
-        return sessionEntriesByPeer.values.sortedBy { entry -> entry.session.peerIndex }
-    }
-
-    private fun PeerSessionEntry.peerEndpoint(): UdpEndpoint {
-        return UdpEndpoint(
-            address = checkNotNull(peer.endpointAddress) { "Peer `${peer.publicKey}` is missing endpointAddress" },
-            port = checkNotNull(peer.endpointPort) { "Peer `${peer.publicKey}` is missing endpointPort" },
-        )
     }
 
     private fun closePeerSessionsOnly() {

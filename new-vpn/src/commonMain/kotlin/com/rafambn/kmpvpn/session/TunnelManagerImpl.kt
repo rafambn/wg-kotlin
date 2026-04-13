@@ -60,10 +60,18 @@ internal class TunnelManagerImpl(
                     return@forEach
                 }
 
-                val sessionEntry = createPeerSessionEntry(
+                val createdSession = peerSessionFactory.create(
                     config = config,
-                    desiredPeer = desiredPeer,
-                    desiredIndex = desiredIndex,
+                    peer = desiredPeer,
+                    peerIndex = desiredIndex,
+                )
+                require(createdSession.isActive) {
+                    "Session factory must return active peer sessions"
+                }
+
+                val sessionEntry = PeerSessionEntry(
+                    peer = desiredPeer,
+                    session = createdSession,
                 )
 
                 createdSessions += sessionEntry
@@ -93,32 +101,6 @@ internal class TunnelManagerImpl(
 
     override fun hasActiveSessions(): Boolean {
         return sessionEntriesByPeer.values.any { entry -> entry.session.isActive }
-    }
-
-    fun sessionSnapshots(): List<PeerSessionSnapshot> {
-        return sortedSessionEntries()
-            .map { entry ->
-                PeerSessionSnapshot(
-                    peerPublicKey = entry.peer.publicKey,
-                    endpointAddress = entry.peer.endpointAddress,
-                    endpointPort = entry.peer.endpointPort,
-                    allowedIps = entry.peer.allowedIps,
-                    peerIndex = entry.session.peerIndex,
-                    isActive = entry.session.isActive,
-                )
-            }
-    }
-
-    fun sessionSnapshot(peerKey: String): PeerSessionSnapshot? {
-        val entry = sessionEntriesByPeer[peerKey] ?: return null
-        return PeerSessionSnapshot(
-            peerPublicKey = entry.peer.publicKey,
-            endpointAddress = entry.peer.endpointAddress,
-            endpointPort = entry.peer.endpointPort,
-            allowedIps = entry.peer.allowedIps,
-            peerIndex = entry.session.peerIndex,
-            isActive = entry.session.isActive,
-        )
     }
 
     override fun closeAll() {
@@ -181,51 +163,31 @@ internal class TunnelManagerImpl(
     }
 
     private suspend fun pollDataPlaneOnce(
-        udpPort: UdpPort,
+        networkPort: UdpPort,
         periodicTicker: () -> Boolean,
     ): Boolean {
         var didWork = false
-        didWork = processTunInput(tunPacketPort = dataPlaneTunPacketPort, udpPort = udpPort) || didWork
-        didWork = processUdpInput(tunPacketPort = dataPlaneTunPacketPort, udpPort = udpPort) || didWork
+        didWork = processTunnelOutboundPacket(tunnelPort = dataPlaneTunPacketPort, networkPort = networkPort) || didWork
+        didWork = processNetworkInboundPacket(tunnelPort = dataPlaneTunPacketPort, networkPort = networkPort) || didWork
         if (periodicTicker()) {
-            didWork = processPeriodicTasks(udpPort = udpPort) || didWork
+            didWork = processPeriodicTasks(networkPort = networkPort) || didWork
         }
         return didWork
     }
 
-    private fun createPeerSessionEntry(
-        config: VpnConfiguration,
-        desiredPeer: VpnPeer,
-        desiredIndex: Int,
-    ): PeerSessionEntry {
-        val createdSession = peerSessionFactory.create(
-            config = config,
-            peer = desiredPeer,
-            peerIndex = desiredIndex,
-        )
-        require(createdSession.isActive) {
-            "Session factory must return active peer sessions"
-        }
-
-        return PeerSessionEntry(
-            peer = desiredPeer,
-            session = createdSession,
-        )
-    }
-
-    private suspend fun processTunInput(
-        tunPacketPort: TunPacketPort,
-        udpPort: UdpPort,
+    private suspend fun processTunnelOutboundPacket(
+        tunnelPort: TunPacketPort,
+        networkPort: UdpPort,
     ): Boolean {
-        val packet = tunPacketPort.readPacket() ?: return false
+        val packet = tunnelPort.readPacket() ?: return false
         val selected = selectSessionForPacket(
             packet = packet,
             sessionEntries = sessionEntriesByPeer.values,
         ) ?: return true
 
         applyPacketResult(
-            tunPacketPort = tunPacketPort,
-            udpPort = udpPort,
+            tunnelPort = tunnelPort,
+            networkPort = networkPort,
             result = selected.session.encryptRawPacket(packet, DEFAULT_PACKET_BUFFER_SIZE),
             sessionEntry = selected,
             endpoint = selected.peerEndpoint(),
@@ -234,11 +196,11 @@ internal class TunnelManagerImpl(
         return true
     }
 
-    private suspend fun processUdpInput(
-        tunPacketPort: TunPacketPort,
-        udpPort: UdpPort,
+    private suspend fun processNetworkInboundPacket(
+        tunnelPort: TunPacketPort,
+        networkPort: UdpPort,
     ): Boolean {
-        val datagram = udpPort.receiveDatagram() ?: return false
+        val datagram = networkPort.receiveDatagram() ?: return false
         val selected = sessionEntriesByPeer.values.firstOrNull { entry ->
             entry.peer.endpointAddress == datagram.endpoint.host &&
                     entry.peer.endpointPort == datagram.endpoint.port
@@ -254,8 +216,8 @@ internal class TunnelManagerImpl(
 
         while (result !is PacketAction.Done) {
             applyPacketResult(
-                tunPacketPort = tunPacketPort,
-                udpPort = udpPort,
+                tunnelPort = tunnelPort,
+                networkPort = networkPort,
                 result = result,
                 sessionEntry = selected,
                 endpoint = selected.peerEndpoint(),
@@ -279,13 +241,13 @@ internal class TunnelManagerImpl(
     }
 
     private suspend fun processPeriodicTasks(
-        udpPort: UdpPort,
+        networkPort: UdpPort,
     ): Boolean {
         var didWork = false
         sortedSessionEntries().forEach { entry ->
             applyPacketResult(
-                tunPacketPort = dataPlaneTunPacketPort,
-                udpPort = udpPort,
+                tunnelPort = dataPlaneTunPacketPort,
+                networkPort = networkPort,
                 result = entry.session.runPeriodicTask(DEFAULT_PACKET_BUFFER_SIZE),
                 sessionEntry = entry,
                 endpoint = entry.peerEndpoint(),
@@ -297,8 +259,8 @@ internal class TunnelManagerImpl(
     }
 
     private suspend fun applyPacketResult(
-        tunPacketPort: TunPacketPort,
-        udpPort: UdpPort,
+        tunnelPort: TunPacketPort,
+        networkPort: UdpPort,
         result: PacketAction,
         sessionEntry: PeerSessionEntry,
         endpoint: UdpEndpoint,
@@ -307,12 +269,12 @@ internal class TunnelManagerImpl(
         when (result) {
             PacketAction.Done -> Unit
             is PacketAction.WriteToNetwork -> {
-                udpPort.sendDatagram(UdpDatagram(packet = result.packet, endpoint = endpoint))
+                networkPort.sendDatagram(UdpDatagram(packet = result.packet, endpoint = endpoint))
                 peerStatsByPublicKey.getOrPut(sessionEntry.peer.publicKey) { MutablePeerStats() }.transmittedBytes += result.packet.size.toLong()
             }
 
-            is PacketAction.WriteToTunIpv4 -> tunPacketPort.writePacket(result.packet)
-            is PacketAction.WriteToTunIpv6 -> tunPacketPort.writePacket(result.packet)
+            is PacketAction.WriteToTunIpv4 -> tunnelPort.writePacket(result.packet)
+            is PacketAction.WriteToTunIpv6 -> tunnelPort.writePacket(result.packet)
             is PacketAction.Error -> {
                 throw IllegalStateException(
                     "Session `${sessionEntry.session.peerPublicKey}` returned error code `${result.code}` for `$operation`",

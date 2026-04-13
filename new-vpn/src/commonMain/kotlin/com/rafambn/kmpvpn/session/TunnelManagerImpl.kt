@@ -28,7 +28,6 @@ internal class TunnelManagerImpl(
     private val sessionEntriesByPeer: MutableMap<String, PeerSessionEntry> = mutableMapOf()
     private val peerStatsByPublicKey: MutableMap<String, MutablePeerStats> = mutableMapOf()
     private var dataPlane: UserspaceDataPlane? = null
-    private var dataPlaneKey: DataPlaneKey? = null
     private var dataPlaneTunPacketPort: TunPacketPort = DiscardingTunPacketPort
 
     override fun reconcileSessions(config: VpnConfiguration) {
@@ -88,11 +87,7 @@ internal class TunnelManagerImpl(
         sessionEntriesByPeer.putAll(nextSessions)
 
         if (sessionEntriesByPeer.isEmpty()) {
-            try {
-                dataPlane?.close()
-            } finally {
-                clearDataPlaneState()
-            }
+            stopDataPlane()
         }
     }
 
@@ -128,53 +123,32 @@ internal class TunnelManagerImpl(
 
     override fun closeAll() {
         try {
-            dataPlane?.close()
+            stopDataPlane()
         } finally {
-            clearDataPlaneState()
             closePeerSessionsOnly()
         }
     }
 
     override fun startDataPlane(configuration: VpnConfiguration) {
         if (sessionEntriesByPeer.isEmpty()) {
-            try {
-                val currentDataPlane = dataPlane
-                try {
-                    currentDataPlane?.close()
-                } finally {
-                    clearDataPlaneState()
-                }
-            } catch (_: Throwable) {
-                clearDataPlaneState()
-            }
+            stopDataPlaneQuietly()
             return
         }
 
-        val desiredKey = DataPlaneKey(
-            interfaceName = configuration.interfaceName,
-            listenPort = configuration.listenPort ?: Vpn.DEFAULT_PORT,
-        )
+        val desiredListenPort = configuration.listenPort ?: Vpn.DEFAULT_PORT
+
         val currentDataPlane = dataPlane
-        if (currentDataPlane != null && dataPlaneKey == desiredKey && currentDataPlane.isRunning()) {
+        if (currentDataPlane != null && currentDataPlane.isRunning()) {
             return
         }
 
-        try {
-            val currentDataPlane = dataPlane
-            try {
-                currentDataPlane?.close()
-            } finally {
-                clearDataPlaneState()
-            }
-        } catch (_: Throwable) {
-            clearDataPlaneState()
-        }
+        stopDataPlaneQuietly()
         dataPlaneTunPacketPort = tunPacketPortProvider(configuration)
         peerStatsByPublicKey.clear()
 
         val createdDataPlane = UserspaceDataPlane.create(
             configuration = configuration,
-            listenPort = desiredKey.listenPort,
+            listenPort = desiredListenPort,
             pollDataPlaneOnce = ::pollDataPlaneOnce,
             peerStats = ::currentPeerStats,
             onFailure = { _ ->
@@ -184,7 +158,6 @@ internal class TunnelManagerImpl(
         )
 
         dataPlane = createdDataPlane
-        dataPlaneKey = desiredKey
     }
 
     override fun peerStats(): List<VpnPeerStats> {
@@ -391,17 +364,27 @@ internal class TunnelManagerImpl(
         peerStatsByPublicKey.clear()
     }
 
+    private fun stopDataPlane() {
+        try {
+            dataPlane?.close()
+        } finally {
+            clearDataPlaneState()
+        }
+    }
+
+    private fun stopDataPlaneQuietly() {
+        try {
+            stopDataPlane()
+        } catch (_: Throwable) {
+            clearDataPlaneState()
+        }
+    }
+
     private fun clearDataPlaneState() {
         dataPlane = null
-        dataPlaneKey = null
         dataPlaneTunPacketPort = DiscardingTunPacketPort
         peerStatsByPublicKey.clear()
     }
-
-    private data class DataPlaneKey(
-        val interfaceName: String,
-        val listenPort: Int,
-    )
 
     private companion object {
         val DEFAULT_PACKET_BUFFER_SIZE: UInt = 65535u

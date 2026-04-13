@@ -70,22 +70,12 @@ class Vpn internal constructor(
      * Creates the interface and returns the managed interface contract.
      */
     fun create(): InterfaceManager {
-        try {
+        interfaceOperation("create") {
             interfaceManager.create(vpnConfiguration)
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Interface operation `create` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
 
-        try {
+        sessionOperation("reconcileSessions") {
             tunnelManager.reconcileSessions(interfaceManager.configuration())
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Session operation `reconcileSessions` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
 
         return interfaceManager
@@ -101,53 +91,34 @@ class Vpn internal constructor(
             create()
         }
 
-        val currentConfiguration = try {
+        val currentConfiguration = interfaceOperation("configuration") {
             managedInterface.configuration()
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Interface operation `configuration` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
         requireValidConfiguration(currentConfiguration)
 
-        try {
+        interfaceOperation("reconfigure") {
             managedInterface.reconfigure(currentConfiguration)
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Interface operation `reconfigure` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
 
-        try {
+        sessionOperation("reconcileSessions") {
             tunnelManager.reconcileSessions(currentConfiguration)
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Session operation `reconcileSessions` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
 
         try {
-            managedInterface.up()
-        } catch (throwable: Throwable) {
-            tunnelManager.closeAll()
-            throw IllegalStateException(
-                "Interface operation `up` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
+            interfaceOperation("up") { managedInterface.up() }
+        } catch (throwable: IllegalStateException) {
+            runBestEffort { tunnelManager.closeAll() }
+            throw throwable
         }
 
         try {
-            tunnelManager.startDataPlane(configuration = currentConfiguration)
-        } catch (throwable: Throwable) {
-            managedInterface.down()
-            tunnelManager.closeAll()
-            throw IllegalStateException(
-                "Session operation `startDataPlane` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
+            sessionOperation("startDataPlane") {
+                tunnelManager.startDataPlane(configuration = currentConfiguration)
+            }
+        } catch (throwable: IllegalStateException) {
+            runBestEffort { managedInterface.down() }
+            runBestEffort { tunnelManager.closeAll() }
+            throw throwable
         }
 
         return managedInterface
@@ -157,22 +128,12 @@ class Vpn internal constructor(
      * Stops the interface. This operation is idempotent.
      */
     fun stop() {
-        try {
+        sessionOperation("closeAll") {
             tunnelManager.closeAll()
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Session operation `closeAll` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
 
-        try {
+        interfaceOperation("down") {
             interfaceManager.down()
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Interface operation `down` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
     }
 
@@ -180,22 +141,12 @@ class Vpn internal constructor(
      * Deletes the interface. This operation is idempotent.
      */
     fun delete() {
-        try {
+        sessionOperation("closeAll") {
             tunnelManager.closeAll()
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Session operation `closeAll` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
 
-        try {
+        interfaceOperation("delete") {
             interfaceManager.delete()
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Interface operation `delete` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
     }
 
@@ -207,22 +158,12 @@ class Vpn internal constructor(
             return null
         }
 
-        val baseInformation = try {
+        val baseInformation = interfaceOperation("readInformation") {
             interfaceManager.readInformation()
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Interface operation `readInformation` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
 
-        val currentDefinedConfiguration = try {
+        val currentDefinedConfiguration = interfaceOperation("configuration") {
             interfaceManager.configuration()
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Interface operation `configuration` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
 
         val liveInformation = baseInformation ?: VpnInterfaceInformation(
@@ -253,40 +194,52 @@ class Vpn internal constructor(
             "Cannot reconfigure interface `${vpnConfiguration.interfaceName}` using `${config.interfaceName}`"
         }
 
-        try {
+        interfaceOperation("reconfigure") {
             interfaceManager.reconfigure(config)
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Interface operation `reconfigure` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
 
         vpnConfiguration = config
 
-        try {
+        sessionOperation("reconcileSessions") {
             tunnelManager.reconcileSessions(interfaceManager.configuration())
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Session operation `reconcileSessions` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
         }
 
         if (interfaceManager.isUp()) {
-            try {
+            sessionOperation("startDataPlane") {
                 tunnelManager.startDataPlane(configuration = interfaceManager.configuration())
-            } catch (throwable: Throwable) {
-                throw IllegalStateException(
-                    "Session operation `startDataPlane` failed: ${throwable.message ?: "unknown"}",
-                    throwable,
-                )
             }
         }
     }
 
     override fun close() {
         stop()
+    }
+
+    private inline fun <T> interfaceOperation(name: String, block: () -> T): T {
+        return operation(kind = "Interface", name = name, block = block)
+    }
+
+    private inline fun <T> sessionOperation(name: String, block: () -> T): T {
+        return operation(kind = "Session", name = name, block = block)
+    }
+
+    private inline fun <T> operation(kind: String, name: String, block: () -> T): T {
+        return try {
+            block()
+        } catch (throwable: Throwable) {
+            throw IllegalStateException(
+                "$kind operation `$name` failed: ${throwable.message ?: "unknown"}",
+                throwable,
+            )
+        }
+    }
+
+    private inline fun runBestEffort(block: () -> Unit) {
+        try {
+            block()
+        } catch (_: Throwable) {
+            // preserve original failure during rollback
+        }
     }
 
     companion object {

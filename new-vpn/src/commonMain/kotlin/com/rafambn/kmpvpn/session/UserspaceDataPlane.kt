@@ -23,10 +23,49 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
-internal abstract class UserspaceDataPlane : AutoCloseable {
-    abstract fun isRunning(): Boolean
+internal class UserspaceDataPlane private constructor(
+    configuration: VpnConfiguration,
+    private val onFailure: (Throwable) -> Unit,
+    listenPort: Int,
+    receiveTimeoutMillis: Long,
+    private val idleDelayMillis: Long,
+    periodicIntervalMillis: Long,
+    private val pollDataPlaneOnce: suspend (UdpPort, () -> Boolean) -> Boolean,
+    private val peerStatsProvider: () -> List<VpnPeerStats>,
+) : AutoCloseable {
+    private val running = MutableStateFlow(true)
+    private val peerStatsSnapshot = MutableStateFlow<List<VpnPeerStats>>(emptyList())
+    private val scope = CoroutineScope(
+        SupervisorJob() +
+            Dispatchers.Default +
+            CoroutineName("kmpvpn-data-plane-${configuration.interfaceName}"),
+    )
+    private val selectorManager = SelectorManager(scope.coroutineContext)
+    private val socket: BoundDatagramSocket = runBlocking {
+        aSocket(selectorManager).udp().bind(
+            InetSocketAddress("0.0.0.0", listenPort),
+        )
+    }
+    private val periodicTicker = FixedIntervalTicker(periodicIntervalMillis)
+    private val udpPort = KtorDatagramUdpPort(
+        socket = socket,
+        receiveTimeoutMillis = receiveTimeoutMillis,
+    )
+    private val dataPlaneJob = scope.launch {
+        runDataPlaneLoop()
+    }
 
-    abstract fun peerStats(): List<VpnPeerStats>
+    init {
+        peerStatsSnapshot.value = peerStatsProvider()
+    }
+
+    fun isRunning(): Boolean {
+        return running.value
+    }
+
+    fun peerStats(): List<VpnPeerStats> {
+        return peerStatsSnapshot.value
+    }
 
     companion object {
         fun create(
@@ -36,7 +75,7 @@ internal abstract class UserspaceDataPlane : AutoCloseable {
             peerStats: () -> List<VpnPeerStats>,
             onFailure: (Throwable) -> Unit,
         ): UserspaceDataPlane {
-            return RunningUserspaceDataPlane(
+            return UserspaceDataPlane(
                 configuration = configuration,
                 onFailure = onFailure,
                 listenPort = listenPort,
@@ -53,85 +92,40 @@ internal abstract class UserspaceDataPlane : AutoCloseable {
         private const val DEFAULT_PERIODIC_INTERVAL_MILLIS: Long = 100L
     }
 
-    private class RunningUserspaceDataPlane(
-        configuration: VpnConfiguration,
-        private val onFailure: (Throwable) -> Unit,
-        listenPort: Int,
-        receiveTimeoutMillis: Long,
-        private val idleDelayMillis: Long,
-        periodicIntervalMillis: Long,
-        private val pollDataPlaneOnce: suspend (UdpPort, () -> Boolean) -> Boolean,
-        private val peerStatsProvider: () -> List<VpnPeerStats>,
-    ) : UserspaceDataPlane() {
-        private val running = MutableStateFlow(true)
-        private val peerStatsSnapshot = MutableStateFlow<List<VpnPeerStats>>(emptyList())
-        private val scope = CoroutineScope(
-            SupervisorJob() +
-                Dispatchers.Default +
-                CoroutineName("kmpvpn-data-plane-${configuration.interfaceName}"),
-        )
-        private val selectorManager = SelectorManager(scope.coroutineContext)
-        private val socket: BoundDatagramSocket = runBlocking {
-            aSocket(selectorManager).udp().bind(
-                InetSocketAddress("0.0.0.0", listenPort),
-            )
-        }
-        private val periodicTicker = FixedIntervalTicker(periodicIntervalMillis)
-        private val udpPort = KtorDatagramUdpPort(
-            socket = socket,
-            receiveTimeoutMillis = receiveTimeoutMillis,
-        )
-        private val dataPlaneJob = scope.launch {
-            runDataPlaneLoop()
-        }
+    override fun close() {
+        runBlocking {
+            if (!running.value) {
+                return@runBlocking
+            }
 
-        init {
+            running.value = false
+            socket.close()
+            selectorManager.close()
+            dataPlaneJob.cancelAndJoin()
+            scope.cancel()
             peerStatsSnapshot.value = peerStatsProvider()
         }
+    }
 
-        override fun isRunning(): Boolean {
-            return running.value
-        }
-
-        override fun peerStats(): List<VpnPeerStats> {
-            return peerStatsSnapshot.value
-        }
-
-        override fun close() {
-            runBlocking {
-                if (!running.value) {
-                    return@runBlocking
-                }
-
-                running.value = false
-                socket.close()
-                selectorManager.close()
-                dataPlaneJob.cancelAndJoin()
-                scope.cancel()
+    private suspend fun runDataPlaneLoop() {
+        try {
+            while (running.value) {
+                val didWork = pollDataPlaneOnce(udpPort, periodicTicker::shouldTick)
                 peerStatsSnapshot.value = peerStatsProvider()
+                if (!didWork) {
+                    delay(idleDelayMillis.coerceAtLeast(0L))
+                }
             }
-        }
-
-        private suspend fun runDataPlaneLoop() {
-            try {
-                while (running.value) {
-                    val didWork = pollDataPlaneOnce(udpPort, periodicTicker::shouldTick)
-                    peerStatsSnapshot.value = peerStatsProvider()
-                    if (!didWork) {
-                        delay(idleDelayMillis.coerceAtLeast(0L))
-                    }
-                }
-            } catch (_: CancellationException) {
-                // shutdown path
-            } catch (throwable: Throwable) {
-                if (running.value) {
-                    running.value = false
-                    onFailure(throwable)
-                }
-            } finally {
-                peerStatsSnapshot.value = peerStatsProvider()
+        } catch (_: CancellationException) {
+            // shutdown path
+        } catch (throwable: Throwable) {
+            if (running.value) {
                 running.value = false
+                onFailure(throwable)
             }
+        } finally {
+            peerStatsSnapshot.value = peerStatsProvider()
+            running.value = false
         }
     }
 

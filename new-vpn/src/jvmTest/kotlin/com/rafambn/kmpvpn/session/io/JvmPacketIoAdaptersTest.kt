@@ -30,15 +30,15 @@ class JvmPacketIoAdaptersTest {
 
             portA.sendDatagram(
                 UdpDatagram(
-                    packet = byteArrayOf(7, 8, 9),
-                    endpoint = UdpEndpoint(host = "127.0.0.1", port = (socketB.localAddress as InetSocketAddress).port),
+                    payload = byteArrayOf(7, 8, 9),
+                    remoteEndpoint = UdpEndpoint(address = "127.0.0.1", port = (socketB.localAddress as InetSocketAddress).port),
                 ),
             )
             val received = portB.receiveDatagram()
 
             assertNotNull(received)
-            assertContentEquals(byteArrayOf(7, 8, 9), received.packet)
-            assertEquals((socketA.localAddress as InetSocketAddress).port, received.endpoint.port)
+            assertContentEquals(byteArrayOf(7, 8, 9), received.payload)
+            assertEquals((socketA.localAddress as InetSocketAddress).port, received.remoteEndpoint.port)
         } finally {
             socketA.close()
             socketB.close()

@@ -34,8 +34,8 @@ class KtorDatagramUdpPort(
         } ?: return null
 
         return UdpDatagram(
-            packet = received.packet.readByteArray(),
-            endpoint = received.address.toUdpEndpoint(),
+            payload = received.packet.readByteArray(),
+            remoteEndpoint = received.address.toUdpEndpoint(),
         )
     }
 
@@ -43,9 +43,9 @@ class KtorDatagramUdpPort(
         socket.send(
             Datagram(
                 packet = buildPacket {
-                    writeFully(datagram.packet)
+                    writeFully(datagram.payload)
                 },
-                address = InetSocketAddress(datagram.endpoint.host, datagram.endpoint.port),
+                address = InetSocketAddress(datagram.remoteEndpoint.address, datagram.remoteEndpoint.port),
             ),
         )
     }
@@ -55,7 +55,7 @@ private fun SocketAddress.toUdpEndpoint(): UdpEndpoint {
     val inetAddress = this as? InetSocketAddress
         ?: throw IllegalStateException("Unsupported Ktor socket address type `${this::class.simpleName}`")
     return UdpEndpoint(
-        host = inetAddress.hostname,
+        address = inetAddress.hostname,
         port = inetAddress.port,
     )
 }

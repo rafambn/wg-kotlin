@@ -8,15 +8,15 @@ class InMemoryUdpPort(
     override suspend fun receiveDatagram(): UdpDatagram? {
         val datagram = incomingDatagrams.removeFirstOrNull() ?: return null
         return UdpDatagram(
-            packet = datagram.packet.copyOf(),
-            endpoint = datagram.endpoint,
+            payload = datagram.payload.copyOf(),
+            remoteEndpoint = datagram.remoteEndpoint,
         )
     }
 
     override suspend fun sendDatagram(datagram: UdpDatagram) {
         sentDatagrams += UdpDatagram(
-            packet = datagram.packet.copyOf(),
-            endpoint = datagram.endpoint,
+            payload = datagram.payload.copyOf(),
+            remoteEndpoint = datagram.remoteEndpoint,
         )
     }
 }

@@ -202,14 +202,14 @@ internal class TunnelManagerImpl(
     ): Boolean {
         val datagram = networkPort.receiveDatagram() ?: return false
         val selected = sessionEntriesByPeer.values.firstOrNull { entry ->
-            entry.peer.endpointAddress == datagram.endpoint.host &&
-                    entry.peer.endpointPort == datagram.endpoint.port
+            entry.peer.endpointAddress == datagram.remoteEndpoint.address &&
+                    entry.peer.endpointPort == datagram.remoteEndpoint.port
         } ?: return true
 
-        peerStatsByPublicKey.getOrPut(selected.peer.publicKey) { MutablePeerStats() }.receivedBytes += datagram.packet.size.toLong()
+        peerStatsByPublicKey.getOrPut(selected.peer.publicKey) { MutablePeerStats() }.receivedBytes += datagram.payload.size.toLong()
 
         var result = selected.session.decryptToRawPacket(
-            datagram.packet,
+            datagram.payload,
             DEFAULT_PACKET_BUFFER_SIZE,
         )
         var iterations = 0
@@ -269,7 +269,7 @@ internal class TunnelManagerImpl(
         when (result) {
             PacketAction.Done -> Unit
             is PacketAction.WriteToNetwork -> {
-                networkPort.sendDatagram(UdpDatagram(packet = result.packet, endpoint = endpoint))
+                networkPort.sendDatagram(UdpDatagram(payload = result.packet, remoteEndpoint = endpoint))
                 peerStatsByPublicKey.getOrPut(sessionEntry.peer.publicKey) { MutablePeerStats() }.transmittedBytes += result.packet.size.toLong()
             }
 
@@ -313,7 +313,7 @@ internal class TunnelManagerImpl(
 
     private fun PeerSessionEntry.peerEndpoint(): UdpEndpoint {
         return UdpEndpoint(
-            host = checkNotNull(peer.endpointAddress) { "Peer `${peer.publicKey}` is missing endpointAddress" },
+            address = checkNotNull(peer.endpointAddress) { "Peer `${peer.publicKey}` is missing endpointAddress" },
             port = checkNotNull(peer.endpointPort) { "Peer `${peer.publicKey}` is missing endpointPort" },
         )
     }

@@ -166,112 +166,82 @@ internal class TunnelManagerImpl(
     private suspend fun pollInboundPacketOnce(networkPort: UdpPort): Boolean {
         val datagram = networkPort.receiveDatagram() ?: return false
         return dataPlaneMutex.withLock {
-            processNetworkInboundPacket(
-                tunnelPort = dataPlaneTunPacketPort,
-                networkPort = networkPort,
-                datagram = datagram,
+            val selected = sessionEntriesByPeer.values.firstOrNull { entry ->
+                entry.peer.endpointAddress == datagram.remoteEndpoint.address &&
+                        entry.peer.endpointPort == datagram.remoteEndpoint.port
+            } ?: return@withLock true
+
+            peerStatsByPublicKey.getOrPut(selected.peer.publicKey) { MutablePeerStats() }.receivedBytes += datagram.payload.size.toLong()
+
+            var result = selected.session.decryptToRawPacket(
+                datagram.payload,
+                DEFAULT_PACKET_BUFFER_SIZE,
             )
+            var iterations = 0
+
+            while (result !is PacketAction.Done) {
+                applyPacketResult(
+                    tunnelPort = dataPlaneTunPacketPort,
+                    networkPort = networkPort,
+                    result = result,
+                    sessionEntry = selected,
+                    endpoint = selected.peerEndpoint(),
+                    operation = "decryptToRawPacket",
+                )
+
+                iterations += 1
+                if (iterations >= DEFAULT_MAX_FLUSH_ITERATIONS) {
+                    throw IllegalStateException(
+                        "Session `${selected.session.peerPublicKey}` exceeded flush limit while decrypting packets",
+                    )
+                }
+
+                result = selected.session.decryptToRawPacket(
+                    ByteArray(0),
+                    DEFAULT_PACKET_BUFFER_SIZE,
+                )
+            }
+
+            true
         }
     }
 
     private suspend fun pollOutboundPacketOnce(networkPort: UdpPort): Boolean {
         val packet = dataPlaneTunPacketPort.readPacket() ?: return false
         return dataPlaneMutex.withLock {
-            processTunnelOutboundPacket(
+            val selected = selectSessionForPacket(
+                packet = packet,
+                sessionEntries = sessionEntriesByPeer.values,
+            ) ?: return@withLock true
+
+            applyPacketResult(
                 tunnelPort = dataPlaneTunPacketPort,
                 networkPort = networkPort,
-                packet = packet,
+                result = selected.session.encryptRawPacket(packet, DEFAULT_PACKET_BUFFER_SIZE),
+                sessionEntry = selected,
+                endpoint = selected.peerEndpoint(),
+                operation = "encryptRawPacket",
             )
+            true
         }
     }
 
     private suspend fun runPeriodicWorkOnce(networkPort: UdpPort): Boolean {
         return dataPlaneMutex.withLock {
-            processPeriodicTasks(networkPort = networkPort)
-        }
-    }
-
-    private suspend fun processTunnelOutboundPacket(
-        tunnelPort: TunPacketPort,
-        networkPort: UdpPort,
-        packet: ByteArray,
-    ): Boolean {
-        val selected = selectSessionForPacket(
-            packet = packet,
-            sessionEntries = sessionEntriesByPeer.values,
-        ) ?: return true
-
-        applyPacketResult(
-            tunnelPort = tunnelPort,
-            networkPort = networkPort,
-            result = selected.session.encryptRawPacket(packet, DEFAULT_PACKET_BUFFER_SIZE),
-            sessionEntry = selected,
-            endpoint = selected.peerEndpoint(),
-            operation = "encryptRawPacket",
-        )
-        return true
-    }
-
-    private suspend fun processNetworkInboundPacket(
-        tunnelPort: TunPacketPort,
-        networkPort: UdpPort,
-        datagram: UdpDatagram,
-    ): Boolean {
-        val selected = sessionEntriesByPeer.values.firstOrNull { entry ->
-            entry.peer.endpointAddress == datagram.remoteEndpoint.address &&
-                    entry.peer.endpointPort == datagram.remoteEndpoint.port
-        } ?: return true
-
-        peerStatsByPublicKey.getOrPut(selected.peer.publicKey) { MutablePeerStats() }.receivedBytes += datagram.payload.size.toLong()
-
-        var result = selected.session.decryptToRawPacket(
-            datagram.payload,
-            DEFAULT_PACKET_BUFFER_SIZE,
-        )
-        var iterations = 0
-
-        while (result !is PacketAction.Done) {
-            applyPacketResult(
-                tunnelPort = tunnelPort,
-                networkPort = networkPort,
-                result = result,
-                sessionEntry = selected,
-                endpoint = selected.peerEndpoint(),
-                operation = "decryptToRawPacket",
-            )
-
-            iterations += 1
-            if (iterations >= DEFAULT_MAX_FLUSH_ITERATIONS) {
-                throw IllegalStateException(
-                    "Session `${selected.session.peerPublicKey}` exceeded flush limit while decrypting packets",
+            var didWork = false
+            sortedSessionEntries().forEach { entry ->
+                applyPacketResult(
+                    tunnelPort = dataPlaneTunPacketPort,
+                    networkPort = networkPort,
+                    result = entry.session.runPeriodicTask(DEFAULT_PACKET_BUFFER_SIZE),
+                    sessionEntry = entry,
+                    endpoint = entry.peerEndpoint(),
+                    operation = "runPeriodicTask",
                 )
+                didWork = true
             }
-
-            result = selected.session.decryptToRawPacket(
-                ByteArray(0),
-                DEFAULT_PACKET_BUFFER_SIZE,
-            )
+            didWork
         }
-
-        return true
-    }
-
-    private suspend fun processPeriodicTasks(
-        networkPort: UdpPort,
-    ): Boolean {
-        var didWork = false
-        sortedSessionEntries().forEach { entry ->
-            applyPacketResult(
-                tunnelPort = dataPlaneTunPacketPort,
-                networkPort = networkPort,
-                result = entry.session.runPeriodicTask(DEFAULT_PACKET_BUFFER_SIZE),
-                sessionEntry = entry,
-                endpoint = entry.peerEndpoint(),
-                operation = "runPeriodicTask",
-            )
-            didWork = true
-        }
-        return didWork
     }
 
     private suspend fun applyPacketResult(

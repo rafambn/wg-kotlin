@@ -146,15 +146,15 @@ internal class TunnelManagerImpl(
         dataPlaneTunPacketPort = tunPacketPortProvider(configuration)
         peerStatsByPublicKey.clear()
 
-        val createdDataPlane = UserspaceDataPlane.create(
+        val createdDataPlane = UserspaceDataPlane(
             configuration = configuration,
             listenPort = desiredListenPort,
-            pollDataPlaneOnce = ::pollDataPlaneOnce,
-            peerStats = ::currentPeerStats,
             onFailure = { _ ->
                 clearDataPlaneState()
                 closePeerSessionsOnly()
             },
+            pollDataPlaneOnce = ::pollDataPlaneOnce,
+            peerStatsProvider = ::currentPeerStats,
         )
 
         dataPlane = createdDataPlane

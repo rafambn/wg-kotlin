@@ -23,13 +23,17 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
-internal class UserspaceDataPlane private constructor(
+private const val DEFAULT_RECEIVE_TIMEOUT_MILLIS: Long = 50L
+private const val DEFAULT_IDLE_DELAY_MILLIS: Long = 10L
+private const val DEFAULT_PERIODIC_INTERVAL_MILLIS: Long = 100L
+
+internal class UserspaceDataPlane(
     configuration: VpnConfiguration,
     private val onFailure: (Throwable) -> Unit,
     listenPort: Int,
-    receiveTimeoutMillis: Long,
-    private val idleDelayMillis: Long,
-    periodicIntervalMillis: Long,
+    receiveTimeoutMillis: Long = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
+    private val idleDelayMillis: Long = DEFAULT_IDLE_DELAY_MILLIS,
+    periodicIntervalMillis: Long = DEFAULT_PERIODIC_INTERVAL_MILLIS,
     private val pollDataPlaneOnce: suspend (UdpPort, () -> Boolean) -> Boolean,
     private val peerStatsProvider: () -> List<VpnPeerStats>,
 ) : AutoCloseable {
@@ -65,31 +69,6 @@ internal class UserspaceDataPlane private constructor(
 
     fun peerStats(): List<VpnPeerStats> {
         return peerStatsSnapshot.value
-    }
-
-    companion object {
-        fun create(
-            configuration: VpnConfiguration,
-            listenPort: Int,
-            pollDataPlaneOnce: suspend (UdpPort, () -> Boolean) -> Boolean,
-            peerStats: () -> List<VpnPeerStats>,
-            onFailure: (Throwable) -> Unit,
-        ): UserspaceDataPlane {
-            return UserspaceDataPlane(
-                configuration = configuration,
-                onFailure = onFailure,
-                listenPort = listenPort,
-                receiveTimeoutMillis = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
-                idleDelayMillis = DEFAULT_IDLE_DELAY_MILLIS,
-                periodicIntervalMillis = DEFAULT_PERIODIC_INTERVAL_MILLIS,
-                pollDataPlaneOnce = pollDataPlaneOnce,
-                peerStatsProvider = peerStats,
-            )
-        }
-
-        private const val DEFAULT_RECEIVE_TIMEOUT_MILLIS: Long = 50L
-        private const val DEFAULT_IDLE_DELAY_MILLIS: Long = 10L
-        private const val DEFAULT_PERIODIC_INTERVAL_MILLIS: Long = 100L
     }
 
     override fun close() {

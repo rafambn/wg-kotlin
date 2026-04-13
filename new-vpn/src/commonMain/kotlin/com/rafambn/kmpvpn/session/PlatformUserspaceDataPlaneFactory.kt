@@ -4,36 +4,36 @@ import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.iface.VpnPeerStats
 import com.rafambn.kmpvpn.session.io.UdpPort
 
-internal typealias UserspaceRuntimeFactory = (
+internal typealias UserspaceDataPlaneFactory = (
     configuration: VpnConfiguration,
     listenPort: Int,
-    pollOnce: suspend (UdpPort, () -> Boolean) -> Boolean,
+    pollDataPlaneOnce: suspend (UdpPort, () -> Boolean) -> Boolean,
     peerStats: () -> List<VpnPeerStats>,
     onFailure: (Throwable) -> Unit,
-) -> UserspaceRuntimeHandle?
+) -> UserspaceDataPlane?
 
-internal interface UserspaceRuntimeHandle : AutoCloseable {
+internal interface UserspaceDataPlane : AutoCloseable {
     fun isRunning(): Boolean
 
     fun peerStats(): List<VpnPeerStats>
 }
 
-internal object PlatformUserspaceRuntimeFactory {
+internal object PlatformUserspaceDataPlaneFactory {
     fun create(
         configuration: VpnConfiguration,
         listenPort: Int,
-        pollOnce: suspend (UdpPort, () -> Boolean) -> Boolean,
+        pollDataPlaneOnce: suspend (UdpPort, () -> Boolean) -> Boolean,
         peerStats: () -> List<VpnPeerStats>,
         onFailure: (Throwable) -> Unit,
-    ): UserspaceRuntimeHandle {
-        return DefaultUserspaceRuntimeHandle(
+    ): UserspaceDataPlane {
+        return DefaultUserspaceDataPlane(
             configuration = configuration,
             onFailure = onFailure,
             listenPort = listenPort,
             receiveTimeoutMillis = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
             idleDelayMillis = DEFAULT_IDLE_DELAY_MILLIS,
             periodicIntervalMillis = DEFAULT_PERIODIC_INTERVAL_MILLIS,
-            pollOnce = pollOnce,
+            pollDataPlaneOnce = pollDataPlaneOnce,
             peerStats = peerStats,
         )
     }

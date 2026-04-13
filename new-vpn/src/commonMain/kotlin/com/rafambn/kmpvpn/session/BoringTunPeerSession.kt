@@ -1,38 +1,38 @@
 package com.rafambn.kmpvpn.session
 
-import com.rafambn.kmpvpn.session.io.VpnPacketResult
+import com.rafambn.kmpvpn.session.io.PacketAction
 import uniffi.new_vpn.TunnelPacketResult
 import uniffi.new_vpn.TunnelSession
 
-class BoringTunVpnSession(
+class BoringTunPeerSession(
     override val peerPublicKey: String,
-    override val sessionIndex: Int,
+    override val peerIndex: Int,
     private val tunnel: TunnelSession,
-) : VpnSession {
+) : PeerSession {
     private var active: Boolean = true
 
     override val isActive: Boolean
         get() = active
 
-    override fun encryptRawPacket(src: ByteArray, dstSize: UInt): VpnPacketResult {
+    override fun encryptRawPacket(src: ByteArray, dstSize: UInt): PacketAction {
         ensureActive("encryptRawPacket")
-        return toVpnPacketResult(
+        return toPacketAction(
             result = tunnel.encryptRawPacket(src = src, dstSize = dstSize),
             operation = "encryptRawPacket",
         )
     }
 
-    override fun decryptToRawPacket(src: ByteArray, dstSize: UInt): VpnPacketResult {
+    override fun decryptToRawPacket(src: ByteArray, dstSize: UInt): PacketAction {
         ensureActive("decryptToRawPacket")
-        return toVpnPacketResult(
+        return toPacketAction(
             result = tunnel.decryptToRawPacket(src = src, dstSize = dstSize),
             operation = "decryptToRawPacket",
         )
     }
 
-    override fun runPeriodicTask(dstSize: UInt): VpnPacketResult {
+    override fun runPeriodicTask(dstSize: UInt): PacketAction {
         ensureActive("runPeriodicTask")
-        return toVpnPacketResult(
+        return toPacketAction(
             result = tunnel.runPeriodicTask(dstSize = dstSize),
             operation = "runPeriodicTask",
         )
@@ -53,16 +53,16 @@ class BoringTunVpnSession(
         }
     }
 
-    private fun toVpnPacketResult(result: TunnelPacketResult, operation: String): VpnPacketResult {
+    private fun toPacketAction(result: TunnelPacketResult, operation: String): PacketAction {
         val boundedSize = result.size.toInt().coerceIn(0, result.packet.size)
         val boundedPacket = result.packet.copyOfRange(0, boundedSize)
 
         return when (result.op.toInt()) {
-            OP_DONE -> VpnPacketResult.Done
-            OP_WRITE_TO_NETWORK -> VpnPacketResult.WriteToNetwork(boundedPacket)
-            OP_ERROR -> VpnPacketResult.Error(result.size)
-            OP_WRITE_TO_TUNNEL_IPV4 -> VpnPacketResult.WriteToTunnelIpv4(boundedPacket)
-            OP_WRITE_TO_TUNNEL_IPV6 -> VpnPacketResult.WriteToTunnelIpv6(boundedPacket)
+            OP_DONE -> PacketAction.Done
+            OP_WRITE_TO_NETWORK -> PacketAction.WriteToNetwork(boundedPacket)
+            OP_ERROR -> PacketAction.Error(result.size)
+            OP_WRITE_TO_TUNNEL_IPV4 -> PacketAction.WriteToTunIpv4(boundedPacket)
+            OP_WRITE_TO_TUNNEL_IPV6 -> PacketAction.WriteToTunIpv6(boundedPacket)
             else -> throw IllegalStateException(
                 "Unsupported tunnel op `${result.op}` from `$operation` for `${peerPublicKey}`",
             )

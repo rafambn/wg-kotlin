@@ -18,7 +18,7 @@ internal fun testVpn(
 }
 
 internal fun disabledTestTunnelManager(): TunnelManager {
-    return TunnelManagerImpl(userspaceRuntimeFactory = { _, _, _, _, _ -> null })
+    return TunnelManagerImpl(userspaceDataPlaneFactory = { _, _, _, _, _ -> null })
 }
 
 internal class TestInterfaceManager(

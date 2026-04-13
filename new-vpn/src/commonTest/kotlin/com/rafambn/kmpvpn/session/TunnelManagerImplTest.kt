@@ -2,7 +2,7 @@ package com.rafambn.kmpvpn.session
 
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
-import com.rafambn.kmpvpn.session.factory.VpnSessionFactory
+import com.rafambn.kmpvpn.session.factory.PeerSessionFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -14,26 +14,26 @@ class TunnelManagerImplTest {
 
     @Test
     fun reconcileSessionsCreatesActiveSessionsForAllPeers() {
-        val manager = TunnelManagerImpl(sessionFactory = RecordingSessionFactory())
+        val manager = TunnelManagerImpl(peerSessionFactory = RecordingSessionFactory())
 
         manager.reconcileSessions(configurationWithPeers("peer-a", "peer-b"))
 
-        assertEquals(2, manager.sessions().size)
-        assertTrue(manager.sessions().all { session -> session.isActive })
+        assertEquals(2, manager.sessionSnapshots().size)
+        assertTrue(manager.sessionSnapshots().all { session -> session.isActive })
     }
 
     @Test
     fun reconcileSessionsRemovesMissingPeers() {
         val factory = RecordingSessionFactory()
         val manager = TunnelManagerImpl(
-            sessionFactory = factory,
+            peerSessionFactory = factory,
         )
 
         manager.reconcileSessions(configurationWithPeers("peer-a", "peer-b"))
         manager.reconcileSessions(configurationWithPeers("peer-b"))
 
-        assertNull(manager.session("peer-a"))
-        assertNotNull(manager.session("peer-b"))
+        assertNull(manager.sessionSnapshot("peer-a"))
+        assertNotNull(manager.sessionSnapshot("peer-b"))
         assertEquals(1, factory.sessionByPeer("peer-a")?.closeCalls)
     }
 
@@ -41,7 +41,7 @@ class TunnelManagerImplTest {
     fun reconcileSessionsReplacesChangedPeerConfiguration() {
         val factory = RecordingSessionFactory()
         val manager = TunnelManagerImpl(
-            sessionFactory = factory,
+            peerSessionFactory = factory,
         )
 
         manager.reconcileSessions(
@@ -68,7 +68,7 @@ class TunnelManagerImplTest {
         assertEquals(1, factory.createdSessions.first().closeCalls)
         assertEquals(0, factory.createdSessions.last().closeCalls)
 
-        val session = manager.session("peer-a")
+        val session = manager.sessionSnapshot("peer-a")
         assertNotNull(session)
         assertEquals("10.0.0.2", session.endpointAddress)
         assertEquals(51821, session.endpointPort)
@@ -76,7 +76,7 @@ class TunnelManagerImplTest {
 
     @Test
     fun duplicatePeerKeysAreRejected() {
-        val manager = TunnelManagerImpl(sessionFactory = RecordingSessionFactory())
+        val manager = TunnelManagerImpl(peerSessionFactory = RecordingSessionFactory())
 
         val duplicated = configurationWithPeer(
             VpnPeer(publicKey = "peer-a"),
@@ -92,7 +92,7 @@ class TunnelManagerImplTest {
     fun partialCreateFailureRollsBackNewlyCreatedSessions() {
         val factory = RecordingSessionFactory(failOnPeer = "peer-b")
         val manager = TunnelManagerImpl(
-            sessionFactory = factory,
+            peerSessionFactory = factory,
         )
 
         val throwable = assertFailsWith<IllegalStateException> {
@@ -100,20 +100,20 @@ class TunnelManagerImplTest {
         }
 
         assertTrue(throwable.message?.contains("factory forced failure") == true)
-        assertTrue(manager.sessions().isEmpty())
+        assertTrue(manager.sessionSnapshots().isEmpty())
         assertEquals(1, factory.createdSessions.size)
         assertEquals(1, factory.createdSessions.first().closeCalls)
     }
 
     @Test
-    fun sessionIndexesAreDeterministicAcrossPeerOrderChanges() {
-        val manager = TunnelManagerImpl(sessionFactory = RecordingSessionFactory())
+    fun peerIndexesAreDeterministicAcrossPeerOrderChanges() {
+        val manager = TunnelManagerImpl(peerSessionFactory = RecordingSessionFactory())
 
         manager.reconcileSessions(configurationWithPeers("peer-b", "peer-a"))
-        val first = manager.sessions().associate { it.peerPublicKey to it.sessionIndex }
+        val first = manager.sessionSnapshots().associate { it.peerPublicKey to it.peerIndex }
 
         manager.reconcileSessions(configurationWithPeers("peer-a", "peer-b"))
-        val second = manager.sessions().associate { it.peerPublicKey to it.sessionIndex }
+        val second = manager.sessionSnapshots().associate { it.peerPublicKey to it.peerIndex }
 
         assertEquals(first, second)
         assertEquals(1, second["peer-a"])
@@ -144,35 +144,35 @@ class TunnelManagerImplTest {
 
     private class RecordingSessionFactory(
         private val failOnPeer: String? = null,
-    ) : VpnSessionFactory {
-        val createdSessions: MutableList<TestVpnSession> = mutableListOf()
+    ) : PeerSessionFactory {
+        val createdSessions: MutableList<TestPeerSession> = mutableListOf()
 
         override fun create(
             config: VpnConfiguration,
             peer: VpnPeer,
-            sessionIndex: Int,
-        ): VpnSession {
+            peerIndex: Int,
+        ): PeerSession {
             if (peer.publicKey == failOnPeer) {
                 throw IllegalStateException("factory forced failure for `${peer.publicKey}`")
             }
 
-            val session = TestVpnSession(
+            val session = TestPeerSession(
                 peerPublicKey = peer.publicKey,
-                sessionIndex = sessionIndex,
+                peerIndex = peerIndex,
             )
             createdSessions += session
             return session
         }
 
-        fun sessionByPeer(peerPublicKey: String): TestVpnSession? {
+        fun sessionByPeer(peerPublicKey: String): TestPeerSession? {
             return createdSessions.find { session -> session.peerPublicKey == peerPublicKey }
         }
     }
 
-    private class TestVpnSession(
+    private class TestPeerSession(
         override val peerPublicKey: String,
-        override val sessionIndex: Int,
-    ) : VpnSession {
+        override val peerIndex: Int,
+    ) : PeerSession {
         var closeCalls: Int = 0
 
         override val isActive: Boolean

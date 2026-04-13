@@ -23,22 +23,22 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
-internal class DefaultUserspaceRuntimeHandle(
+internal class DefaultUserspaceDataPlane(
     configuration: VpnConfiguration,
     private val onFailure: (Throwable) -> Unit,
     listenPort: Int,
     receiveTimeoutMillis: Long,
     private val idleDelayMillis: Long,
     periodicIntervalMillis: Long,
-    private val pollOnce: suspend (UdpPort, () -> Boolean) -> Boolean,
+    private val pollDataPlaneOnce: suspend (UdpPort, () -> Boolean) -> Boolean,
     private val peerStats: () -> List<VpnPeerStats>,
-) : UserspaceRuntimeHandle {
+) : UserspaceDataPlane {
     private val running = MutableStateFlow(true)
     private val peerStatsSnapshot = MutableStateFlow<List<VpnPeerStats>>(emptyList())
     private val scope = CoroutineScope(
         SupervisorJob() +
             Dispatchers.Default +
-            CoroutineName("kmpvpn-runtime-${configuration.interfaceName}"),
+            CoroutineName("kmpvpn-data-plane-${configuration.interfaceName}"),
     )
     private val selectorManager = SelectorManager(scope.coroutineContext)
     private val socket: BoundDatagramSocket = runBlocking {
@@ -51,8 +51,8 @@ internal class DefaultUserspaceRuntimeHandle(
         socket = socket,
         receiveTimeoutMillis = receiveTimeoutMillis,
     )
-    private val runtimeJob = scope.launch {
-        runLoop()
+    private val dataPlaneJob = scope.launch {
+        runDataPlaneLoop()
     }
 
     init {
@@ -76,16 +76,16 @@ internal class DefaultUserspaceRuntimeHandle(
             running.value = false
             socket.close()
             selectorManager.close()
-            runtimeJob.cancelAndJoin()
+            dataPlaneJob.cancelAndJoin()
             scope.cancel()
             peerStatsSnapshot.value = peerStats()
         }
     }
 
-    private suspend fun runLoop() {
+    private suspend fun runDataPlaneLoop() {
         try {
             while (running.value) {
-                val didWork = pollOnce(udpPort, periodicTicker::shouldTick)
+                val didWork = pollDataPlaneOnce(udpPort, periodicTicker::shouldTick)
                 peerStatsSnapshot.value = peerStats()
                 if (!didWork) {
                     delay(idleDelayMillis.coerceAtLeast(0L))

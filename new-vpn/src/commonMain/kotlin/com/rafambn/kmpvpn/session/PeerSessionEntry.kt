@@ -2,7 +2,7 @@ package com.rafambn.kmpvpn.session
 
 import com.rafambn.kmpvpn.VpnPeer
 
-data class ManagedSession(
+data class PeerSessionEntry(
     val peer: VpnPeer,
-    val session: VpnSession,
+    val session: PeerSession,
 )

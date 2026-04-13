@@ -2,14 +2,14 @@ package com.rafambn.kmpvpn.session
 
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
-import com.rafambn.kmpvpn.session.factory.VpnSessionFactory
-import com.rafambn.kmpvpn.session.io.InMemoryTunnelPacketPort
+import com.rafambn.kmpvpn.session.factory.PeerSessionFactory
+import com.rafambn.kmpvpn.session.io.InMemoryTunPacketPort
 import com.rafambn.kmpvpn.session.io.InMemoryUdpPort
 import com.rafambn.kmpvpn.session.io.ManualPeriodicTicker
-import com.rafambn.kmpvpn.session.io.TunnelPacketPort
+import com.rafambn.kmpvpn.session.io.TunPacketPort
 import com.rafambn.kmpvpn.session.io.UdpDatagram
 import com.rafambn.kmpvpn.session.io.UdpEndpoint
-import com.rafambn.kmpvpn.session.io.VpnPacketResult
+import com.rafambn.kmpvpn.session.io.PacketAction
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -20,18 +20,18 @@ class TunnelManagerImplDataPlaneTest {
 
     @Test
     fun longestPrefixMatchRoutesTunPacketsToTheCorrectPeer() = runTest {
-        val peerA = QueueVpnSession(
+        val peerA = QueuePeerSession(
             peerPublicKey = "peer-a",
-            encryptResults = ArrayDeque(listOf(VpnPacketResult.WriteToNetwork(byteArrayOf(1)))),
+            encryptResults = ArrayDeque(listOf(PacketAction.WriteToNetwork(byteArrayOf(1)))),
         )
-        val peerB = QueueVpnSession(
+        val peerB = QueuePeerSession(
             peerPublicKey = "peer-b",
-            encryptResults = ArrayDeque(listOf(VpnPacketResult.WriteToNetwork(byteArrayOf(2)))),
+            encryptResults = ArrayDeque(listOf(PacketAction.WriteToNetwork(byteArrayOf(2)))),
         )
-        val tunnelPacketPort = InMemoryTunnelPacketPort(
+        val tunPacketPort = InMemoryTunPacketPort(
             incomingPackets = ArrayDeque(listOf(ipv4Packet(destination = byteArrayOf(10, 1, 2, 3)))),
         )
-        val manager = manager(peerA, peerB, tunnelPacketPort = tunnelPacketPort)
+        val manager = manager(peerA, peerB, tunPacketPort = tunPacketPort)
         val configuration = configuration(
             peers = listOf(
                 peer(
@@ -51,8 +51,8 @@ class TunnelManagerImplDataPlaneTest {
         val udpPort = InMemoryUdpPort()
 
         manager.reconcileSessions(configuration)
-        manager.startRuntime(configuration)
-        manager.pollRuntimeOnce(udpPort) { false }
+        manager.startDataPlane(configuration)
+        manager.pollDataPlaneOnce(udpPort) { false }
 
         assertEquals(1, udpPort.sentDatagrams.size)
         assertEquals(UdpEndpoint("198.51.100.2", 51821), udpPort.sentDatagrams.single().endpoint)
@@ -63,12 +63,12 @@ class TunnelManagerImplDataPlaneTest {
 
     @Test
     fun unknownDestinationPacketsAreDropped() = runTest {
-        val tunnelPacketPort = InMemoryTunnelPacketPort(
+        val tunPacketPort = InMemoryTunPacketPort(
             incomingPackets = ArrayDeque(listOf(ipv4Packet(destination = byteArrayOf(172.toByte(), 16, 0, 1)))),
         )
         val manager = manager(
-            QueueVpnSession(peerPublicKey = "peer-a"),
-            tunnelPacketPort = tunnelPacketPort,
+            QueuePeerSession(peerPublicKey = "peer-a"),
+            tunPacketPort = tunPacketPort,
         )
         val configuration = configuration(
             peers = listOf(
@@ -83,8 +83,8 @@ class TunnelManagerImplDataPlaneTest {
         val udpPort = InMemoryUdpPort()
 
         manager.reconcileSessions(configuration)
-        manager.startRuntime(configuration)
-        manager.pollRuntimeOnce(udpPort) { false }
+        manager.startDataPlane(configuration)
+        manager.pollDataPlaneOnce(udpPort) { false }
 
         assertTrue(udpPort.sentDatagrams.isEmpty())
         assertEquals(0L, manager.peerStats().single().transmittedBytes)
@@ -92,16 +92,16 @@ class TunnelManagerImplDataPlaneTest {
 
     @Test
     fun incomingDatagramsAreDemultiplexedByPeerEndpoint() = runTest {
-        val peerA = QueueVpnSession(
+        val peerA = QueuePeerSession(
             peerPublicKey = "peer-a",
-            decryptResults = ArrayDeque(listOf(VpnPacketResult.Done)),
+            decryptResults = ArrayDeque(listOf(PacketAction.Done)),
         )
-        val peerB = QueueVpnSession(
+        val peerB = QueuePeerSession(
             peerPublicKey = "peer-b",
-            decryptResults = ArrayDeque(listOf(VpnPacketResult.WriteToTunnelIpv4(byteArrayOf(9, 9, 9)), VpnPacketResult.Done)),
+            decryptResults = ArrayDeque(listOf(PacketAction.WriteToTunIpv4(byteArrayOf(9, 9, 9)), PacketAction.Done)),
         )
-        val tunnelPacketPort = InMemoryTunnelPacketPort()
-        val manager = manager(peerA, peerB, tunnelPacketPort = tunnelPacketPort)
+        val tunPacketPort = InMemoryTunPacketPort()
+        val manager = manager(peerA, peerB, tunPacketPort = tunPacketPort)
         val configuration = configuration(
             peers = listOf(
                 peer(
@@ -130,25 +130,25 @@ class TunnelManagerImplDataPlaneTest {
         )
 
         manager.reconcileSessions(configuration)
-        manager.startRuntime(configuration)
-        manager.pollRuntimeOnce(udpPort) { false }
+        manager.startDataPlane(configuration)
+        manager.pollDataPlaneOnce(udpPort) { false }
 
         assertEquals(0, peerA.decryptInputs.size)
         assertEquals(2, peerB.decryptInputs.size)
         assertContentEquals(byteArrayOf(7, 8, 9), peerB.decryptInputs.first())
-        assertEquals(1, tunnelPacketPort.writtenPackets.size)
+        assertEquals(1, tunPacketPort.writtenPackets.size)
         assertEquals(3L, manager.peerStats().single { it.publicKey == "peer-b" }.receivedBytes)
     }
 
     @Test
-    fun periodicTasksRunAcrossAllManagedSessions() = runTest {
-        val peerA = QueueVpnSession(
+    fun periodicTasksRunAcrossAllPeerSessionEntries() = runTest {
+        val peerA = QueuePeerSession(
             peerPublicKey = "peer-a",
-            periodicResults = ArrayDeque(listOf(VpnPacketResult.WriteToNetwork(byteArrayOf(1)))),
+            periodicResults = ArrayDeque(listOf(PacketAction.WriteToNetwork(byteArrayOf(1)))),
         )
-        val peerB = QueueVpnSession(
+        val peerB = QueuePeerSession(
             peerPublicKey = "peer-b",
-            periodicResults = ArrayDeque(listOf(VpnPacketResult.WriteToNetwork(byteArrayOf(2)))),
+            periodicResults = ArrayDeque(listOf(PacketAction.WriteToNetwork(byteArrayOf(2)))),
         )
         val manager = manager(peerA, peerB)
         val configuration = configuration(
@@ -170,8 +170,8 @@ class TunnelManagerImplDataPlaneTest {
         val udpPort = InMemoryUdpPort()
 
         manager.reconcileSessions(configuration)
-        manager.startRuntime(configuration)
-        manager.pollRuntimeOnce(
+        manager.startDataPlane(configuration)
+        manager.pollDataPlaneOnce(
             udpPort = udpPort,
             periodicTicker = ManualPeriodicTicker(values = ArrayDeque(listOf(true))),
         )
@@ -184,13 +184,13 @@ class TunnelManagerImplDataPlaneTest {
     }
 
     private fun manager(
-        vararg sessions: QueueVpnSession,
-        tunnelPacketPort: TunnelPacketPort = InMemoryTunnelPacketPort(),
+        vararg sessions: QueuePeerSession,
+        tunPacketPort: TunPacketPort = InMemoryTunPacketPort(),
     ): TunnelManagerImpl {
         return TunnelManagerImpl(
-            sessionFactory = RecordingSessionFactory(sessions.associateBy { session -> session.peerPublicKey }),
-            userspaceRuntimeFactory = { _, _, _, _, _ -> null },
-            tunnelPacketPortProvider = { tunnelPacketPort },
+            peerSessionFactory = RecordingSessionFactory(sessions.associateBy { session -> session.peerPublicKey }),
+            userspaceDataPlaneFactory = { _, _, _, _, _ -> null },
+            tunPacketPortProvider = { tunPacketPort },
         )
     }
 
@@ -246,47 +246,47 @@ class TunnelManagerImplDataPlaneTest {
     }
 
     private class RecordingSessionFactory(
-        private val sessionsByKey: Map<String, QueueVpnSession>,
-    ) : VpnSessionFactory {
+        private val sessionsByKey: Map<String, QueuePeerSession>,
+    ) : PeerSessionFactory {
         override fun create(
             config: VpnConfiguration,
             peer: VpnPeer,
-            sessionIndex: Int,
-        ): VpnSession {
+            peerIndex: Int,
+        ): PeerSession {
             val session = checkNotNull(sessionsByKey[peer.publicKey]) {
                 "Missing test session for `${peer.publicKey}`"
             }
-            session.sessionIndex = sessionIndex
+            session.peerIndex = peerIndex
             return session
         }
     }
 
-    private class QueueVpnSession(
+    private class QueuePeerSession(
         override val peerPublicKey: String,
-        private val encryptResults: ArrayDeque<VpnPacketResult> = ArrayDeque(),
-        private val decryptResults: ArrayDeque<VpnPacketResult> = ArrayDeque(),
-        private val periodicResults: ArrayDeque<VpnPacketResult> = ArrayDeque(),
-    ) : VpnSession {
-        override var sessionIndex: Int = 0
+        private val encryptResults: ArrayDeque<PacketAction> = ArrayDeque(),
+        private val decryptResults: ArrayDeque<PacketAction> = ArrayDeque(),
+        private val periodicResults: ArrayDeque<PacketAction> = ArrayDeque(),
+    ) : PeerSession {
+        override var peerIndex: Int = 0
         override val isActive: Boolean = true
 
         val encryptInputs: MutableList<ByteArray> = mutableListOf()
         val decryptInputs: MutableList<ByteArray> = mutableListOf()
         var periodicCalls: Int = 0
 
-        override fun encryptRawPacket(src: ByteArray, dstSize: UInt): VpnPacketResult {
+        override fun encryptRawPacket(src: ByteArray, dstSize: UInt): PacketAction {
             encryptInputs += src.copyOf()
-            return encryptResults.removeFirstOrNull() ?: VpnPacketResult.Done
+            return encryptResults.removeFirstOrNull() ?: PacketAction.Done
         }
 
-        override fun decryptToRawPacket(src: ByteArray, dstSize: UInt): VpnPacketResult {
+        override fun decryptToRawPacket(src: ByteArray, dstSize: UInt): PacketAction {
             decryptInputs += src.copyOf()
-            return decryptResults.removeFirstOrNull() ?: VpnPacketResult.Done
+            return decryptResults.removeFirstOrNull() ?: PacketAction.Done
         }
 
-        override fun runPeriodicTask(dstSize: UInt): VpnPacketResult {
+        override fun runPeriodicTask(dstSize: UInt): PacketAction {
             periodicCalls += 1
-            return periodicResults.removeFirstOrNull() ?: VpnPacketResult.Done
+            return periodicResults.removeFirstOrNull() ?: PacketAction.Done
         }
 
         override fun close() = Unit

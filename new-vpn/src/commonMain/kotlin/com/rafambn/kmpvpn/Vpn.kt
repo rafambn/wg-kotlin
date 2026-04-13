@@ -10,7 +10,7 @@ import com.rafambn.kmpvpn.session.TunnelManager
  * Core orchestrator facade for VPN lifecycle operations.
  *
  * Manages the full lifecycle of a VPN interface (create, start, stop, delete)
- * while delegating session and interface concerns to [TunnelManager] and [InterfaceManager].
+ * while delegating peer-session and interface concerns to [TunnelManager] and [InterfaceManager].
  */
 class Vpn internal constructor(
     private var vpnConfiguration: VpnConfiguration,
@@ -53,7 +53,7 @@ class Vpn internal constructor(
     }
 
     /**
-     * Returns whether the interface exists and active tunnel sessions are running.
+     * Returns whether the interface exists and active peer sessions are running.
      */
     fun isRunning(): Boolean {
         if (!exists()) {
@@ -63,7 +63,7 @@ class Vpn internal constructor(
             return false
         }
 
-        return tunnelManager.sessions().any { session -> session.isActive }
+        return tunnelManager.sessionSnapshots().any { session -> session.isActive }
     }
 
     /**
@@ -140,12 +140,12 @@ class Vpn internal constructor(
         }
 
         try {
-            tunnelManager.startRuntime(configuration = currentConfiguration)
+            tunnelManager.startDataPlane(configuration = currentConfiguration)
         } catch (throwable: Throwable) {
             managedInterface.down()
             tunnelManager.closeAll()
             throw IllegalStateException(
-                "Session operation `startRuntime` failed: ${throwable.message ?: "unknown"}",
+                "Session operation `startDataPlane` failed: ${throwable.message ?: "unknown"}",
                 throwable,
             )
         }
@@ -275,10 +275,10 @@ class Vpn internal constructor(
 
         if (interfaceManager.isUp()) {
             try {
-                tunnelManager.startRuntime(configuration = interfaceManager.configuration(),)
+                tunnelManager.startDataPlane(configuration = interfaceManager.configuration(),)
             } catch (throwable: Throwable) {
                 throw IllegalStateException(
-                    "Session operation `startRuntime` failed: ${throwable.message ?: "unknown"}",
+                    "Session operation `startDataPlane` failed: ${throwable.message ?: "unknown"}",
                     throwable,
                 )
             }

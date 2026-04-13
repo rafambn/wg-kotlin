@@ -4,7 +4,7 @@ import com.rafambn.kmpvpn.iface.VpnInterfaceInformation
 import com.rafambn.kmpvpn.iface.InterfaceManager
 import com.rafambn.kmpvpn.iface.VpnPeerStats
 import com.rafambn.kmpvpn.session.TunnelManagerImpl
-import com.rafambn.kmpvpn.session.UserspaceRuntimeHandle
+import com.rafambn.kmpvpn.session.UserspaceDataPlane
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -12,44 +12,44 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
-class VpnUserspaceRuntimeIntegrationTest {
+class VpnUserspaceDataPlaneIntegrationTest {
     private val privateKey = "oA8gY5Yg7R6pujISiFDUFxIr05o2IaNbS1Ry6j3TzXs="
     private val peerKey = "6fX3drXr/7L0KleChX2NDSSSXWMQZnIcXtNCmieYw0I="
 
     @Test
-    fun startStopAndDeleteOwnUserspaceRuntimeLifecycle() {
-        val runtimeFactory = RecordingRuntimeFactory()
+    fun startStopAndDeleteOwnUserspaceDataPlaneLifecycle() {
+        val dataPlaneFactory = RecordingDataPlaneFactory()
         val interfaceManager = RecordingInterfaceManager()
         val vpn = vpn(
             configuration = configuration(interfaceName = "utun140", listenPort = 51820),
             interfaceManager = interfaceManager,
-            runtimeFactory = runtimeFactory,
+            dataPlaneFactory = dataPlaneFactory,
         )
 
         vpn.start()
-        assertEquals(1, runtimeFactory.handles.size)
-        assertTrue(runtimeFactory.handles.single().isRunning())
+        assertEquals(1, dataPlaneFactory.dataPlanes.size)
+        assertTrue(dataPlaneFactory.dataPlanes.single().isRunning())
         assertEquals(VpnState.Running, vpn.state())
 
         vpn.stop()
-        assertFalse(runtimeFactory.handles.single().isRunning())
+        assertFalse(dataPlaneFactory.dataPlanes.single().isRunning())
         assertEquals(VpnState.Created, vpn.state())
 
         vpn.start()
-        assertEquals(2, runtimeFactory.handles.size)
-        assertTrue(runtimeFactory.handles.last().isRunning())
+        assertEquals(2, dataPlaneFactory.dataPlanes.size)
+        assertTrue(dataPlaneFactory.dataPlanes.last().isRunning())
 
         vpn.delete()
         assertFalse(vpn.exists())
-        assertFalse(runtimeFactory.handles.last().isRunning())
+        assertFalse(dataPlaneFactory.dataPlanes.last().isRunning())
         assertEquals(VpnState.NotCreated, vpn.state())
     }
 
     @Test
-    fun runtimeStartFailureRollsBackToCreatedState() {
-        val runtimeFactory = RecordingRuntimeFactory(failOnCreate = true)
+    fun dataPlaneStartFailureRollsBackToCreatedState() {
+        val dataPlaneFactory = RecordingDataPlaneFactory(failOnCreate = true)
         val interfaceManager = RecordingInterfaceManager()
-        val tunnelManager = TunnelManagerImpl(userspaceRuntimeFactory = runtimeFactory::create)
+        val tunnelManager = TunnelManagerImpl(userspaceDataPlaneFactory = dataPlaneFactory::create)
         val vpn = Vpn(
             vpnConfiguration = configuration(interfaceName = "utun141"),
             tunnelManager = tunnelManager,
@@ -60,14 +60,14 @@ class VpnUserspaceRuntimeIntegrationTest {
             vpn.start()
         }
 
-        assertTrue(failure.message.orEmpty().contains("Session operation `startRuntime` failed"))
+        assertTrue(failure.message.orEmpty().contains("Session operation `startDataPlane` failed"))
         assertEquals(1, interfaceManager.downCalls)
-        assertEquals(0, tunnelManager.sessions().size)
+        assertEquals(0, tunnelManager.sessionSnapshots().size)
         assertEquals(VpnState.Created, vpn.state())
     }
 
     @Test
-    fun informationOverlaysRuntimePeerStats() {
+    fun informationOverlaysDataPlanePeerStats() {
         val expectedStats = listOf(
             VpnPeerStats(
                 publicKey = peerKey,
@@ -76,10 +76,10 @@ class VpnUserspaceRuntimeIntegrationTest {
                 lastHandshakeEpochSeconds = null,
             ),
         )
-        val runtimeFactory = RecordingRuntimeFactory(stats = expectedStats)
+        val dataPlaneFactory = RecordingDataPlaneFactory(stats = expectedStats)
         val vpn = vpn(
             configuration = configuration(interfaceName = "utun142"),
-            runtimeFactory = runtimeFactory,
+            dataPlaneFactory = dataPlaneFactory,
         )
 
         vpn.start()
@@ -123,33 +123,33 @@ class VpnUserspaceRuntimeIntegrationTest {
     }
 
     @Test
-    fun reconfigureRestartsRuntimeWhenListenPortChanges() {
-        val runtimeFactory = RecordingRuntimeFactory()
+    fun reconfigureRestartsDataPlaneWhenListenPortChanges() {
+        val dataPlaneFactory = RecordingDataPlaneFactory()
         val vpn = vpn(
             configuration = configuration(interfaceName = "utun144", listenPort = 51820),
-            runtimeFactory = runtimeFactory,
+            dataPlaneFactory = dataPlaneFactory,
         )
 
         vpn.start()
-        val firstHandle = runtimeFactory.handles.single()
+        val firstDataPlane = dataPlaneFactory.dataPlanes.single()
 
         vpn.reconfigure(
             configuration(interfaceName = "utun144", listenPort = 51821),
         )
 
-        assertEquals(2, runtimeFactory.handles.size)
-        assertFalse(firstHandle.isRunning())
-        assertTrue(runtimeFactory.handles.last().isRunning())
+        assertEquals(2, dataPlaneFactory.dataPlanes.size)
+        assertFalse(firstDataPlane.isRunning())
+        assertTrue(dataPlaneFactory.dataPlanes.last().isRunning())
     }
 
     private fun vpn(
         configuration: VpnConfiguration,
         interfaceManager: InterfaceManager = RecordingInterfaceManager(),
-        runtimeFactory: RecordingRuntimeFactory = RecordingRuntimeFactory(),
+        dataPlaneFactory: RecordingDataPlaneFactory = RecordingDataPlaneFactory(),
     ): Vpn {
         return Vpn(
             vpnConfiguration = configuration,
-            tunnelManager = TunnelManagerImpl(userspaceRuntimeFactory = runtimeFactory::create),
+            tunnelManager = TunnelManagerImpl(userspaceDataPlaneFactory = dataPlaneFactory::create),
             interfaceManager = interfaceManager,
         )
     }
@@ -220,40 +220,40 @@ class VpnUserspaceRuntimeIntegrationTest {
         }
     }
 
-    private class RecordingRuntimeFactory(
+    private class RecordingDataPlaneFactory(
         private val failOnCreate: Boolean = false,
         private val stats: List<VpnPeerStats> = emptyList(),
     ) {
-        val handles: MutableList<RecordingRuntimeHandle> = mutableListOf()
+        val dataPlanes: MutableList<RecordingDataPlane> = mutableListOf()
 
         fun create(
             configuration: VpnConfiguration,
             listenPort: Int,
-            pollOnce: suspend (
+            pollDataPlaneOnce: suspend (
                 com.rafambn.kmpvpn.session.io.UdpPort,
                 () -> Boolean,
             ) -> Boolean,
             peerStats: () -> List<VpnPeerStats>,
             onFailure: (Throwable) -> Unit,
-        ): UserspaceRuntimeHandle {
+        ): UserspaceDataPlane {
             if (failOnCreate) {
                 throw IllegalStateException("boom")
             }
             require(configuration.interfaceName.isNotBlank())
             require(listenPort > 0)
-            requireNotNull(pollOnce)
+            requireNotNull(pollDataPlaneOnce)
             requireNotNull(peerStats)
             requireNotNull(onFailure)
 
-            return RecordingRuntimeHandle(stats = stats).also { handle ->
-                handles += handle
+            return RecordingDataPlane(stats = stats).also { dataPlane ->
+                dataPlanes += dataPlane
             }
         }
     }
 
-    private class RecordingRuntimeHandle(
+    private class RecordingDataPlane(
         private val stats: List<VpnPeerStats>,
-    ) : UserspaceRuntimeHandle {
+    ) : UserspaceDataPlane {
         private var running: Boolean = true
 
         override fun isRunning(): Boolean = running

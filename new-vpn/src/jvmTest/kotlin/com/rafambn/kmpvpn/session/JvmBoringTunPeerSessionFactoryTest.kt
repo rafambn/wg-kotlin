@@ -2,9 +2,9 @@ package com.rafambn.kmpvpn.session
 
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.VpnPeer
-import com.rafambn.kmpvpn.session.factory.BoringTunVpnSessionFactory
-import com.rafambn.kmpvpn.session.factory.QuicVpnSessionFactory
-import com.rafambn.kmpvpn.session.io.VpnPacketResult
+import com.rafambn.kmpvpn.session.factory.BoringTunPeerSessionFactory
+import com.rafambn.kmpvpn.session.factory.QuicPeerSessionFactory
+import com.rafambn.kmpvpn.session.io.PacketAction
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -14,11 +14,11 @@ import uniffi.new_vpn.convertX25519KeyToBase64
 import uniffi.new_vpn.generatePublicKey
 import uniffi.new_vpn.generateSecretKey
 
-class JvmBoringTunVpnSessionFactoryTest {
+class JvmBoringTunPeerSessionFactoryTest {
 
     @Test
     fun quicStrategyIsExplicitlyUnsupported() {
-        val factory = QuicVpnSessionFactory()
+        val factory = QuicPeerSessionFactory()
         val config = VpnConfiguration(
             interfaceName = "wg-test",
             privateKey = "private-key",
@@ -29,7 +29,7 @@ class JvmBoringTunVpnSessionFactoryTest {
             factory.create(
                 config = config,
                 peer = config.peers.first(),
-                sessionIndex = 1,
+                peerIndex = 1,
             )
         }
     }
@@ -45,21 +45,21 @@ class JvmBoringTunVpnSessionFactoryTest {
             peers = listOf(VpnPeer(publicKey = remotePublicKey)),
         )
 
-        val factory = BoringTunVpnSessionFactory()
+        val factory = BoringTunPeerSessionFactory()
 
         val session = factory.create(
             config = config,
             peer = config.peers.first(),
-            sessionIndex = 1,
+            peerIndex = 1,
         )
 
         assertTrue(session.isActive)
 
         val encrypted = session.encryptRawPacket(src = "hello".encodeToByteArray(), dstSize = 512u)
-        assertTrue(encrypted !is VpnPacketResult.NotSupported)
+        assertTrue(encrypted !is PacketAction.NotSupported)
 
         val periodic = session.runPeriodicTask(dstSize = 512u)
-        assertTrue(periodic !is VpnPacketResult.NotSupported)
+        assertTrue(periodic !is PacketAction.NotSupported)
 
         session.close()
         assertFalse(session.isActive)

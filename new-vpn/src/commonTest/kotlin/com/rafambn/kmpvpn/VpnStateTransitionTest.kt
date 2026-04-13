@@ -48,7 +48,7 @@ class VpnStateTransitionTest {
     fun interfaceFailureDoesNotPersistSyntheticState() {
         val vpn = Vpn(
             vpnConfiguration = baseConfiguration(interfaceName = "utun132"),
-            tunnelManager = disabledTestTunnelManager(),
+            tunnelManager = TunnelManagerImpl(),
             interfaceManager = FailingUpInterfaceManager(),
         )
 
@@ -65,7 +65,7 @@ class VpnStateTransitionTest {
         val interfaceManager = ExistingInterfaceManager(configuration)
         val vpn = Vpn(
             vpnConfiguration = configuration,
-            tunnelManager = disabledTestTunnelManager(),
+            tunnelManager = TunnelManagerImpl(),
             interfaceManager = interfaceManager,
         )
 
@@ -78,6 +78,7 @@ class VpnStateTransitionTest {
     private fun baseConfiguration(interfaceName: String): VpnConfiguration {
         return VpnConfiguration(
             interfaceName = interfaceName,
+            listenPort = 0,
             privateKey = privateKey,
             peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
         )

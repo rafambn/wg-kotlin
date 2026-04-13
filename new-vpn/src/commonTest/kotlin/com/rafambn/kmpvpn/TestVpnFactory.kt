@@ -7,18 +7,14 @@ import com.rafambn.kmpvpn.session.TunnelManager
 
 internal fun testVpn(
     configuration: VpnConfiguration,
-    tunnelManager: TunnelManager = disabledTestTunnelManager(),
-    interfaceManager: InterfaceManager = TestInterfaceManager(configuration),
+    tunnelManager: TunnelManager = TunnelManagerImpl(),
+    interfaceManager: InterfaceManager = TestInterfaceManager(normalizedTestConfiguration(configuration)),
 ): Vpn {
     return Vpn(
-        vpnConfiguration = configuration,
+        vpnConfiguration = normalizedTestConfiguration(configuration),
         tunnelManager = tunnelManager,
         interfaceManager = interfaceManager,
     )
-}
-
-internal fun disabledTestTunnelManager(): TunnelManager {
-    return TunnelManagerImpl(createDataPlane = { _, _, _, _, _ -> null })
 }
 
 internal class TestInterfaceManager(
@@ -86,4 +82,12 @@ internal fun snapshotConfiguration(config: VpnConfiguration): VpnConfiguration {
             )
         },
     )
+}
+
+private fun normalizedTestConfiguration(config: VpnConfiguration): VpnConfiguration {
+    return if (config.listenPort != null) {
+        config
+    } else {
+        snapshotConfiguration(config).copy(listenPort = 0)
+    }
 }

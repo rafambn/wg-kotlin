@@ -23,13 +23,6 @@ import com.rafambn.kmpvpn.session.io.PacketAction
 internal class TunnelManagerImpl(
     engine: Engine = Engine.BORINGTUN,
     private val peerSessionFactory: PeerSessionFactory = defaultFactory(engine),
-    private val createDataPlane: (
-        configuration: VpnConfiguration,
-        listenPort: Int,
-        pollDataPlaneOnce: suspend (UdpPort, () -> Boolean) -> Boolean,
-        peerStats: () -> List<VpnPeerStats>,
-        onFailure: (Throwable) -> Unit,
-    ) -> UserspaceDataPlane? = UserspaceDataPlane::create,
     private val tunPacketPortProvider: (VpnConfiguration) -> TunPacketPort = { DiscardingTunPacketPort },
 ) : TunnelManager {
     private val sessionEntriesByPeer: LinkedHashMap<String, PeerSessionEntry> = linkedMapOf()
@@ -168,16 +161,17 @@ internal class TunnelManagerImpl(
         dataPlaneTunPacketPort = tunPacketPortProvider(configuration)
         peerStatsByPublicKey.clear()
 
-        val createdDataPlane = createDataPlane(
-            configuration,
-            desiredKey.listenPort,
-            ::pollDataPlaneOnce,
-            ::currentPeerStats,
-        ) { throwable ->
-            clearDataPlaneState()
-            closePeerSessionsOnly()
-            onFailure(throwable)
-        } ?: return
+        val createdDataPlane = UserspaceDataPlane.create(
+            configuration = configuration,
+            listenPort = desiredKey.listenPort,
+            pollDataPlaneOnce = ::pollDataPlaneOnce,
+            peerStats = ::currentPeerStats,
+            onFailure = { throwable ->
+                clearDataPlaneState()
+                closePeerSessionsOnly()
+                onFailure(throwable)
+            },
+        )
 
         dataPlane = createdDataPlane
         dataPlaneKey = desiredKey

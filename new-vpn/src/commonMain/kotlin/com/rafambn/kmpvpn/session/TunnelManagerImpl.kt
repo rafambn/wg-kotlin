@@ -4,9 +4,6 @@ import com.rafambn.kmpvpn.Engine
 import com.rafambn.kmpvpn.VpnConfiguration
 import com.rafambn.kmpvpn.Vpn
 import com.rafambn.kmpvpn.iface.VpnPeerStats
-import com.rafambn.kmpvpn.matches
-import com.rafambn.kmpvpn.parseCidr
-import com.rafambn.kmpvpn.parsePacketDestination
 import com.rafambn.kmpvpn.requireDistinctAllowedIpOwnership
 import com.rafambn.kmpvpn.requireUserspacePeerEndpoints
 import com.rafambn.kmpvpn.requireUniquePeerPublicKeys

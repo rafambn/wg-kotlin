@@ -1,4 +1,4 @@
-package com.rafambn.kmpvpn
+package com.rafambn.kmpvpn.session
 
 internal sealed interface ParsedIpAddress {
     val bytes: ByteArray

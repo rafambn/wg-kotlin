@@ -1,5 +1,8 @@
 package com.rafambn.kmpvpn
 
+import com.rafambn.kmpvpn.session.normalizedKey
+import com.rafambn.kmpvpn.session.parseCidr
+
 internal fun requireUserspacePeerEndpoints(peers: List<VpnPeer>) {
     peers.forEachIndexed { index, peer ->
         require(!peer.endpointAddress.isNullOrBlank()) {

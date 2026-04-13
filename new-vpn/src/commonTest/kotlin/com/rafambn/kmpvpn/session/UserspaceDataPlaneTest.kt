@@ -25,8 +25,6 @@ class UserspaceDataPlaneTest {
                 throw AssertionError("Unexpected data plane failure", throwable)
             },
             listenPort = 0,
-            idleDelayMillis = 0L,
-            periodicIntervalMillis = 1L,
             pollInboundPacketOnce = {
                 inboundStarted.complete(Unit)
                 packetWorkerGate.await()
@@ -42,7 +40,6 @@ class UserspaceDataPlaneTest {
                 periodicWorkerGate.await()
                 false
             },
-            peerStatsProvider = { emptyList() },
         )
 
         try {

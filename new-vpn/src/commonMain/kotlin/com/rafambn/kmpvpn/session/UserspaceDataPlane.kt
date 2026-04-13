@@ -1,7 +1,6 @@
 package com.rafambn.kmpvpn.session
 
 import com.rafambn.kmpvpn.VpnConfiguration
-import com.rafambn.kmpvpn.iface.VpnPeerStats
 import com.rafambn.kmpvpn.session.io.KtorDatagramUdpPort
 import com.rafambn.kmpvpn.session.io.UdpPort
 import io.ktor.network.selector.SelectorManager
@@ -19,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 private const val DEFAULT_RECEIVE_TIMEOUT_MILLIS: Long = 50L
 private const val DEFAULT_IDLE_DELAY_MILLIS: Long = 10L
@@ -30,28 +30,17 @@ internal class UserspaceDataPlane(
     private val pollInboundPacketOnce: suspend (UdpPort) -> Boolean,
     private val pollOutboundPacketOnce: suspend (UdpPort) -> Boolean,
     private val runPeriodicWorkOnce: suspend (UdpPort) -> Boolean,
-    private val peerStatsProvider: suspend () -> List<VpnPeerStats>,
     private val onFailure: (Throwable) -> Unit,
 ) : AutoCloseable {
     private val idleDelayMillis: Long = DEFAULT_IDLE_DELAY_MILLIS
-    private val running = MutableStateFlow(true)
-    private val peerStatsSnapshot = MutableStateFlow<List<VpnPeerStats>>(emptyList())
     private val periodicIntervalDelayMillis = DEFAULT_PERIODIC_INTERVAL_MILLIS
     private val coroutineLabel = "kmpvpn-data-plane-${configuration.interfaceName}"
+
+    private val running = MutableStateFlow(true)
     private val scope = CoroutineScope(
         SupervisorJob() +
             Dispatchers.Default +
             CoroutineName(coroutineLabel),
-    )
-    private val selectorManager = SelectorManager(scope.coroutineContext)
-    private val socket: BoundDatagramSocket = runBlocking {
-        aSocket(selectorManager).udp().bind(
-            InetSocketAddress("0.0.0.0", listenPort),
-        )
-    }
-    private val udpPort = KtorDatagramUdpPort(
-        socket = socket,
-        receiveTimeoutMillis = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
     )
     private val inboundJob = scope.launch(CoroutineName("$coroutineLabel-inbound")) {
         runInboundLoop()
@@ -63,18 +52,20 @@ internal class UserspaceDataPlane(
         runPeriodicLoop()
     }
 
-    init {
-        peerStatsSnapshot.value = runBlocking {
-            peerStatsProvider()
-        }
+    private val selectorManager = SelectorManager(scope.coroutineContext)
+    private val socket: BoundDatagramSocket = runBlocking {
+        aSocket(selectorManager).udp().bind(
+            // TODO: Support IPv6/dual-stack listening instead of binding IPv4 wildcard only.
+            InetSocketAddress("0.0.0.0", listenPort),
+        )
     }
+    private val udpPort = KtorDatagramUdpPort(
+        socket = socket,
+        receiveTimeoutMillis = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
+    )
 
     fun isRunning(): Boolean {
         return running.value
-    }
-
-    fun peerStats(): List<VpnPeerStats> {
-        return peerStatsSnapshot.value
     }
 
     override fun close() {
@@ -90,7 +81,6 @@ internal class UserspaceDataPlane(
             outboundJob.cancelAndJoin()
             periodicJob.cancelAndJoin()
             scope.cancel()
-            peerStatsSnapshot.value = peerStatsProvider()
         }
     }
 
@@ -127,7 +117,6 @@ internal class UserspaceDataPlane(
             delay(initialDelayMillis.coerceAtLeast(0L))
             while (running.value) {
                 val didWork = work()
-                peerStatsSnapshot.value = peerStatsProvider()
                 if (delayAfterEachIteration || !didWork) {
                     delay(idleDelayMillis.coerceAtLeast(0L))
                 }
@@ -144,9 +133,10 @@ internal class UserspaceDataPlane(
             return
         }
 
-        socket.close()
-        selectorManager.close()
-        peerStatsSnapshot.value = peerStatsProvider()
+        withContext(Dispatchers.IO) {
+            socket.close()
+            selectorManager.close()
+        }
         onFailure(throwable)
         scope.cancel("userspace data plane worker failed", throwable)
     }

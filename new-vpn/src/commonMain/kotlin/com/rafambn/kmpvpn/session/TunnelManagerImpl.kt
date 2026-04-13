@@ -142,17 +142,12 @@ internal class TunnelManagerImpl(
             pollInboundPacketOnce = ::pollInboundPacketOnce,
             pollOutboundPacketOnce = ::pollOutboundPacketOnce,
             runPeriodicWorkOnce = ::runPeriodicWorkOnce,
-            peerStatsProvider = ::currentPeerStatsSnapshot,
         )
 
         dataPlane = createdDataPlane
     }
 
     override fun peerStats(): List<VpnPeerStats> {
-        return dataPlane?.peerStats() ?: currentPeerStats()
-    }
-
-    private fun currentPeerStats(): List<VpnPeerStats> {
         return sortedSessionEntries()
             .map { entry ->
                 val stats = peerStatsByPublicKey[entry.peer.publicKey] ?: MutablePeerStats()
@@ -166,12 +161,6 @@ internal class TunnelManagerImpl(
                     lastHandshakeEpochSeconds = null,
                 )
             }
-    }
-
-    private suspend fun currentPeerStatsSnapshot(): List<VpnPeerStats> {
-        return dataPlaneMutex.withLock {
-            currentPeerStats()
-        }
     }
 
     private suspend fun pollInboundPacketOnce(networkPort: UdpPort): Boolean {

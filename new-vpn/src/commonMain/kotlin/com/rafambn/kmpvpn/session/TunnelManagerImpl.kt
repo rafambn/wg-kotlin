@@ -51,7 +51,12 @@ internal class TunnelManagerImpl(
                 val desiredIndex = desiredIndexes.getValue(publicKey)
                 val previous = previousSessions[publicKey]
 
-                if (shouldReuse(previous, desiredPeer, desiredIndex)) {
+                if (
+                    previous != null &&
+                    previous.peer == desiredPeer &&
+                    previous.session.peerIndex == desiredIndex &&
+                    previous.session.isActive
+                ) {
                     nextSessions[publicKey] = checkNotNull(previous)
                     return@forEach
                 }
@@ -91,9 +96,12 @@ internal class TunnelManagerImpl(
         }
     }
 
-    override fun sessionSnapshots(): List<PeerSessionSnapshot> {
-        return sessionEntriesByPeer.values
-            .sortedBy { entry -> entry.session.peerIndex }
+    override fun hasActiveSessions(): Boolean {
+        return sessionEntriesByPeer.values.any { entry -> entry.session.isActive }
+    }
+
+    fun sessionSnapshots(): List<PeerSessionSnapshot> {
+        return sortedSessionEntries()
             .map { entry ->
                 PeerSessionSnapshot(
                     peerPublicKey = entry.peer.publicKey,
@@ -106,13 +114,7 @@ internal class TunnelManagerImpl(
             }
     }
 
-    override fun sessionEntries(): List<PeerSessionEntry> {
-        return sessionEntriesByPeer.values
-            .sortedBy { entry -> entry.session.peerIndex }
-            .map { entry -> entry.copy() }
-    }
-
-    override fun sessionSnapshot(peerKey: String): PeerSessionSnapshot? {
+    fun sessionSnapshot(peerKey: String): PeerSessionSnapshot? {
         val entry = sessionEntriesByPeer[peerKey] ?: return null
         return PeerSessionSnapshot(
             peerPublicKey = entry.peer.publicKey,
@@ -124,44 +126,16 @@ internal class TunnelManagerImpl(
         )
     }
 
-    override fun closePeerSession(peerKey: String) {
-        val entry = sessionEntriesByPeer.remove(peerKey) ?: return
-        entry.session.close()
-        if (sessionEntriesByPeer.isEmpty()) {
-            try {
-                val currentDataPlane = dataPlane
-                try {
-                    currentDataPlane?.close()
-                } finally {
-                    clearDataPlaneState()
-                }
-            } catch (_: Throwable) {
-                clearDataPlaneState()
-            }
-        }
-    }
-
     override fun closeAll() {
-        var dataPlaneFailure: Throwable? = null
         try {
-            val currentDataPlane = dataPlane
-            try {
-                currentDataPlane?.close()
-            } finally {
-                clearDataPlaneState()
-            }
-        } catch (throwable: Throwable) {
-            dataPlaneFailure = throwable
+            dataPlane?.close()
+        } finally {
+            clearDataPlaneState()
+            closePeerSessionsOnly()
         }
-
-        closePeerSessionsOnly()
-        dataPlaneFailure?.let { throwable -> throw throwable }
     }
 
-    override fun startDataPlane(
-        configuration: VpnConfiguration,
-        onFailure: (Throwable) -> Unit,
-    ) {
+    override fun startDataPlane(configuration: VpnConfiguration) {
         if (sessionEntriesByPeer.isEmpty()) {
             try {
                 val currentDataPlane = dataPlane
@@ -203,10 +177,9 @@ internal class TunnelManagerImpl(
             listenPort = desiredKey.listenPort,
             pollDataPlaneOnce = ::pollDataPlaneOnce,
             peerStats = ::currentPeerStats,
-            onFailure = { throwable ->
+            onFailure = { _ ->
                 clearDataPlaneState()
                 closePeerSessionsOnly()
-                onFailure(throwable)
             },
         )
 
@@ -219,8 +192,7 @@ internal class TunnelManagerImpl(
     }
 
     private fun currentPeerStats(): List<VpnPeerStats> {
-        return sessionEntriesByPeer.values
-            .sortedBy { entry -> entry.session.peerIndex }
+        return sortedSessionEntries()
             .map { entry ->
                 val stats = peerStatsByPublicKey[entry.peer.publicKey] ?: MutablePeerStats()
                 VpnPeerStats(
@@ -235,7 +207,7 @@ internal class TunnelManagerImpl(
             }
     }
 
-    internal suspend fun pollDataPlaneOnce(
+    private suspend fun pollDataPlaneOnce(
         udpPort: UdpPort,
         periodicTicker: () -> Boolean,
     ): Boolean {
@@ -246,17 +218,6 @@ internal class TunnelManagerImpl(
             didWork = processPeriodicTasks(udpPort = udpPort) || didWork
         }
         return didWork
-    }
-
-    private fun shouldReuse(
-        previous: PeerSessionEntry?,
-        desiredPeer: VpnPeer,
-        desiredIndex: Int,
-    ): Boolean {
-        return previous != null &&
-                previous.peer == desiredPeer &&
-                previous.session.peerIndex == desiredIndex &&
-                previous.session.isActive
     }
 
     private fun createPeerSessionEntry(
@@ -286,7 +247,7 @@ internal class TunnelManagerImpl(
         val packet = tunPacketPort.readPacket() ?: return false
         val selected = selectSessionForPacket(
             packet = packet,
-            sessionEntries = sessionEntries(),
+            sessionEntries = sessionEntriesByPeer.values,
         ) ?: return true
 
         applyPacketResult(
@@ -305,7 +266,7 @@ internal class TunnelManagerImpl(
         udpPort: UdpPort,
     ): Boolean {
         val datagram = udpPort.receiveDatagram() ?: return false
-        val selected = sessionEntries().firstOrNull { entry ->
+        val selected = sessionEntriesByPeer.values.firstOrNull { entry ->
             entry.peer.endpointAddress == datagram.endpoint.host &&
                     entry.peer.endpointPort == datagram.endpoint.port
         } ?: return true
@@ -348,7 +309,7 @@ internal class TunnelManagerImpl(
         udpPort: UdpPort,
     ): Boolean {
         var didWork = false
-        sessionEntries().forEach { entry ->
+        sortedSessionEntries().forEach { entry ->
             applyPacketResult(
                 tunPacketPort = dataPlaneTunPacketPort,
                 udpPort = udpPort,
@@ -395,7 +356,7 @@ internal class TunnelManagerImpl(
 
     private fun selectSessionForPacket(
         packet: ByteArray,
-        sessionEntries: List<PeerSessionEntry>,
+        sessionEntries: Iterable<PeerSessionEntry>,
     ): PeerSessionEntry? {
         val destination = parsePacketDestination(packet) ?: return null
         return sessionEntries
@@ -409,6 +370,10 @@ internal class TunnelManagerImpl(
             }
             .maxByOrNull { (_, route) -> route.prefixLength }
             ?.first
+    }
+
+    private fun sortedSessionEntries(): List<PeerSessionEntry> {
+        return sessionEntriesByPeer.values.sortedBy { entry -> entry.session.peerIndex }
     }
 
     private fun PeerSessionEntry.peerEndpoint(): UdpEndpoint {

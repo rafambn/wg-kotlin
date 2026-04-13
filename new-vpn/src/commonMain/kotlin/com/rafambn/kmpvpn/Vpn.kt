@@ -63,7 +63,7 @@ class Vpn internal constructor(
             return false
         }
 
-        return tunnelManager.sessionSnapshots().any { session -> session.isActive }
+        return tunnelManager.hasActiveSessions()
     }
 
     /**
@@ -275,7 +275,7 @@ class Vpn internal constructor(
 
         if (interfaceManager.isUp()) {
             try {
-                tunnelManager.startDataPlane(configuration = interfaceManager.configuration(),)
+                tunnelManager.startDataPlane(configuration = interfaceManager.configuration())
             } catch (throwable: Throwable) {
                 throw IllegalStateException(
                     "Session operation `startDataPlane` failed: ${throwable.message ?: "unknown"}",

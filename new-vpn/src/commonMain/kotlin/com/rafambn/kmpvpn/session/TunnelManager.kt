@@ -14,24 +14,9 @@ interface TunnelManager {
     fun reconcileSessions(config: VpnConfiguration)
 
     /**
-     * Returns snapshots for all known sessions.
+     * Returns whether any managed session is currently active.
      */
-    fun sessionSnapshots(): List<PeerSessionSnapshot>
-
-    /**
-     * Returns the currently managed live sessions.
-     */
-    fun sessionEntries(): List<PeerSessionEntry>
-
-    /**
-     * Returns one session snapshot by peer public key, or `null` if missing.
-     */
-    fun sessionSnapshot(peerKey: String): PeerSessionSnapshot?
-
-    /**
-     * Closes one session by peer public key.
-     */
-    fun closePeerSession(peerKey: String)
+    fun hasActiveSessions(): Boolean
 
     /**
      * Closes all known sessions.
@@ -42,10 +27,7 @@ interface TunnelManager {
     /**
      * Starts or refreshes the owned data-plane runtime for the current interface.
      */
-    fun startDataPlane(
-        configuration: VpnConfiguration,
-        onFailure: (Throwable) -> Unit = {},
-    )
+    fun startDataPlane(configuration: VpnConfiguration)
 
     /**
      * Returns current peer stats from the active data plane, or zeroed peer stats

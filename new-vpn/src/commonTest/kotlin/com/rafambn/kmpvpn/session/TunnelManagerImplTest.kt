@@ -18,6 +18,7 @@ class TunnelManagerImplTest {
 
         manager.reconcileSessions(configurationWithPeers("peer-a", "peer-b"))
 
+        assertTrue(manager.hasActiveSessions())
         assertEquals(2, manager.sessionSnapshots().size)
         assertTrue(manager.sessionSnapshots().all { session -> session.isActive })
     }

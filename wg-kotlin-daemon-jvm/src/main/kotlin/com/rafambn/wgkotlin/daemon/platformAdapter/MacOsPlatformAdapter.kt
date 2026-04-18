@@ -23,88 +23,94 @@ internal class MacOsPlatformAdapter(
             ipv4Address = ipv4Address,
             prefixLength = prefixLength,
         ).openDevice()
-        val interfaceName = handle.interfaceName
+        return try {
+            val interfaceName = handle.interfaceName
+            val addresses = normalizeCidrs(config.addresses)
+            val routes = normalizeCidrs(config.routes)
 
-        config.mtu?.let { mtu ->
-            runCommand(
-                operationLabel = "apply-mtu",
-                binary = CommandBinary.IFCONFIG,
-                arguments = listOf(interfaceName, "mtu", mtu.toString()),
-            )
-        }
-
-        config.addresses.forEach { address ->
-            val arguments = if (address.substringBefore("/").contains(":")) {
-                listOf(interfaceName, "inet6", address, "add")
-            } else {
-                listOf(interfaceName, "inet", address, "alias")
+            config.mtu?.let { mtu ->
+                runCommand(
+                    operationLabel = "apply-mtu",
+                    binary = CommandBinary.IFCONFIG,
+                    arguments = listOf(interfaceName, "mtu", mtu.toString()),
+                )
             }
-            runCommand(
-                operationLabel = "add-address",
-                binary = CommandBinary.IFCONFIG,
-                arguments = arguments,
-            )
-        }
 
-        config.routes.forEach { route ->
-            runCommand(
-                operationLabel = "delete-route",
-                binary = CommandBinary.ROUTE,
-                arguments = listOf("-n", "delete", "-net", route, "-interface", interfaceName),
-                acceptedExitCodes = setOf(0, 1),
-            )
-            runCommand(
-                operationLabel = "add-route",
-                binary = CommandBinary.ROUTE,
-                arguments = listOf("-n", "add", "-net", route, "-interface", interfaceName),
-            )
-        }
+            addresses.forEach { address ->
+                val arguments = if (address.substringBefore("/").contains(":")) {
+                    listOf(interfaceName, "inet6", address, "add")
+                } else {
+                    listOf(interfaceName, "inet", address, "alias")
+                }
+                runCommand(
+                    operationLabel = "add-address",
+                    binary = CommandBinary.IFCONFIG,
+                    arguments = arguments,
+                )
+            }
 
-        val resolverPath = "State:/Network/Service/$interfaceName/DNS"
-        val resolverRootPath = "State:/Network/Service/$interfaceName"
-        val dnsServers = config.dns.servers
-            .map { server -> server.trim() }
-            .filter { server -> server.isNotBlank() }
-            .distinct()
-        val domains = config.dns.searchDomains
-            .map { domain -> domain.trim().removePrefix(".") }
-            .filter { domain -> domain.isNotBlank() }
-            .distinct()
+            routes.forEach { route ->
+                runCommand(
+                    operationLabel = "delete-route",
+                    binary = CommandBinary.ROUTE,
+                    arguments = listOf("-n", "delete", "-net", route, "-interface", interfaceName),
+                    acceptedExitCodes = setOf(0, 1),
+                )
+                runCommand(
+                    operationLabel = "add-route",
+                    binary = CommandBinary.ROUTE,
+                    arguments = listOf("-n", "add", "-net", route, "-interface", interfaceName),
+                )
+            }
 
-        runCommand(
-            operationLabel = "clear-dns",
-            binary = CommandBinary.SCUTIL,
-            stdin = buildString {
-                appendLine("remove $resolverPath")
-                appendLine("remove $resolverRootPath")
-                appendLine("quit")
-            },
-        )
+            val resolverPath = "State:/Network/Service/$interfaceName/DNS"
+            val resolverRootPath = "State:/Network/Service/$interfaceName"
+            val dnsServers = config.dns.servers
+                .map { server -> server.trim() }
+                .filter { server -> server.isNotBlank() }
+                .distinct()
+            val domains = config.dns.searchDomains
+                .map { domain -> domain.trim().removePrefix(".") }
+                .filter { domain -> domain.isNotBlank() }
+                .distinct()
 
-        if (domains.isNotEmpty() && dnsServers.isNotEmpty()) {
             runCommand(
-                operationLabel = "set-dns",
+                operationLabel = "clear-dns",
                 binary = CommandBinary.SCUTIL,
                 stdin = buildString {
-                    appendLine("d.init")
-                    appendLine("d.add ServerAddresses ${dnsServers.joinToString(" ")}")
-                    appendLine("d.add SupplementalMatchDomains ${domains.joinToString(" ")}")
-                    appendLine("set $resolverPath")
+                    appendLine("remove $resolverPath")
+                    appendLine("remove $resolverRootPath")
                     appendLine("quit")
                 },
             )
-            runCommand(
-                operationLabel = "set-dns-root",
-                binary = CommandBinary.SCUTIL,
-                stdin = buildString {
-                    appendLine("d.init")
-                    appendLine("d.add UserDefinedName $interfaceName")
-                    appendLine("set $resolverRootPath")
-                    appendLine("quit")
-                },
-            )
-        }
 
-        return handle
+            if (domains.isNotEmpty() && dnsServers.isNotEmpty()) {
+                runCommand(
+                    operationLabel = "set-dns",
+                    binary = CommandBinary.SCUTIL,
+                    stdin = buildString {
+                        appendLine("d.init")
+                        appendLine("d.add ServerAddresses ${dnsServers.joinToString(" ")}")
+                        appendLine("d.add SupplementalMatchDomains ${domains.joinToString(" ")}")
+                        appendLine("set $resolverPath")
+                        appendLine("quit")
+                    },
+                )
+                runCommand(
+                    operationLabel = "set-dns-root",
+                    binary = CommandBinary.SCUTIL,
+                    stdin = buildString {
+                        appendLine("d.init")
+                        appendLine("d.add UserDefinedName $interfaceName")
+                        appendLine("set $resolverRootPath")
+                        appendLine("quit")
+                    },
+                )
+            }
+            handle
+        } catch (failure: Throwable) {
+            runCatching { handle.close() }
+            throw failure
+        }
     }
 }

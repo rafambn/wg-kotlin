@@ -23,124 +23,131 @@ internal class WindowsPlatformAdapter(
             ipv4Address = ipv4Address,
             prefixLength = prefixLength,
         ).openDevice()
-        val interfaceName = baseHandle.interfaceName
+        return try {
+            val interfaceName = baseHandle.interfaceName
+            val addresses = normalizeCidrs(config.addresses)
+            val routes = normalizeCidrs(config.routes)
 
-        config.mtu?.let { mtu ->
-            runCommand(
-                operationLabel = "apply-mtu",
-                binary = CommandBinary.NETSH,
-                arguments = listOf(
-                    "interface",
-                    "ipv4",
-                    "set",
-                    "subinterface",
-                    interfaceName,
-                    "mtu=$mtu",
-                    "store=active",
-                ),
-            )
-        }
-
-        config.addresses.forEach { address ->
-            if (isIpv6AddressLiteral(address)) {
+            config.mtu?.let { mtu ->
                 runCommand(
-                    operationLabel = "delete-address",
-                    binary = CommandBinary.NETSH,
-                    arguments = listOf(
-                        "interface",
-                        "ipv6",
-                        "delete",
-                        "address",
-                        "interface=$interfaceName",
-                        "address=$address",
-                    ),
-                    acceptedExitCodes = setOf(0, 1),
-                )
-                runCommand(
-                    operationLabel = "add-address",
-                    binary = CommandBinary.NETSH,
-                    arguments = listOf(
-                        "interface",
-                        "ipv6",
-                        "add",
-                        "address",
-                        "interface=$interfaceName",
-                        "address=$address",
-                    ),
-                )
-            } else {
-                val (ip, prefix) = splitCidr(address)
-                runCommand(
-                    operationLabel = "delete-address",
+                    operationLabel = "apply-mtu",
                     binary = CommandBinary.NETSH,
                     arguments = listOf(
                         "interface",
                         "ipv4",
-                        "delete",
-                        "address",
-                        "name=$interfaceName",
-                        "address=$ip",
-                        "gateway=all",
+                        "set",
+                        "subinterface",
+                        interfaceName,
+                        "mtu=$mtu",
+                        "store=active",
                     ),
-                    acceptedExitCodes = setOf(0, 1),
                 )
+            }
+
+            addresses.forEach { address ->
+                if (isIpv6AddressLiteral(address)) {
+                    runCommand(
+                        operationLabel = "delete-address",
+                        binary = CommandBinary.NETSH,
+                        arguments = listOf(
+                            "interface",
+                            "ipv6",
+                            "delete",
+                            "address",
+                            "interface=$interfaceName",
+                            "address=$address",
+                        ),
+                        acceptedExitCodes = setOf(0, 1),
+                    )
+                    runCommand(
+                        operationLabel = "add-address",
+                        binary = CommandBinary.NETSH,
+                        arguments = listOf(
+                            "interface",
+                            "ipv6",
+                            "add",
+                            "address",
+                            "interface=$interfaceName",
+                            "address=$address",
+                        ),
+                    )
+                } else {
+                    val (ip, prefix) = splitCidr(address)
+                    runCommand(
+                        operationLabel = "delete-address",
+                        binary = CommandBinary.NETSH,
+                        arguments = listOf(
+                            "interface",
+                            "ipv4",
+                            "delete",
+                            "address",
+                            "name=$interfaceName",
+                            "address=$ip",
+                            "gateway=all",
+                        ),
+                        acceptedExitCodes = setOf(0, 1),
+                    )
+                    runCommand(
+                        operationLabel = "add-address",
+                        binary = CommandBinary.NETSH,
+                        arguments = listOf(
+                            "interface",
+                            "ipv4",
+                            "add",
+                            "address",
+                            "name=$interfaceName",
+                            "address=$ip",
+                            "mask=${prefixToMask(prefix)}",
+                        ),
+                    )
+                }
+            }
+
+            routes.forEach { route ->
                 runCommand(
-                    operationLabel = "add-address",
+                    operationLabel = "add-route",
                     binary = CommandBinary.NETSH,
                     arguments = listOf(
                         "interface",
-                        "ipv4",
+                        if (route.substringBefore("/").contains(":")) "ipv6" else "ipv4",
                         "add",
-                        "address",
-                        "name=$interfaceName",
-                        "address=$ip",
-                        "mask=${prefixToMask(prefix)}",
+                        "route",
+                        "prefix=$route",
+                        "interface=$interfaceName",
                     ),
                 )
             }
-        }
 
-        config.routes.forEach { route ->
-            runCommand(
-                operationLabel = "add-route",
-                binary = CommandBinary.NETSH,
-                arguments = listOf(
-                    "interface",
-                    if (route.substringBefore("/").contains(":")) "ipv6" else "ipv4",
-                    "add",
-                    "route",
-                    "prefix=$route",
-                    "interface=$interfaceName",
-                ),
-            )
-        }
-
-        clearNrptRules(interfaceName)
-        val namespaces = config.dns.searchDomains
-            .map { domain -> domain.trim() }
-            .filter { domain -> domain.isNotBlank() }
-            .map { domain -> ".${domain.removePrefix(".")}" }
-            .distinct()
-        val dnsServers = config.dns.servers
-            .map { server -> server.trim() }
-            .filter { server -> server.isNotBlank() }
-            .distinct()
-        if (namespaces.isNotEmpty() && dnsServers.isNotEmpty()) {
-            namespaces.forEach { namespace ->
-                val script = "Add-DnsClientNrptRule -Namespace '${escapePowerShellSingleQuoted(namespace)}' " +
-                    "-NameServers ${toPowerShellArrayLiteral(dnsServers)} -Comment '${escapePowerShellSingleQuoted(ruleComment(interfaceName))}'"
-                runCommand(
-                    operationLabel = "set-nrpt-rule",
-                    binary = CommandBinary.POWERSHELL,
-                    arguments = listOf("-NoProfile", "-NonInteractive", "-Command", script),
-                )
+            clearNrptRules(interfaceName)
+            val namespaces = config.dns.searchDomains
+                .map { domain -> domain.trim() }
+                .filter { domain -> domain.isNotBlank() }
+                .map { domain -> ".${domain.removePrefix(".")}" }
+                .distinct()
+            val dnsServers = config.dns.servers
+                .map { server -> server.trim() }
+                .filter { server -> server.isNotBlank() }
+                .distinct()
+            if (namespaces.isNotEmpty() && dnsServers.isNotEmpty()) {
+                namespaces.forEach { namespace ->
+                    val script = "Add-DnsClientNrptRule -Namespace '${escapePowerShellSingleQuoted(namespace)}' " +
+                        "-NameServers ${toPowerShellArrayLiteral(dnsServers)} -Comment '${escapePowerShellSingleQuoted(ruleComment(interfaceName))}'"
+                    runCommand(
+                        operationLabel = "set-nrpt-rule",
+                        binary = CommandBinary.POWERSHELL,
+                        arguments = listOf("-NoProfile", "-NonInteractive", "-Command", script),
+                    )
+                }
             }
+            CleanupTunHandle(
+                delegate = baseHandle,
+                cleanup = { clearNrptRules(interfaceName) },
+            )
+        } catch (failure: Throwable) {
+            runCatching { baseHandle.close() }
+            runCatching { clearNrptRules(baseHandle.interfaceName) }
+            throw failure
         }
-
-        return CleanupTunHandle(
-            delegate = baseHandle,
-            cleanup = { clearNrptRules(interfaceName) },
-        )
     }
 
     private fun clearNrptRules(interfaceName: String) {

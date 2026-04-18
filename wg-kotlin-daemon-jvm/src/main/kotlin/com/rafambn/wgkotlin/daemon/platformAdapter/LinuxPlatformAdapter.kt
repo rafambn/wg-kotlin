@@ -22,66 +22,72 @@ internal class LinuxPlatformAdapter(
             ipv4Address = ipv4Address,
             prefixLength = prefixLength,
         ).openDevice()
-        val interfaceName = handle.interfaceName
+        return try {
+            val interfaceName = handle.interfaceName
+            val addresses = normalizeCidrs(config.addresses)
+            val routes = normalizeCidrs(config.routes)
 
-        config.mtu?.let { mtu ->
+            config.mtu?.let { mtu ->
+                runCommand(
+                    operationLabel = "apply-mtu",
+                    binary = CommandBinary.IP,
+                    arguments = listOf("link", "set", "dev", interfaceName, "mtu", mtu.toString()),
+                )
+            }
+
             runCommand(
-                operationLabel = "apply-mtu",
+                operationLabel = "flush-addresses",
                 binary = CommandBinary.IP,
-                arguments = listOf("link", "set", "dev", interfaceName, "mtu", mtu.toString()),
+                arguments = listOf("address", "flush", "dev", interfaceName),
             )
+            addresses.forEach { address ->
+                runCommand(
+                    operationLabel = "add-address",
+                    binary = CommandBinary.IP,
+                    arguments = listOf("address", "add", address, "dev", interfaceName),
+                )
+            }
+
+            routes.forEach { route ->
+                runCommand(
+                    operationLabel = "add-route",
+                    binary = CommandBinary.IP,
+                    arguments = listOf("route", "replace", route, "dev", interfaceName),
+                )
+            }
+
+            val routingDomains = config.dns.searchDomains
+                .map { domain -> domain.trim() }
+                .filter { domain -> domain.isNotBlank() }
+                .distinct()
+                .map { domain -> "~${domain.removePrefix(".")}" }
+            val dnsServers = config.dns.servers
+                .map { server -> server.trim() }
+                .filter { server -> server.isNotBlank() }
+                .distinct()
+
+            if (routingDomains.isEmpty() || dnsServers.isEmpty()) {
+                runCommand(
+                    operationLabel = "revert-dns",
+                    binary = CommandBinary.RESOLVECTL,
+                    arguments = listOf("revert", interfaceName),
+                )
+            } else {
+                runCommand(
+                    operationLabel = "set-dns",
+                    binary = CommandBinary.RESOLVECTL,
+                    arguments = listOf("dns", interfaceName) + dnsServers,
+                )
+                runCommand(
+                    operationLabel = "set-domains",
+                    binary = CommandBinary.RESOLVECTL,
+                    arguments = listOf("domain", interfaceName) + routingDomains,
+                )
+            }
+            handle
+        } catch (failure: Throwable) {
+            runCatching { handle.close() }
+            throw failure
         }
-
-        runCommand(
-            operationLabel = "flush-addresses",
-            binary = CommandBinary.IP,
-            arguments = listOf("address", "flush", "dev", interfaceName),
-        )
-        config.addresses.forEach { address ->
-            runCommand(
-                operationLabel = "add-address",
-                binary = CommandBinary.IP,
-                arguments = listOf("address", "add", address, "dev", interfaceName),
-            )
-        }
-
-        config.routes.forEach { route ->
-            runCommand(
-                operationLabel = "add-route",
-                binary = CommandBinary.IP,
-                arguments = listOf("route", "replace", route, "dev", interfaceName),
-            )
-        }
-
-        val routingDomains = config.dns.searchDomains
-            .map { domain -> domain.trim() }
-            .filter { domain -> domain.isNotBlank() }
-            .distinct()
-            .map { domain -> "~${domain.removePrefix(".")}" }
-        val dnsServers = config.dns.servers
-            .map { server -> server.trim() }
-            .filter { server -> server.isNotBlank() }
-            .distinct()
-
-        if (routingDomains.isEmpty() || dnsServers.isEmpty()) {
-            runCommand(
-                operationLabel = "revert-dns",
-                binary = CommandBinary.RESOLVECTL,
-                arguments = listOf("revert", interfaceName),
-            )
-        } else {
-            runCommand(
-                operationLabel = "set-dns",
-                binary = CommandBinary.RESOLVECTL,
-                arguments = listOf("dns", interfaceName) + dnsServers,
-            )
-            runCommand(
-                operationLabel = "set-domains",
-                binary = CommandBinary.RESOLVECTL,
-                arguments = listOf("domain", interfaceName) + routingDomains,
-            )
-        }
-
-        return handle
     }
 }

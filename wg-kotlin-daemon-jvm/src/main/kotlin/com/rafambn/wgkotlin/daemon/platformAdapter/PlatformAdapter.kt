@@ -34,7 +34,6 @@ internal object PlatformAdapterFactory {
 internal abstract class BasePlatformAdapter(
     protected val processLauncher: ProcessLauncher,
 ) : PlatformAdapter {
-
     protected fun runCommand(
         operationLabel: String,
         binary: CommandBinary,
@@ -61,10 +60,14 @@ internal abstract class BasePlatformAdapter(
 }
 
 internal fun extractPrimaryIpv4Address(config: TunSessionConfig): Pair<String, UByte> {
-    val ipv4Address = config.addresses
+    val ipv4Address = normalizeCidrs(config.addresses)
         .map { address -> address.substringBefore("/") to address.substringAfter("/", "") }
         .firstOrNull { (ip, prefix) -> ip.isNotBlank() && !ip.contains(":") && prefix.isNotBlank() }
         ?: throw IllegalArgumentException("Tun session requires at least one IPv4 address")
 
     return ipv4Address.first to ipv4Address.second.toUByte()
+}
+
+internal fun normalizeCidrs(values: List<String>): List<String> {
+    return values.map { value -> value.trim() }
 }

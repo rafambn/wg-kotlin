@@ -1,7 +1,7 @@
 package com.rafambn.wgkotlin
 
-import com.rafambn.wgkotlin.session.normalizedKey
-import com.rafambn.wgkotlin.session.parseCidr
+import com.rafambn.wgkotlin.util.normalizedKey
+import com.rafambn.wgkotlin.util.parseCidr
 
 internal fun requireUserspacePeerEndpoints(peers: List<VpnPeer>) {
     peers.forEachIndexed { index, peer ->

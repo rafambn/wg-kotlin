@@ -1,7 +1,7 @@
 package com.rafambn.wgkotlin.iface
 
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
-import com.rafambn.wgkotlin.session.DuplexChannelPipe
+import com.rafambn.wgkotlin.util.DuplexChannelPipe
 
 class InMemoryInterfaceCommandExecutor : InterfaceCommandExecutor {
     private val sessions = linkedMapOf<String, SessionState>()

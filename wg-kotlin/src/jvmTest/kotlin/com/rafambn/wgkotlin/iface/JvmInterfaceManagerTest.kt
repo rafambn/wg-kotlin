@@ -3,7 +3,7 @@ package com.rafambn.wgkotlin.iface
 import com.rafambn.wgkotlin.DnsConfig
 import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.VpnPeer
-import com.rafambn.wgkotlin.session.DuplexChannelPipe
+import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

@@ -1,14 +1,11 @@
 package com.rafambn.wgkotlin
 
-import com.rafambn.wgkotlin.iface.InterfaceManager
 import com.rafambn.wgkotlin.iface.PlatformInterfaceFactory
 import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
-import com.rafambn.wgkotlin.session.CryptoSessionManager
-import com.rafambn.wgkotlin.session.CryptoSessionManagerImpl
-import com.rafambn.wgkotlin.session.DuplexChannelPipe
-import com.rafambn.wgkotlin.session.SocketManager
-import com.rafambn.wgkotlin.session.SocketManagerImpl
-import com.rafambn.wgkotlin.session.io.UdpDatagram
+import com.rafambn.wgkotlin.crypto.CryptoSessionManagerImpl
+import com.rafambn.wgkotlin.util.DuplexChannelPipe
+import com.rafambn.wgkotlin.network.SocketManagerImpl
+import com.rafambn.wgkotlin.network.io.UdpDatagram
 
 class Vpn(
     configuration: VpnConfiguration,

@@ -1,7 +1,7 @@
 package com.rafambn.wgkotlin.iface
 
 import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
-import com.rafambn.wgkotlin.session.DuplexChannelPipe
+import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import java.time.Duration
 import org.koin.core.module.Module
 import org.koin.core.parameter.parametersOf

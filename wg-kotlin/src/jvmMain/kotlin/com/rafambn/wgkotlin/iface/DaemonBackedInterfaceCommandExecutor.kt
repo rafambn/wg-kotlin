@@ -4,7 +4,7 @@ import com.rafambn.wgkotlin.daemon.client.DaemonProcessClient
 import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import com.rafambn.wgkotlin.daemon.protocol.DaemonApi
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
-import com.rafambn.wgkotlin.session.DuplexChannelPipe
+import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets

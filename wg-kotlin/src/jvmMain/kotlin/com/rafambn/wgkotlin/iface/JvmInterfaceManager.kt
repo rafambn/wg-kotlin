@@ -2,7 +2,7 @@ package com.rafambn.wgkotlin.iface
 
 import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.requireValidConfiguration
-import com.rafambn.wgkotlin.session.DuplexChannelPipe
+import com.rafambn.wgkotlin.util.DuplexChannelPipe
 
 class JvmInterfaceManager(
     private val commandExecutor: InterfaceCommandExecutor,

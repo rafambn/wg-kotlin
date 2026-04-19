@@ -2,82 +2,15 @@ package com.rafambn.wgkotlin
 
 import com.rafambn.wgkotlin.iface.InterfaceManager
 import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
-import com.rafambn.wgkotlin.session.CryptoSessionManager
-import com.rafambn.wgkotlin.session.DuplexChannelPipe
-import com.rafambn.wgkotlin.session.SocketManager
-import com.rafambn.wgkotlin.session.io.UdpDatagram
 
 internal fun testVpn(
     configuration: VpnConfiguration,
-    cryptoSessionManager: CryptoSessionManager? = null,
-    socketManager: SocketManager? = null,
-    interfaceManager: InterfaceManager? = null,
+    engine: Engine = Engine.BORINGTUN,
 ): Vpn {
     return Vpn(
         configuration = normalizedTestConfiguration(configuration),
-        cryptoSessionManager = cryptoSessionManager,
-        socketManager = socketManager,
-        interfaceManager = interfaceManager,
+        engine = engine,
     )
-}
-
-internal class MockSocketManager : SocketManager {
-    var startCalls: Int = 0
-    var stopCalls: Int = 0
-
-    override fun start(listenPort: Int, networkPipe: DuplexChannelPipe<UdpDatagram>, onFailure: (Throwable) -> Unit) {
-        startCalls++
-    }
-
-    override fun stop() {
-        stopCalls++
-    }
-
-    override fun isRunning(): Boolean = false
-}
-
-internal class MockInterfaceManager(
-    private var currentConfiguration: VpnConfiguration,
-) : InterfaceManager {
-    var startCalls: Int = 0
-    var stopCalls: Int = 0
-    var reconfigureCalls: Int = 0
-
-    private var running: Boolean = false
-
-    override fun isRunning(): Boolean = running
-
-    override fun start(config: VpnConfiguration, onFailure: (Throwable) -> Unit) {
-        startCalls++
-        running = true
-        currentConfiguration = snapshotConfiguration(config)
-    }
-
-    override fun stop() {
-        stopCalls++
-        running = false
-    }
-
-    override fun reconfigure(config: VpnConfiguration) {
-        reconfigureCalls++
-        currentConfiguration = snapshotConfiguration(config)
-        running = true
-    }
-
-    override fun information(): VpnInterfaceInformation? {
-        if (!running) {
-            return null
-        }
-
-        return VpnInterfaceInformation(
-            interfaceName = currentConfiguration.interfaceName,
-            isUp = true,
-            addresses = currentConfiguration.addresses.toList(),
-            dns = currentConfiguration.dns,
-            mtu = currentConfiguration.mtu,
-            listenPort = currentConfiguration.listenPort,
-        )
-    }
 }
 
 internal fun snapshotConfiguration(config: VpnConfiguration): VpnConfiguration {

@@ -83,10 +83,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up GraalVM for JDK 17
+      - name: Set up GraalVM for JDK 25
         uses: graalvm/setup-graalvm@v1
         with:
-          java-version: "17"
+          java-version: "25"
           distribution: "graalvm-community"
           components: "native-image"
           github-token: ${{ secrets.GITHUB_TOKEN }}

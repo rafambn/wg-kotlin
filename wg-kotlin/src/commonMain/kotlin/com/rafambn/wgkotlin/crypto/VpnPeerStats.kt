@@ -1,4 +1,4 @@
-package com.rafambn.wgkotlin.iface
+package com.rafambn.wgkotlin.crypto
 
 /**
  * Read-only runtime counters for a configured VPN peer.

@@ -2,6 +2,7 @@ package com.rafambn.wgkotlin.iface
 
 import com.rafambn.wgkotlin.DnsConfig
 import com.rafambn.wgkotlin.VpnConfiguration
+import com.rafambn.wgkotlin.crypto.VpnPeerStats
 
 /**
  * Read-only interface information returned by [InterfaceManager.information].

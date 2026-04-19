@@ -2,7 +2,6 @@ package com.rafambn.wgkotlin.crypto
 
 import com.rafambn.wgkotlin.Engine
 import com.rafambn.wgkotlin.VpnConfiguration
-import com.rafambn.wgkotlin.iface.VpnPeerStats
 import com.rafambn.wgkotlin.requireDistinctAllowedIpOwnership
 import com.rafambn.wgkotlin.requireUniquePeerPublicKeys
 import com.rafambn.wgkotlin.requireUserspacePeerEndpoints
@@ -13,7 +12,6 @@ import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.util.parseCidr
 import com.rafambn.wgkotlin.util.parsePacketDestination
 import com.rafambn.wgkotlin.util.matches
-import com.rafambn.wgkotlin.crypto.PacketAction
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName

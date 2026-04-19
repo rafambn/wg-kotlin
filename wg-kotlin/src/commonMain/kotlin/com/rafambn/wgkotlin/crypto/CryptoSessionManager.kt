@@ -1,7 +1,6 @@
 package com.rafambn.wgkotlin.crypto
 
 import com.rafambn.wgkotlin.VpnConfiguration
-import com.rafambn.wgkotlin.iface.VpnPeerStats
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 

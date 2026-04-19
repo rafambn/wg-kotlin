@@ -2,7 +2,7 @@ package com.rafambn.wgkotlin
 
 import com.rafambn.wgkotlin.iface.InterfaceManager
 import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
-import com.rafambn.wgkotlin.iface.VpnPeerStats
+import com.rafambn.wgkotlin.crypto.VpnPeerStats
 import com.rafambn.wgkotlin.crypto.CryptoSessionManager
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.network.SocketManager

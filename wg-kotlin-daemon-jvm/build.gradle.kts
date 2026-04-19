@@ -20,107 +20,48 @@ kotlin {
     jvmToolchain(17)
 }
 
+val daemonMainClass = "com.rafambn.wgkotlin.daemon.DaemonMainKt"
+
 application {
-    mainClass.set("com.rafambn.wgkotlin.daemon.DaemonMainKt")
+    mainClass.set(daemonMainClass)
 }
 
-fun File.isJavaHome(): Boolean = resolve("bin/java").isFile || resolve("bin/java.exe").isFile
+fun File.releaseProperties(): Properties =
+    Properties().also { properties ->
+        resolve("release")
+            .takeIf(File::isFile)
+            ?.inputStream()
+            ?.use(properties::load)
+    }
 
-fun File.nativeImageExecutable(): File? {
-    val unixBinary = resolve("bin/native-image")
-    if (unixBinary.isFile) return unixBinary
+fun File.javaExecutable(): File =
+    resolve("bin/java.exe").takeIf(File::isFile) ?: resolve("bin/java")
 
-    val windowsBinary = resolve("bin/native-image.cmd")
-    if (windowsBinary.isFile) return windowsBinary
+fun File.nativeImageExecutable(): File? =
+    resolve("bin/native-image").takeIf(File::isFile)
+        ?: resolve("bin/native-image.cmd").takeIf(File::isFile)
 
-    return null
-}
+fun File.isLocalGraalVm25Home(): Boolean =
+    isDirectory &&
+        name.contains("graalvm", ignoreCase = true) &&
+        nativeImageExecutable() != null &&
+        releaseProperties().getProperty("JAVA_VERSION")?.trim('"')?.startsWith("25") == true
 
-fun File.releaseProperties(): Properties {
-    val properties = Properties()
-    val releaseFile = resolve("release")
-    if (!releaseFile.isFile) return properties
-
-    releaseFile.inputStream().use(properties::load)
-    return properties
-}
-
-fun File.isNativeImageCapableJava25Home(): Boolean {
-    if (!isJavaHome()) return false
-    if (nativeImageExecutable() == null) return false
-
-    val javaVersion = releaseProperties().getProperty("JAVA_VERSION")
-        ?.trim('"')
-        ?: return false
-
-    return javaVersion.startsWith("25")
-}
-
-fun findCandidateJavaInstallations(root: File): List<File> {
-    if (!root.exists()) return emptyList()
-
-    return buildList {
-        if (root.isDirectory && root.isJavaHome()) {
-            add(root)
+fun findLocalGraalVm25Home(userHome: File): File? =
+    sequenceOf(userHome.resolve(".jdks"), userHome.resolve("jdks"))
+        .filter(File::isDirectory)
+        .flatMap { root ->
+            sequenceOf(root) + root.listFiles().orEmpty().asSequence()
         }
-
-        root.listFiles()
-            ?.filter(File::isDirectory)
-            ?.filter { it.isJavaHome() }
-            ?.sortedBy(File::getName)
-            ?.let(::addAll)
-    }
-}
-
-fun findPreferredGraalVm25Installations(userHome: File): List<File> {
-    val userPreferredCandidates = findCandidateJavaInstallations(userHome.resolve("jdks"))
-    val userLegacyCandidates = findCandidateJavaInstallations(userHome.resolve(".jdks"))
-
-    return (userPreferredCandidates + userLegacyCandidates)
-        .filter { it.isNativeImageCapableJava25Home() }
+        .filter { it.isLocalGraalVm25Home() }
         .distinctBy(File::getAbsolutePath)
-}
-
-fun selectedWintunResourceName(osName: String, archName: String): String? {
-    val normalizedOs = osName.lowercase()
-    if (!normalizedOs.contains("win")) return null
-
-    val normalizedArch = archName.lowercase()
-    return when {
-        normalizedArch.contains("amd64") || normalizedArch.contains("x86_64") -> "wintun-x64.dll"
-        normalizedArch.contains("aarch64") || normalizedArch.contains("arm64") -> "wintun-arm64.dll"
-        normalizedArch.contains("x86") || normalizedArch.contains("i386") || normalizedArch.contains("i486") ||
-            normalizedArch.contains("i586") || normalizedArch.contains("i686") -> "wintun-x86.dll"
-        else -> error("Unsupported Windows architecture for WinTUN resource packaging: $archName")
-    }
-}
-
-val preferredGraalVm25Installations = findPreferredGraalVm25Installations(
-    userHome = File(System.getProperty("user.home")),
-)
-
-fun majorJavaVersion(javaHome: File): Int {
-    val javaVersion = javaHome.releaseProperties().getProperty("JAVA_VERSION")
-        ?.trim('"')
-        ?.takeWhile { it.isDigit() || it == '.' }
-        ?.substringBefore('.')
-        ?: return 25
-
-    return javaVersion.toIntOrNull() ?: 25
-}
-
-fun preferredJavaExecutable(javaHome: File): File {
-    val windowsExecutable = javaHome.resolve("bin/java.exe")
-    if (windowsExecutable.isFile) return windowsExecutable
-
-    return javaHome.resolve("bin/java")
-}
+        .sortedBy(File::getName)
+        .firstOrNull()
 
 fun staticJavaLauncher(javaHome: File): JavaLauncher {
     val releaseProperties = javaHome.releaseProperties()
     val installationPath: Directory = layout.dir(providers.provider { javaHome }).get()
-    val executablePath: RegularFile = layout.file(providers.provider { preferredJavaExecutable(javaHome) }).get()
-    val languageVersion = JavaLanguageVersion.of(majorJavaVersion(javaHome))
+    val executablePath: RegularFile = layout.file(providers.provider { javaHome.javaExecutable() }).get()
     val runtimeVersion = releaseProperties.getProperty("JAVA_RUNTIME_VERSION")
         ?.trim('"')
         ?: releaseProperties.getProperty("JAVA_VERSION")?.trim('"').orEmpty()
@@ -129,7 +70,7 @@ fun staticJavaLauncher(javaHome: File): JavaLauncher {
         ?: releaseProperties.getProperty("IMPLEMENTOR_VERSION")?.trim('"').orEmpty()
 
     val metadata = object : JavaInstallationMetadata {
-        override fun getLanguageVersion(): JavaLanguageVersion = languageVersion
+        override fun getLanguageVersion(): JavaLanguageVersion = JavaLanguageVersion.of(25)
 
         override fun getJavaRuntimeVersion(): String = runtimeVersion
 
@@ -149,7 +90,25 @@ fun staticJavaLauncher(javaHome: File): JavaLauncher {
     }
 }
 
-val fallbackGraalVm25Launcher = javaToolchains.launcherFor {
+fun selectedWintunResourceName(osName: String, archName: String): String? {
+    val normalizedOs = osName.lowercase()
+    if (!normalizedOs.contains("win")) return null
+
+    val normalizedArch = archName.lowercase()
+    return when {
+        normalizedArch.contains("amd64") || normalizedArch.contains("x86_64") -> "wintun-x64.dll"
+        normalizedArch.contains("aarch64") || normalizedArch.contains("arm64") -> "wintun-arm64.dll"
+        normalizedArch.contains("x86") || normalizedArch.contains("i386") || normalizedArch.contains("i486") ||
+            normalizedArch.contains("i586") || normalizedArch.contains("i686") -> "wintun-x86.dll"
+        else -> error("Unsupported Windows architecture for WinTUN resource packaging: $archName")
+    }
+}
+
+val localGraalVm25Home = findLocalGraalVm25Home(File(System.getProperty("user.home")))
+
+val graalVm25Launcher = localGraalVm25Home?.let { javaHome ->
+    providers.provider { staticJavaLauncher(javaHome) }
+} ?: javaToolchains.launcherFor {
     languageVersion.set(JavaLanguageVersion.of(25))
     nativeImageCapable.set(true)
     vendor.set(JvmVendorSpec.GRAAL_VM)
@@ -163,12 +122,8 @@ graalvmNative {
     binaries {
         named("main") {
             imageName.set("vpn-daemon")
-            mainClass.set("com.rafambn.wgkotlin.daemon.DaemonMainKt")
-            if (preferredGraalVm25Installations.isNotEmpty()) {
-                javaLauncher.set(providers.provider { staticJavaLauncher(preferredGraalVm25Installations.first()) })
-            } else {
-                javaLauncher.set(fallbackGraalVm25Launcher)
-            }
+            mainClass.set(daemonMainClass)
+            javaLauncher.set(graalVm25Launcher)
             resources.autodetect()
             buildArgs.addAll(
                 "-H:+ReportExceptionStackTraces",

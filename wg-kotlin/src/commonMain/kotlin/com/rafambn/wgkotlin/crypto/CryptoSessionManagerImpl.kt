@@ -31,14 +31,6 @@ internal class CryptoSessionManagerImpl(
 ) : CryptoSessionManager {
 
     private val reconcileMutex = Mutex()
-
-    /**
-     * Immutable-map reference updated atomically under [reconcileMutex].
-     * Reading the volatile reference outside the mutex is safe: callers see either the
-     * old or the new map, never a torn intermediate state, because the map itself is
-     * immutable once assigned.
-     */
-    @Volatile
     private var sessionEntriesByPeer: Map<String, PeerSessionEntry> = emptyMap()
     private val peerStatsByPublicKey: MutableMap<String, MutablePeerStats> = mutableMapOf()
 

@@ -1,6 +1,5 @@
 package com.rafambn.wgkotlin.crypto
 
-import com.rafambn.wgkotlin.crypto.PacketAction
 import uniffi.wg_kotlin.TunnelPacketResult
 import uniffi.wg_kotlin.TunnelSession
 

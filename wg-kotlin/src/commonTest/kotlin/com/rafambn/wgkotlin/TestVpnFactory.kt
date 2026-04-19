@@ -1,8 +1,5 @@
 package com.rafambn.wgkotlin
 
-import com.rafambn.wgkotlin.iface.InterfaceManager
-import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
-
 internal fun testVpn(
     configuration: VpnConfiguration,
     engine: Engine = Engine.BORINGTUN,

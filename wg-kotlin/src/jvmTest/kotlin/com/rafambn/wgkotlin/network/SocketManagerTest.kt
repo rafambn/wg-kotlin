@@ -1,8 +1,8 @@
 package com.rafambn.wgkotlin.network
 
-import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.network.io.UdpEndpoint
+import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.Datagram
 import io.ktor.network.sockets.InetSocketAddress

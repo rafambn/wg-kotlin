@@ -1,12 +1,12 @@
 package com.rafambn.wgkotlin
 
+import com.rafambn.wgkotlin.crypto.CryptoSessionManager
+import com.rafambn.wgkotlin.crypto.VpnPeerStats
 import com.rafambn.wgkotlin.iface.InterfaceManager
 import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
-import com.rafambn.wgkotlin.crypto.VpnPeerStats
-import com.rafambn.wgkotlin.crypto.CryptoSessionManager
-import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.network.SocketManager
 import com.rafambn.wgkotlin.network.io.UdpDatagram
+import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue

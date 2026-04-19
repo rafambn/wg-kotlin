@@ -1,14 +1,14 @@
 package com.rafambn.wgkotlin.daemon.client
 
-import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import com.rafambn.wgkotlin.daemon.protocol.DaemonApi
-import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
+import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import com.rafambn.wgkotlin.daemon.protocol.PingResponse
-import java.time.Duration
+import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withTimeout
 import org.koin.core.module.Module
+import java.time.Duration
 
 class DaemonProcessClient(
     val service: DaemonApi,

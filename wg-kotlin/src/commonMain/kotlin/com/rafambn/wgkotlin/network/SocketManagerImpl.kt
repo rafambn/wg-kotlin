@@ -1,9 +1,9 @@
 package com.rafambn.wgkotlin.network
 
-import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.network.io.KtorDatagramUdpPort
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.network.io.UdpPort
+import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.BoundDatagramSocket
 import io.ktor.network.sockets.InetSocketAddress

@@ -1,7 +1,6 @@
 package com.rafambn.wgkotlin.util
 
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.consume
 
 /**
  * Duplex coroutine channel pipe connecting two parties.

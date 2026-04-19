@@ -5,11 +5,11 @@ import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.rpc.krpc.ktor.client.installKrpc
 import kotlinx.rpc.krpc.ktor.client.rpc
 import kotlinx.rpc.krpc.serialization.protobuf.protobuf
 import kotlinx.rpc.withService
+import kotlinx.serialization.ExperimentalSerializationApi
 import org.koin.core.module.Module
 import org.koin.core.parameter.parametersOf
 import org.koin.dsl.koinApplication

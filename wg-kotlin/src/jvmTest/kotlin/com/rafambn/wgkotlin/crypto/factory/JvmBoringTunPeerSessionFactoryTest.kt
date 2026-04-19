@@ -2,17 +2,15 @@ package com.rafambn.wgkotlin.crypto.factory
 
 import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.VpnPeer
-import com.rafambn.wgkotlin.crypto.factory.BoringTunPeerSessionFactory
-import com.rafambn.wgkotlin.crypto.factory.QuicPeerSessionFactory
 import com.rafambn.wgkotlin.crypto.PacketAction
+import uniffi.wg_kotlin.convertX25519KeyToBase64
+import uniffi.wg_kotlin.generatePublicKey
+import uniffi.wg_kotlin.generateSecretKey
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import uniffi.wg_kotlin.convertX25519KeyToBase64
-import uniffi.wg_kotlin.generatePublicKey
-import uniffi.wg_kotlin.generateSecretKey
 
 class JvmBoringTunPeerSessionFactoryTest {
 

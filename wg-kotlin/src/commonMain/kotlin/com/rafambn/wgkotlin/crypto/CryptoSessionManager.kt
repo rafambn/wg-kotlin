@@ -1,8 +1,8 @@
 package com.rafambn.wgkotlin.crypto
 
 import com.rafambn.wgkotlin.VpnConfiguration
-import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.network.io.UdpDatagram
+import com.rafambn.wgkotlin.util.DuplexChannelPipe
 
 /**
  * Owns peer crypto sessions and the three data-plane worker coroutines.

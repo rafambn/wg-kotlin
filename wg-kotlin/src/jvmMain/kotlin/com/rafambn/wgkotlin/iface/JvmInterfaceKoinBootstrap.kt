@@ -2,11 +2,11 @@ package com.rafambn.wgkotlin.iface
 
 import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
-import java.time.Duration
 import org.koin.core.module.Module
 import org.koin.core.parameter.parametersOf
 import org.koin.dsl.koinApplication
 import org.koin.dsl.module
+import java.time.Duration
 
 internal object JvmInterfaceKoinBootstrap {
     private val baseModule: Module = module {

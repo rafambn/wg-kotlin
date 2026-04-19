@@ -45,8 +45,8 @@ jobs:
             wg-kotlin-daemon-jvm/build/test-results/
           retention-days: 7
 
-  build-distributions:
-    name: Build ${{ matrix.name }}
+  build-native-binaries:
+    name: Build Native ${{ matrix.name }}
     needs: test
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -56,39 +56,41 @@ jobs:
         include:
           - os: windows-latest
             name: Windows x64
-            gradle-command: .\gradlew.bat :wg-kotlin-daemon-jvm:distZip --no-daemon
-            artifact-name: wg-kotlin-daemon-windows-x64
+            gradle-command: .\gradlew.bat :wg-kotlin-daemon-jvm:nativeCompile --no-daemon
+            artifact-name: vpn-daemon-windows-x64
 
           - os: macos-13
             name: macOS x64
-            gradle-command: ./gradlew :wg-kotlin-daemon-jvm:distZip --no-daemon
-            artifact-name: wg-kotlin-daemon-macos-x64
+            gradle-command: ./gradlew :wg-kotlin-daemon-jvm:nativeCompile --no-daemon
+            artifact-name: vpn-daemon-macos-x64
 
           - os: macos-latest
             name: macOS ARM64
-            gradle-command: ./gradlew :wg-kotlin-daemon-jvm:distZip --no-daemon
-            artifact-name: wg-kotlin-daemon-macos-arm64
+            gradle-command: ./gradlew :wg-kotlin-daemon-jvm:nativeCompile --no-daemon
+            artifact-name: vpn-daemon-macos-arm64
 
           - os: ubuntu-latest
             name: Linux x64
-            gradle-command: ./gradlew :wg-kotlin-daemon-jvm:distZip --no-daemon
-            artifact-name: wg-kotlin-daemon-linux-x64
+            gradle-command: ./gradlew :wg-kotlin-daemon-jvm:nativeCompile --no-daemon
+            artifact-name: vpn-daemon-linux-x64
 
           - os: ubuntu-24.04-arm
             name: Linux ARM64
-            gradle-command: ./gradlew :wg-kotlin-daemon-jvm:distZip --no-daemon
-            artifact-name: wg-kotlin-daemon-linux-arm64
+            gradle-command: ./gradlew :wg-kotlin-daemon-jvm:nativeCompile --no-daemon
+            artifact-name: vpn-daemon-linux-arm64
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17 (Temurin)
-        uses: actions/setup-java@v4
+      - name: Set up GraalVM for JDK 17
+        uses: graalvm/setup-graalvm@v1
         with:
           java-version: "17"
-          distribution: "temurin"
-          cache: "gradle"
+          distribution: "graalvm-community"
+          components: "native-image"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          native-image-job-reports: "true"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -99,12 +101,13 @@ jobs:
         if: runner.os != 'Windows'
         run: chmod +x ./gradlew
 
-      - name: Build distribution
+      - name: Build native binary
         run: ${{ matrix.gradle-command }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact-name }}
-          path: wg-kotlin-daemon-jvm/build/distributions/*.zip
+          path: wg-kotlin-daemon-jvm/build/native/nativeCompile/
+          if-no-files-found: error
           retention-days: 7

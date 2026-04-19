@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.jvm).apply(false)
     alias(libs.plugins.maven.publish).apply(false)
     alias(libs.plugins.gobley.cargo).apply(false)
+    alias(libs.plugins.graalvmNative).apply(false)
 }
 
 val ciWgKotlinCore = tasks.register("ciWgKotlinCore") {

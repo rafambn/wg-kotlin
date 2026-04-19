@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kotlinx.rpc)
+    alias(libs.plugins.graalvmNative)
     application
 }
 
@@ -11,6 +12,19 @@ kotlin {
 
 application {
     mainClass.set("com.rafambn.wgkotlin.daemon.DaemonMainKt")
+}
+
+graalvmNative {
+    toolchainDetection.set(false)
+
+    binaries {
+        named("main") {
+            imageName.set("vpn-daemon")
+            mainClass.set("com.rafambn.wgkotlin.daemon.DaemonMainKt")
+            resources.autodetect()
+            buildArgs.add("-H:+ReportExceptionStackTraces")
+        }
+    }
 }
 
 dependencies {

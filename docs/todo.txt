@@ -1,5 +1,4 @@
 ISSUES AND TASKS
 
 -Migrate the uniffi do a separated module
--Fix/Improve api of Daemon
 -Maybe implement daemon in native

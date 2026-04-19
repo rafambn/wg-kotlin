@@ -12,10 +12,7 @@ import com.rafambn.wgkotlin.session.io.UdpDatagram
 
 class Vpn(
     configuration: VpnConfiguration,
-    engine: Engine = Engine.BORINGTUN,
-    cryptoSessionManager: CryptoSessionManager? = null,
-    socketManager: SocketManager? = null,
-    interfaceManager: InterfaceManager? = null,
+    engine: Engine = Engine.BORINGTUN
 ) : AutoCloseable {
 
     companion object {
@@ -24,61 +21,46 @@ class Vpn(
 
     private val tunPipePair = DuplexChannelPipe.create<ByteArray>()
     private val networkPipePair = DuplexChannelPipe.create<UdpDatagram>()
-
     private var vpnConfiguration = configuration
-    private val cryptoSessionManager = cryptoSessionManager ?: CryptoSessionManagerImpl(engine = engine)
-    private val socketManager = socketManager ?: SocketManagerImpl()
-    private val interfaceManager = interfaceManager ?: PlatformInterfaceFactory.create(tunPipePair.first)
+    private val cryptoSessionManager = CryptoSessionManagerImpl(engine = engine)
+    private val socketManager = SocketManagerImpl()
+    private val interfaceManager = PlatformInterfaceFactory.create(tunPipePair.first)
 
     init {
         requireValidConfiguration(vpnConfiguration)
     }
 
-    fun state(): VpnState {
-        return if (interfaceManager.isRunning() && cryptoSessionManager.hasActiveSessions()) {
-            VpnState.Running
-        } else {
-            VpnState.Stopped
-        }
+    fun isRunning(): Boolean {
+        return interfaceManager.isRunning() && cryptoSessionManager.hasActiveSessions()
     }
 
-    fun start(): InterfaceManager {
+    fun open() {
         requireValidConfiguration(vpnConfiguration)
-        stop()
+        close()
 
-        sessionOperation("reconcileSessions") {
+        operation("reconcileSessions") {
             cryptoSessionManager.reconcileSessions(vpnConfiguration)
         }
 
-        sessionOperation("start") {
-            cryptoSessionManager.start(tunPipePair.second, networkPipePair.second) { stop() }
+        operation("start") {
+            cryptoSessionManager.start(tunPipePair.second, networkPipePair.second) { close() }
         }
 
-        sessionOperation("socketStart") {
+        operation("socketStart") {
             socketManager.start(
                 listenPort = vpnConfiguration.listenPort ?: DEFAULT_PORT,
                 networkPipe = networkPipePair.first,
-                onFailure = { stop() },
+                onFailure = { close() },
             )
         }
 
-        interfaceOperation("start") {
-            interfaceManager.start(vpnConfiguration) { stop() }
+        operation("start") {
+            interfaceManager.start(vpnConfiguration) { close() }
         }
-
-        return interfaceManager
-    }
-
-    fun stop() {
-        runCleanupSequence(
-            { interfaceOperation("stop") { interfaceManager.stop() } },
-            { sessionOperation("socketStop") { socketManager.stop() } },
-            { sessionOperation("stop") { cryptoSessionManager.stop() } },
-        )
     }
 
     fun information(): VpnInterfaceInformation? {
-        val liveInformation = interfaceOperation("information") {
+        val liveInformation = operation("information") {
             interfaceManager.information()
         } ?: return null
 
@@ -101,62 +83,54 @@ class Vpn(
         val previousListenPort = vpnConfiguration.listenPort ?: DEFAULT_PORT
         vpnConfiguration = config
 
-        sessionOperation("reconcileSessions") {
+        operation("reconcileSessions") {
             cryptoSessionManager.reconcileSessions(config)
         }
 
         if (interfaceManager.isRunning()) {
             val newListenPort = config.listenPort ?: DEFAULT_PORT
 
-            interfaceOperation("reconfigure") {
+            operation("reconfigure") {
                 interfaceManager.reconfigure(config)
             }
 
             if (previousListenPort != newListenPort) {
-                sessionOperation("socketRestart") {
+                operation("socketRestart") {
                     socketManager.stop()
-                    socketManager.start(newListenPort, networkPipePair.first) { stop() }
+                    socketManager.start(newListenPort, networkPipePair.first) { close() }
                 }
             }
         }
     }
 
     override fun close() {
-        stop()
+        var firstError: Throwable? = null
+        try {
+            operation("stop") { interfaceManager.stop() }
+        } catch (error: Throwable) {
+            firstError = error
+        }
+        try {
+            operation("socketStop") { socketManager.stop() }
+        } catch (error: Throwable) {
+            if (firstError == null) firstError = error
+        }
+        try {
+            operation("stop") { cryptoSessionManager.stop() }
+        } catch (error: Throwable) {
+            if (firstError == null) firstError = error
+        }
+        if (firstError != null) throw firstError
     }
 
-    private inline fun <T> interfaceOperation(name: String, block: () -> T): T {
-        return operation(kind = "Interface", name = name, block = block)
-    }
-
-    private inline fun <T> sessionOperation(name: String, block: () -> T): T {
-        return operation(kind = "Session", name = name, block = block)
-    }
-
-    private inline fun <T> operation(kind: String, name: String, block: () -> T): T {
+    private inline fun <T> operation(name: String, block: () -> T): T {
         return try {
             block()
         } catch (throwable: Throwable) {
             throw IllegalStateException(
-                "$kind operation `$name` failed: ${throwable.message ?: "unknown"}",
+                "Operation `$name` failed: ${throwable.message ?: "unknown"}",
                 throwable,
             )
-        }
-    }
-
-    private fun runCleanupSequence(vararg operations: () -> Unit) {
-        var firstError: Throwable? = null
-        for (operation in operations) {
-            try {
-                operation()
-            } catch (error: Throwable) {
-                if (firstError == null) {
-                    firstError = error
-                }
-            }
-        }
-        if (firstError != null) {
-            throw firstError
         }
     }
 }

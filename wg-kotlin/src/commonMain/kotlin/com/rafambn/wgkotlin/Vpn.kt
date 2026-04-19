@@ -20,7 +20,7 @@ class Vpn(
     private val networkPipePair = DuplexChannelPipe.create<UdpDatagram>()
     private var vpnConfiguration = configuration
     private val cryptoSessionManager = CryptoSessionManagerImpl(engine = engine)
-    private val socketManager = SocketManagerImpl()
+    private val socketManager = SocketManagerImpl(networkPipe = networkPipePair.first)
     private val interfaceManager = PlatformInterfaceFactory.create(tunPipePair.first)
 
     init {
@@ -46,7 +46,6 @@ class Vpn(
         operation("socketStart") {
             socketManager.start(
                 listenPort = vpnConfiguration.listenPort ?: DEFAULT_PORT,
-                networkPipe = networkPipePair.first,
                 onFailure = { close() },
             )
         }
@@ -94,7 +93,7 @@ class Vpn(
             if (previousListenPort != newListenPort) {
                 operation("socketRestart") {
                     socketManager.stop()
-                    socketManager.start(newListenPort, networkPipePair.first) { close() }
+                    socketManager.start(newListenPort) { close() }
                 }
             }
         }

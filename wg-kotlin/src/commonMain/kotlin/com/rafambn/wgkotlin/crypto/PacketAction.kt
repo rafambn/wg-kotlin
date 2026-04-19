@@ -1,4 +1,4 @@
-package com.rafambn.wgkotlin.network.io
+package com.rafambn.wgkotlin.crypto
 
 sealed class PacketAction {
     data object Done : PacketAction()

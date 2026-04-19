@@ -17,16 +17,16 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
-internal class SocketManagerImpl : SocketManager {
-    private var networkPipe: DuplexChannelPipe<UdpDatagram>? = null
+internal class SocketManagerImpl(
+    private val networkPipe: DuplexChannelPipe<UdpDatagram>,
+) : SocketManager {
 
     private var running = false
     private var socket: BoundDatagramSocket? = null
     private var selectorManager: SelectorManager? = null
     private var scope: CoroutineScope? = null
 
-    override fun start(listenPort: Int, networkPipe: DuplexChannelPipe<UdpDatagram>, onFailure: (Throwable) -> Unit) {
-        this.networkPipe = networkPipe
+    override fun start(listenPort: Int, onFailure: (Throwable) -> Unit) {
         stop()
 
         val coroutineLabel = "kmpvpn-socket"
@@ -74,10 +74,9 @@ internal class SocketManagerImpl : SocketManager {
 
     private suspend fun runReceiveLoop(udpPort: UdpPort, onFailure: (Throwable) -> Unit) {
         try {
-            val pipe = checkNotNull(networkPipe) { "networkPipe must be set before running loops" }
             while (true) {
                 val datagram = udpPort.receiveDatagram() ?: continue
-                pipe.send(datagram)
+                networkPipe.send(datagram)
             }
         } catch (_: CancellationException) {
             // shutdown path
@@ -88,9 +87,8 @@ internal class SocketManagerImpl : SocketManager {
 
     private suspend fun runSendLoop(udpPort: UdpPort, onFailure: (Throwable) -> Unit) {
         try {
-            val pipe = checkNotNull(networkPipe) { "networkPipe must be set before running loops" }
             while (true) {
-                val datagram = pipe.receive()
+                val datagram = networkPipe.receive()
                 udpPort.sendDatagram(datagram)
             }
         } catch (_: CancellationException) {

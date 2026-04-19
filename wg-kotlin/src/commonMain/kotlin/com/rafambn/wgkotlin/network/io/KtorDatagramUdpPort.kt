@@ -14,23 +14,17 @@ import kotlinx.io.readByteArray
  */
 class KtorDatagramUdpPort(
     private val socket: BoundDatagramSocket,
-    private val receiveTimeoutMillis: Long? = null,
+    private val receiveTimeoutMillis: Long = 0L,
 ) : UdpPort {
     init {
-        receiveTimeoutMillis?.let { timeout ->
-            require(timeout > 0L) {
-                "receiveTimeoutMillis must be greater than zero when provided"
-            }
+        require(receiveTimeoutMillis > 0L) {
+            "receiveTimeoutMillis must be greater than zero when provided"
         }
     }
 
     override suspend fun receiveDatagram(): UdpDatagram? {
-        val received = if (receiveTimeoutMillis == null) {
+        val received = withTimeoutOrNull(receiveTimeoutMillis) {
             socket.receive()
-        } else {
-            withTimeoutOrNull(receiveTimeoutMillis) {
-                socket.receive()
-            }
         } ?: return null
 
         return UdpDatagram(

@@ -4,7 +4,7 @@ import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.VpnPeer
 import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
-import com.rafambn.wgkotlin.network.io.PacketAction
+import com.rafambn.wgkotlin.crypto.PacketAction
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.network.io.UdpEndpoint
 import kotlinx.coroutines.delay

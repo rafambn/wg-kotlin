@@ -21,14 +21,14 @@ class SocketManagerTest {
 
     @Test
     fun isRunningFalseBeforeStart() {
-        val manager = SocketManagerImpl()
+        val manager = SocketManagerImpl(DuplexChannelPipe.create<UdpDatagram>().first)
 
         assertFalse(manager.isRunning())
     }
 
     @Test
     fun stopIsIdempotentWhenNotRunning() {
-        val manager = SocketManagerImpl()
+        val manager = SocketManagerImpl(DuplexChannelPipe.create<UdpDatagram>().first)
 
         manager.stop()
         manager.stop()
@@ -38,10 +38,10 @@ class SocketManagerTest {
 
     @Test
     fun startAndStopTransitionsRunningState() {
-        val manager = SocketManagerImpl()
         val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
+        val manager = SocketManagerImpl(networkPipe.first)
 
-        manager.start(listenPort = 0, networkPipe = networkPipe.first, onFailure = { throwable ->
+        manager.start(listenPort = 0, onFailure = { throwable ->
             throw AssertionError("Unexpected socket failure", throwable)
         })
 
@@ -56,12 +56,12 @@ class SocketManagerTest {
 
     @Test
     fun startAfterStopRebindsSocket() {
-        val manager = SocketManagerImpl()
         val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
+        val manager = SocketManagerImpl(networkPipe.first)
 
-        manager.start(listenPort = 0, networkPipe = networkPipe.first, onFailure = {})
+        manager.start(listenPort = 0, onFailure = {})
         manager.stop()
-        manager.start(listenPort = 0, networkPipe = networkPipe.first, onFailure = {})
+        manager.start(listenPort = 0, onFailure = {})
 
         try {
             assertTrue(manager.isRunning())
@@ -78,9 +78,9 @@ class SocketManagerTest {
         // binding, closing, and re-binding to a port that another process may have claimed.
         val selector = SelectorManager(Dispatchers.IO)
 
-        val manager = SocketManagerImpl()
         val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
-        manager.start(listenPort = 0, networkPipe = networkPipe.first, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
+        val manager = SocketManagerImpl(networkPipe.first)
+        manager.start(listenPort = 0, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
 
         try {
             // Create a probe receiver socket and discover the manager's OS-assigned port.
@@ -115,9 +115,9 @@ class SocketManagerTest {
 
     @Test
     fun sendLoopTransmitsOutboundDatagramFromPipe() = runBlocking {
-        val manager = SocketManagerImpl()
         val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
-        manager.start(listenPort = 0, networkPipe = networkPipe.first, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
+        val manager = SocketManagerImpl(networkPipe.first)
+        manager.start(listenPort = 0, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
 
         try {
             val selector = SelectorManager(Dispatchers.IO)
@@ -149,9 +149,9 @@ class SocketManagerTest {
     fun restartOnListenPortChangeRebindsAndStillProcessesPackets() = runBlocking {
         val selector = SelectorManager(Dispatchers.IO)
 
-        val manager = SocketManagerImpl()
         val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
-        manager.start(listenPort = 0, networkPipe = networkPipe.first, onFailure = {})
+        val manager = SocketManagerImpl(networkPipe.first)
+        manager.start(listenPort = 0, onFailure = {})
         assertTrue(manager.isRunning())
         manager.stop()
         assertFalse(manager.isRunning())
@@ -161,7 +161,7 @@ class SocketManagerTest {
         val newPort = (freshReceiver.localAddress as InetSocketAddress).port
         freshReceiver.close()
 
-        manager.start(listenPort = newPort, networkPipe = networkPipe.first, onFailure = {})
+        manager.start(listenPort = newPort, onFailure = {})
         try {
             assertTrue(manager.isRunning())
 

@@ -1,6 +1,6 @@
 package com.rafambn.wgkotlin.crypto
 
-import com.rafambn.wgkotlin.network.io.PacketAction
+import com.rafambn.wgkotlin.crypto.PacketAction
 
 interface PeerSession : AutoCloseable {
     val peerPublicKey: String

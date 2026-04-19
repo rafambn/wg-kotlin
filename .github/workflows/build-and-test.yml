@@ -18,10 +18,10 @@ jobs:
         include:
           - os: windows-latest
             name: Windows x64
-            gradle-command: .\gradlew.bat :wg-kotlin-daemon-jvm:nativeCompile --no-daemon
+            gradle-command: .\gradlew.bat :wg-kotlin-daemon-jvm:nativeCompile --no-daemon --no-configuration-cache
             artifact-name: vpn-daemon-windows-x64
 
-          - os: macos-13
+          - os: macos-26
             name: macOS x64
             gradle-command: ./gradlew :wg-kotlin-daemon-jvm:nativeCompile --no-daemon
             artifact-name: vpn-daemon-macos-x64
@@ -44,6 +44,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up Visual C++ Build Tools (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Set up GraalVM for JDK 25
         uses: graalvm/setup-graalvm@v1

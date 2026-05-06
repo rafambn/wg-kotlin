@@ -51,31 +51,32 @@ tasks.withType<Test>().configureEach {
 //Publishing your Kotlin Multiplatform library to Maven Central
 //https://www.jetbrains.com/help/kotlin-multiplatform-dev/multiplatform-publish-libraries.html
 mavenPublishing {
-    publishToMavenCentral()
-    coordinates("com.rafambn", "wg-kotlin", "1.0.0")
+    publishToMavenCentral(automaticRelease = false)
+    coordinates(groupId = "com.rafambn", artifactId = "wg-kotlin", version = "0.1.0")
 
     pom {
-        name = "New VPN"
-        description = "Kotlin Multiplatform library"
-        url = "github url" //todo
+        name = "wg-kotlin"
+        description = "Kotlin Multiplatform WireGuard implementation."
+        url = "https://github.com/rafambn/wg-kotlin"
 
-        licenses {
-            license {
-                name = "MIT"
-                url = "https://opensource.org/licenses/MIT"
-            }
-        }
+//        licenses {
+//            license {
+//                name = "MIT"
+//                url = "https://opensource.org/licenses/MIT"
+//            }
+//        }
 
         developers {
             developer {
-                id = "" //todo
-                name = "" //todo
-                email = "" //todo
+                id = "rafambn"
+                name = "Rafael Mendonca"
+                email = "rafambn@gmail.com"
+                url = "https://rafambn.com"
             }
         }
 
         scm {
-            url = "github url" //todo
+            url = "https://github.com/rafambn/wg-kotlin"
         }
     }
     if (project.hasProperty("signing.keyId")) signAllPublications()

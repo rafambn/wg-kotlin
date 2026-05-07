@@ -9,6 +9,6 @@ data class VpnConfiguration(
     val mtu: Int? = null,
     val addresses: MutableList<String> = mutableListOf(),
     val listenPort: Int? = null,
-    val privateKey: String, // Keys.genkey().getBase64PrivateKey()
+    val privateKey: String,
     val peers: List<VpnPeer> = emptyList(),
 )

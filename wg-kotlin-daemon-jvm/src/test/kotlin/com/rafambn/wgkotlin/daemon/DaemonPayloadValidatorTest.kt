@@ -36,6 +36,12 @@ class DaemonPayloadValidatorTest {
     }
 
     @Test
+    fun validateAddressesAndRoutesAcceptIpv6Cidrs() {
+        DaemonPayloadValidator.validateAddresses(listOf("fd00::1/128"))
+        DaemonPayloadValidator.validateRoutes(listOf("::/0"))
+    }
+
+    @Test
     fun validateRoutesRejectsAboveMaxEntries() {
         val routes = List(257) { index -> "10.10.${index / 256}.${index % 256}/32" }
         assertFailsWith<PayloadValidationException> {
@@ -68,5 +74,15 @@ class DaemonPayloadValidatorTest {
                 ),
             )
         }
+    }
+
+    @Test
+    fun validateDnsAcceptsIpv6DnsServers() {
+        DaemonPayloadValidator.validateDns(
+            DnsConfig(
+                searchDomains = listOf("corp.local"),
+                servers = listOf("2001:4860:4860::8888"),
+            ),
+        )
     }
 }

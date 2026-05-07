@@ -12,7 +12,7 @@ import uniffi.wg_kotlin_uniffi_tun_rs.TunDevice
  */
 internal class RealTunHandle(
     private val requestedInterfaceName: String,
-    private val ipv4Address: String,
+    private val ipAddress: String,
     private val prefixLength: UByte = 24u,
     private val onClose: () -> Unit = {},
 ) : TunHandle {
@@ -27,7 +27,7 @@ internal class RealTunHandle(
         get() = openedInterfaceName
 
     suspend fun openDevice(): RealTunHandle {
-        logger.info("Opening TUN device: $requestedInterfaceName with IP $ipv4Address/$prefixLength")
+        logger.info("Opening TUN device: $requestedInterfaceName with IP $ipAddress/$prefixLength")
 
         // Prepare and load WinTUN DLL on Windows before attempting to open device.
         // The returned path is passed to tun-rs so it loads the exact DLL we extracted.
@@ -38,8 +38,8 @@ internal class RealTunHandle(
                 // Create the TUN device via uniffi bindings
                 tunDevice = TunDevice(requestedInterfaceName)
 
-                // Open the device with the specified IPv4 address
-                tunDevice?.open(ipv4Address, prefixLength, winTunDllPath)
+                // Open the device with the specified primary tunnel address.
+                tunDevice?.open(ipAddress, prefixLength, winTunDllPath)
                 openedInterfaceName = tunDevice?.getInterfaceName() ?: requestedInterfaceName
 
                 logger.info("TUN device opened successfully: $openedInterfaceName")

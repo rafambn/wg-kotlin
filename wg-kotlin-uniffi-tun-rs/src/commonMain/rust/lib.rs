@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex as StdMutex};
+use std::{net::IpAddr, str::FromStr};
 use tun_rs::SyncDevice;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -31,19 +32,19 @@ impl TunDevice {
 
     pub fn open(
         &self,
-        ipv4_addr: String,
+        ip_addr: String,
         prefix_len: u8,
         wintun_dll_path: Option<String>,
     ) -> Result<(), TunError> {
-        #[cfg(windows)]
-        let mut builder = tun_rs::DeviceBuilder::new()
-            .name(self.interface_name.clone())
-            .ipv4(ipv4_addr, prefix_len, None);
+        let parsed_ip = IpAddr::from_str(ip_addr.as_str()).map_err(|_| {
+            TunError::DeviceCreationFailed(format!("invalid ip address: {ip_addr}"))
+        })?;
 
-        #[cfg(not(windows))]
-        let builder = tun_rs::DeviceBuilder::new()
-            .name(self.interface_name.clone())
-            .ipv4(ipv4_addr, prefix_len, None);
+        let mut builder = tun_rs::DeviceBuilder::new().name(self.interface_name.clone());
+        builder = match parsed_ip {
+            IpAddr::V4(ipv4_addr) => builder.ipv4(ipv4_addr, prefix_len, None),
+            IpAddr::V6(ipv6_addr) => builder.ipv6(ipv6_addr, prefix_len),
+        };
 
         #[cfg(windows)]
         if let Some(path) = wintun_dll_path {

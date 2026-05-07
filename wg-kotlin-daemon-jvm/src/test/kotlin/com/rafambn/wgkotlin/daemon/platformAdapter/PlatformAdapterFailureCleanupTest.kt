@@ -134,13 +134,34 @@ class PlatformAdapterFailureCleanupTest {
     }
 
     @Test
-    fun extractPrimaryIpv4AddressTrimsWhitespace() {
+    fun extractPrimaryTunAddressTrimsWhitespace() {
         assertEquals(
-            "10.10.10.2" to 24u.toUByte(),
-            extractPrimaryIpv4Address(
+            PrimaryTunAddress(
+                address = "10.10.10.2",
+                prefixLength = 24u.toUByte(),
+                family = IpFamily.IPV4,
+            ),
+            extractPrimaryTunAddress(
                 TunSessionConfig(
                     interfaceName = "wg0",
                     addresses = listOf(" 10.10.10.2/24 "),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun extractPrimaryTunAddressSupportsIpv6OnlyConfigurations() {
+        assertEquals(
+            PrimaryTunAddress(
+                address = "fd00::2",
+                prefixLength = 64u.toUByte(),
+                family = IpFamily.IPV6,
+            ),
+            extractPrimaryTunAddress(
+                TunSessionConfig(
+                    interfaceName = "wg0",
+                    addresses = listOf("fd00::2/64"),
                 ),
             ),
         )

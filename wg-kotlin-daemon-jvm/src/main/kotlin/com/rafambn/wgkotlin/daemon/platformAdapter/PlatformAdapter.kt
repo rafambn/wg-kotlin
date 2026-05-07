@@ -59,13 +59,53 @@ internal abstract class BasePlatformAdapter(
     }
 }
 
-internal fun extractPrimaryIpv4Address(config: TunSessionConfig): Pair<String, UByte> {
-    val ipv4Address = normalizeCidrs(config.addresses)
-        .map { address -> address.substringBefore("/") to address.substringAfter("/", "") }
-        .firstOrNull { (ip, prefix) -> ip.isNotBlank() && !ip.contains(":") && prefix.isNotBlank() }
-        ?: throw IllegalArgumentException("Tun session requires at least one IPv4 address")
+internal enum class IpFamily {
+    IPV4,
+    IPV6,
+}
 
-    return ipv4Address.first to ipv4Address.second.toUByte()
+internal data class PrimaryTunAddress(
+    val address: String,
+    val prefixLength: UByte,
+    val family: IpFamily,
+)
+
+internal fun extractPrimaryTunAddress(config: TunSessionConfig): PrimaryTunAddress {
+    return normalizeCidrs(config.addresses)
+        .mapNotNull(::parsePrimaryTunAddress)
+        .firstOrNull()
+        ?: throw IllegalArgumentException("Tun session requires at least one IPv4 or IPv6 address")
+}
+
+private fun parsePrimaryTunAddress(cidr: String): PrimaryTunAddress? {
+    val ip = cidr.substringBefore("/", "").trim()
+    val prefixLiteral = cidr.substringAfter("/", "").trim()
+    if (ip.isBlank() || prefixLiteral.isBlank()) {
+        return null
+    }
+
+    val prefixLength = prefixLiteral.toIntOrNull() ?: return null
+    return if (ip.contains(":")) {
+        if (prefixLength !in 0..128) {
+            null
+        } else {
+            PrimaryTunAddress(
+                address = ip,
+                prefixLength = prefixLength.toUByte(),
+                family = IpFamily.IPV6,
+            )
+        }
+    } else {
+        if (prefixLength !in 0..32) {
+            null
+        } else {
+            PrimaryTunAddress(
+                address = ip,
+                prefixLength = prefixLength.toUByte(),
+                family = IpFamily.IPV4,
+            )
+        }
+    }
 }
 
 internal fun normalizeCidrs(values: List<String>): List<String> {

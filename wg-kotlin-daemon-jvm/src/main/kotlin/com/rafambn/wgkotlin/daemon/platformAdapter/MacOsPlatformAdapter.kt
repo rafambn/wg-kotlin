@@ -18,11 +18,11 @@ internal class MacOsPlatformAdapter(
     )
 
     override suspend fun startSession(config: TunSessionConfig): TunHandle {
-        val (ipv4Address, prefixLength) = extractPrimaryIpv4Address(config)
+        val primaryAddress = extractPrimaryTunAddress(config)
         val handle = RealTunHandle(
             requestedInterfaceName = config.interfaceName,
-            ipv4Address = ipv4Address,
-            prefixLength = prefixLength,
+            ipAddress = primaryAddress.address,
+            prefixLength = primaryAddress.prefixLength,
         ).openDevice()
         return try {
             val interfaceName = handle.interfaceName

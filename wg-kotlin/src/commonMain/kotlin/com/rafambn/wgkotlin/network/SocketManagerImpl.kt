@@ -22,7 +22,8 @@ internal class SocketManagerImpl(
 ) : SocketManager {
 
     private var running = false
-    private var socket: BoundDatagramSocket? = null
+    private var ipv4Socket: BoundDatagramSocket? = null
+    private var ipv6Socket: BoundDatagramSocket? = null
     private var selectorManager: SelectorManager? = null
     private var scope: CoroutineScope? = null
 
@@ -35,25 +36,72 @@ internal class SocketManagerImpl(
         )
 
         val newSelectorManager = SelectorManager(newScope.coroutineContext)
-        val newSocket = runBlocking {
-            // TODO: Support IPv6/dual-stack listening.
-            aSocket(newSelectorManager).udp().bind(InetSocketAddress("0.0.0.0", listenPort))
+        try {
+            runBlocking {
+                var firstFailure: Throwable? = null
+
+                runCatching {
+                    aSocket(newSelectorManager).udp().bind(InetSocketAddress("::", listenPort))
+                }.onSuccess { socket ->
+                    ipv6Socket = socket
+                }.onFailure { failure ->
+                    firstFailure = failure
+                }
+
+                val ipv4Port = if (listenPort == 0 && ipv6Socket != null) {
+                    (ipv6Socket!!.localAddress as InetSocketAddress).port //TODO change code to not use !! in ipv6Socket!!
+                } else {
+                    listenPort
+                }
+
+                runCatching {
+                    aSocket(newSelectorManager).udp().bind(InetSocketAddress("0.0.0.0", ipv4Port))
+                }.onSuccess { socket ->
+                    ipv4Socket = socket
+                }.onFailure { failure ->
+                    if (ipv6Socket == null) {
+                        firstFailure = firstFailure ?: failure
+                    }
+                }
+
+                if (ipv4Socket == null && ipv6Socket == null) {
+                    throw IllegalStateException("Failed to bind UDP socket for IPv4 and IPv6", firstFailure)
+                }
+            }
+        } catch (failure: Throwable) {
+            newSelectorManager.close()
+            newScope.cancel("SocketManager bind failed")
+            throw failure
         }
-        val udpPort = KtorDatagramUdpPort(
-            socket = newSocket,
-            receiveTimeoutMillis = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
-        )
 
         selectorManager = newSelectorManager
-        socket = newSocket
         scope = newScope
         running = true
 
-        newScope.launch(CoroutineName("$coroutineLabel-receive")) {
-            runReceiveLoop(udpPort, onFailure)
+        val ipv4UdpPort =  ipv4Socket?.let {
+            val port = KtorDatagramUdpPort(
+                socket = it,
+                receiveTimeoutMillis = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
+            )
+            newScope.launch(CoroutineName("$coroutineLabel-receive-ipv4")) {
+                runReceiveLoop(port, onFailure)
+            }
+            port
         }
+
+        val ipv6UdpPort = ipv6Socket?.let {
+            val port = KtorDatagramUdpPort(
+                socket = it,
+                receiveTimeoutMillis = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
+            )
+            newScope.launch(CoroutineName("$coroutineLabel-receive-ipv6")) {
+                runReceiveLoop(port, onFailure)
+            }
+            port
+        }
+
         newScope.launch(CoroutineName("$coroutineLabel-send")) {
-            runSendLoop(udpPort, onFailure)
+            runSendLoop(ipv4Port = ipv4UdpPort, ipv6Port = ipv6UdpPort, onFailure = onFailure,)
         }
     }
 
@@ -62,10 +110,12 @@ internal class SocketManagerImpl(
             return
         }
         running = false
-        socket?.close()
+        runCatching { ipv4Socket?.close() }
+        runCatching { ipv6Socket?.close() }
         selectorManager?.close()
         scope?.cancel("SocketManager stopped")
-        socket = null
+        ipv4Socket = null
+        ipv6Socket = null
         selectorManager = null
         scope = null
     }
@@ -85,17 +135,30 @@ internal class SocketManagerImpl(
         }
     }
 
-    private suspend fun runSendLoop(udpPort: UdpPort, onFailure: (Throwable) -> Unit) {
+    private suspend fun runSendLoop(
+        ipv4Port: UdpPort?,
+        ipv6Port: UdpPort?,
+        onFailure: (Throwable) -> Unit,
+    ) {
+        val defaultSocket = ipv4Port ?: ipv6Port ?: return
         try {
             while (true) {
                 val datagram = networkPipe.receive()
-                udpPort.sendDatagram(datagram)
+                if (isIpv6Literal(datagram.remoteEndpoint.address)) {
+                    (ipv4Port ?: defaultSocket).sendDatagram(datagram)
+                } else {
+                    (ipv6Port ?: defaultSocket).sendDatagram(datagram)
+                }
             }
         } catch (_: CancellationException) {
             // shutdown path
         } catch (throwable: Throwable) {
             onFailure(throwable)
         }
+    }
+
+    private fun isIpv6Literal(address: String): Boolean {
+        return address.contains(':')
     }
 
     private companion object {

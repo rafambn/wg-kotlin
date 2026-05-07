@@ -146,6 +146,82 @@ class SocketManagerTest {
     }
 
     @Test
+    fun receiveLoopDeliversInboundIpv6DatagramToPipeWhenIpv6Available() = runBlocking {
+        if (!isIpv6LoopbackAvailable()) {
+            return@runBlocking
+        }
+
+        val selector = SelectorManager(Dispatchers.IO)
+        val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
+        val manager = SocketManagerImpl(networkPipe.first)
+        manager.start(listenPort = 0, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
+
+        try {
+            val probeReceiver = aSocket(selector).udp().bind(InetSocketAddress("::1", 0))
+            val probePort = (probeReceiver.localAddress as InetSocketAddress).port
+            networkPipe.second.send(
+                UdpDatagram(
+                    payload = byteArrayOf(0),
+                    remoteEndpoint = UdpEndpoint(address = "::1", port = probePort),
+                ),
+            )
+            val probeResult = withTimeout(2_000) { probeReceiver.receive() }
+            val managerPort = (probeResult.address as InetSocketAddress).port
+            probeReceiver.close()
+
+            val sender = aSocket(selector).udp().bind(InetSocketAddress("::1", 0))
+            try {
+                val payload = byteArrayOf(0x21, 0x22, 0x23)
+                sender.send(Datagram(buildPacket { writeFully(payload) }, InetSocketAddress("::1", managerPort)))
+
+                val datagram = withTimeout(2_000) { networkPipe.second.receive() }
+                assertTrue(datagram.payload.contentEquals(payload))
+            } finally {
+                sender.close()
+            }
+        } finally {
+            manager.stop()
+            selector.close()
+        }
+    }
+
+    @Test
+    fun sendLoopTransmitsOutboundIpv6DatagramFromPipeWhenIpv6Available() = runBlocking {
+        if (!isIpv6LoopbackAvailable()) {
+            return@runBlocking
+        }
+
+        val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
+        val manager = SocketManagerImpl(networkPipe.first)
+        manager.start(listenPort = 0, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
+
+        try {
+            val selector = SelectorManager(Dispatchers.IO)
+            val receiver = aSocket(selector).udp().bind(InetSocketAddress("::1", 0))
+            val receiverPort = (receiver.localAddress as InetSocketAddress).port
+
+            try {
+                val payload = byteArrayOf(0x31, 0x32)
+                networkPipe.second.send(
+                    UdpDatagram(
+                        payload = payload,
+                        remoteEndpoint = UdpEndpoint(address = "::1", port = receiverPort),
+                    ),
+                )
+
+                val received = withTimeout(2_000) { receiver.receive() }
+                val receivedBytes = received.packet.readByteArray()
+                assertTrue(receivedBytes.contentEquals(payload))
+            } finally {
+                receiver.close()
+                selector.close()
+            }
+        } finally {
+            manager.stop()
+        }
+    }
+
+    @Test
     fun restartOnListenPortChangeRebindsAndStillProcessesPackets() = runBlocking {
         val selector = SelectorManager(Dispatchers.IO)
 
@@ -177,6 +253,19 @@ class SocketManagerTest {
             }
         } finally {
             manager.stop()
+            selector.close()
+        }
+    }
+
+    private suspend fun isIpv6LoopbackAvailable(): Boolean {
+        val selector = SelectorManager(Dispatchers.IO)
+        return try {
+            val socket = aSocket(selector).udp().bind(InetSocketAddress("::1", 0))
+            socket.close()
+            true
+        } catch (_: Throwable) {
+            false
+        } finally {
             selector.close()
         }
     }

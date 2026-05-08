@@ -74,7 +74,7 @@ class DaemonBackedInterfaceCommandExecutor(
             }
         }
 
-        scope.launch {
+        val sessionCollectorJob = scope.launch {
             try {
                 bridgeReady.complete(Unit)
                 client.startSession(
@@ -96,7 +96,7 @@ class DaemonBackedInterfaceCommandExecutor(
             }
         }
 
-        scope.launch {
+        val outgoingPumpJob = scope.launch {
             try {
                 while (true) {
                     outgoingPackets.send(pipe.receive())
@@ -134,13 +134,20 @@ class DaemonBackedInterfaceCommandExecutor(
         }
 
         return AutoCloseable {
-            scope.cancel("DaemonBackedInterfaceCommandExecutor packet bridge closed")
             outgoingPackets.close()
+            scope.cancel("DaemonBackedInterfaceCommandExecutor packet bridge closed")
+            runBlocking {
+                withTimeoutOrNull(CLOSE_TIMEOUT_MILLIS) {
+                    sessionCollectorJob.join()
+                    outgoingPumpJob.join()
+                }
+            }
         }
     }
 
     private companion object {
         const val CONNECT_TIMEOUT_MILLIS: Long = 5_000
         const val STARTUP_STABILITY_MILLIS: Long = 200
+        const val CLOSE_TIMEOUT_MILLIS: Long = 5_000
     }
 }

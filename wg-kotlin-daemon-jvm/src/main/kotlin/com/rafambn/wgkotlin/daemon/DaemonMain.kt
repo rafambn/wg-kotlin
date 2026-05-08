@@ -7,6 +7,7 @@ import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.versionOption
 import com.rafambn.wgkotlin.daemon.di.DaemonKoinBootstrap
 import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import com.rafambn.wgkotlin.daemon.protocol.DaemonApi
@@ -28,7 +29,13 @@ fun main(args: Array<String>) {
     DaemonCli().main(args)
 }
 
-private class DaemonCli : CliktCommand(name = "vpn-daemon") {
+private const val DAEMON_VERSION = "0.1.0"
+
+internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
+    init {
+        versionOption(version = DAEMON_VERSION, names = setOf("--version", "-v"))
+    }
+
     private val host: String by option(
         "--host",
         help = "Host/interface to bind the daemon listener (default: 127.0.0.1). Non-loopback hosts require --allow-remote.",

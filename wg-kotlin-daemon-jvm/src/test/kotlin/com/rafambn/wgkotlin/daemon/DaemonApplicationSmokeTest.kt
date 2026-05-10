@@ -3,7 +3,6 @@ package com.rafambn.wgkotlin.daemon
 import com.rafambn.wgkotlin.daemon.command.CommandBinary
 import com.rafambn.wgkotlin.daemon.platformAdapter.PlatformAdapter
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
-import com.rafambn.wgkotlin.daemon.protocol.PingResponse
 import com.rafambn.wgkotlin.daemon.tun.TunHandle
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -23,12 +22,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class DaemonApplicationSmokeTest {
-
-    @Test
-    fun pingReturnsSuccess() = runBlocking {
-        val api = DaemonImpl(adapter = RecordingAdapter())
-        assertEquals(PingResponse, api.ping())
-    }
 
     @Test
     fun startSessionStreamsPacketsAndClosesHandle() = runBlocking {

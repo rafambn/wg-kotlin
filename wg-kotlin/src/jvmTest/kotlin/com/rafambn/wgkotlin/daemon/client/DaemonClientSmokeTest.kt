@@ -3,7 +3,6 @@ package com.rafambn.wgkotlin.daemon.client
 import com.rafambn.wgkotlin.daemon.protocol.DaemonApi
 import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import com.rafambn.wgkotlin.daemon.protocol.DnsConfig
-import com.rafambn.wgkotlin.daemon.protocol.PingResponse
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
 import io.ktor.server.application.install
 import io.ktor.server.engine.EmbeddedServer
@@ -12,7 +11,6 @@ import io.ktor.server.netty.Netty
 import io.ktor.server.netty.NettyApplicationEngine
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
@@ -24,22 +22,17 @@ import kotlinx.rpc.krpc.serialization.protobuf.protobuf
 import kotlinx.serialization.ExperimentalSerializationApi
 import org.koin.dsl.module
 import java.net.ServerSocket
-import java.time.Duration
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
-import kotlin.test.assertTrue
 
 @OptIn(ExperimentalSerializationApi::class)
 class DaemonClientSmokeTest {
     @Test
-    fun krpcClientPerformsHandshakeAndStartSessionRoundTrip() = runBlocking {
+    fun krpcClientPerformsStartSessionRoundTrip() = runBlocking {
         val port = randomPort()
         val engine = startServer(
             port = port,
             service = object : StubDaemonApi() {
-                override suspend fun ping(): PingResponse = PingResponse
-
                 override fun startSession(config: TunSessionConfig, outgoingPackets: Flow<ByteArray>): Flow<ByteArray> {
                     assertEquals("utun55", config.interfaceName)
                     assertEquals(listOf("corp.local"), config.dns.searchDomains)
@@ -51,8 +44,6 @@ class DaemonClientSmokeTest {
         val client = DaemonProcessClient.create(config = DaemonClientConfig(port = port))
 
         try {
-            assertEquals(PingResponse, client.handshake())
-
             val packets: List<ByteArray> = client.startSession(
                 config = TunSessionConfig(
                     interfaceName = "utun55",
@@ -70,41 +61,8 @@ class DaemonClientSmokeTest {
     }
 
     @Test
-    fun requestTimeoutIsSurfaced() = runBlocking {
-        val port = randomPort()
-        val engine = startServer(
-            port = port,
-            service = object : StubDaemonApi() {
-                override suspend fun ping(): PingResponse {
-                    delay(300)
-                    return PingResponse
-                }
-            },
-        )
-
-        val client = DaemonProcessClient.create(
-            config = DaemonClientConfig(
-                port = port,
-                timeout = Duration.ofMillis(50),
-            ),
-        )
-
-        try {
-            val failure = assertFailsWith<DaemonClientException.Timeout> {
-                client.ping()
-            }
-            assertEquals(50L, failure.timeout.toMillis())
-        } finally {
-            client.close()
-            engine.stop(100, 1_000)
-        }
-    }
-
-    @Test
     fun globalBootstrapSupportsOverridesAndMultipleClientConfigs() = runBlocking {
-        val stubService = object : StubDaemonApi() {
-            override suspend fun ping(): PingResponse = PingResponse
-        }
+        val stubService = object : StubDaemonApi() {}
         val overrideModule = module {
             factory<DaemonApi> { stubService }
         }
@@ -119,29 +77,18 @@ class DaemonClientSmokeTest {
         )
 
         try {
-            assertEquals(PingResponse, first.ping())
-            assertEquals(PingResponse, second.ping())
+            assertEquals(emptyFlow<ByteArray>().toList(), first.startSession(
+                config = TunSessionConfig(interfaceName = "wg0", addresses = listOf("10.0.0.1/24")),
+                outgoingPackets = emptyFlow(),
+            ).toList())
+            assertEquals(emptyFlow<ByteArray>().toList(), second.startSession(
+                config = TunSessionConfig(interfaceName = "wg1", addresses = listOf("10.0.0.2/24")),
+                outgoingPackets = emptyFlow(),
+            ).toList())
         } finally {
             first.close()
             second.close()
         }
-    }
-
-    @Test
-    fun handshakePropagatesRemoteException() = runBlocking {
-        val client = DaemonProcessClient(
-            service = object : StubDaemonApi() {
-                override suspend fun ping(): PingResponse {
-                    throw IllegalStateException("nope")
-                }
-            },
-        )
-
-        val failure = assertFailsWith<IllegalStateException> {
-            client.handshake()
-        }
-
-        assertTrue(failure.message.orEmpty().contains("nope"))
     }
 
     private fun startServer(
@@ -174,10 +121,6 @@ class DaemonClientSmokeTest {
     }
 
     private open class StubDaemonApi : DaemonApi {
-        override suspend fun ping(): PingResponse {
-            return PingResponse
-        }
-
         override fun startSession(config: TunSessionConfig, outgoingPackets: Flow<ByteArray>): Flow<ByteArray> = emptyFlow()
     }
 

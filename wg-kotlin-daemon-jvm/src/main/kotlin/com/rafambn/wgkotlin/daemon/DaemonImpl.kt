@@ -3,7 +3,6 @@ package com.rafambn.wgkotlin.daemon
 import com.rafambn.wgkotlin.daemon.platformAdapter.PlatformAdapter
 import com.rafambn.wgkotlin.daemon.platformAdapter.PlatformAdapterFactory
 import com.rafambn.wgkotlin.daemon.protocol.DaemonApi
-import com.rafambn.wgkotlin.daemon.protocol.PingResponse
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -19,10 +18,6 @@ class DaemonImpl internal constructor(
 ) : DaemonApi {
     private val activeSessionLock = Any()
     private val activeSessions = mutableSetOf<String>()
-
-    override suspend fun ping(): PingResponse {
-        return PingResponse
-    }
 
     override fun startSession(
         config: TunSessionConfig,

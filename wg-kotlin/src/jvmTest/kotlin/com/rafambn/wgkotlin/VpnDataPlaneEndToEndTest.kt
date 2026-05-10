@@ -3,7 +3,6 @@ package com.rafambn.wgkotlin
 import com.rafambn.wgkotlin.daemon.client.DaemonProcessClient
 import com.rafambn.wgkotlin.daemon.protocol.DaemonApi
 import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
-import com.rafambn.wgkotlin.daemon.protocol.PingResponse
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
@@ -50,7 +49,6 @@ class VpnDataPlaneEndToEndTest {
                     }
                     registerService<DaemonApi> {
                         object : DaemonApi {
-                            override suspend fun ping(): PingResponse = PingResponse
                             override fun startSession(config: TunSessionConfig, outgoingPackets: Flow<ByteArray>): Flow<ByteArray> = flowOf(byteArrayOf(4, 5, 6))
                         }
                     }

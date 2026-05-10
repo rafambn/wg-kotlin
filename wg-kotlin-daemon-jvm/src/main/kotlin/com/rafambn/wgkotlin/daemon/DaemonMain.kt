@@ -15,6 +15,8 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import io.ktor.server.response.respondText
+import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
 import com.sun.security.auth.module.UnixSystem
@@ -29,7 +31,7 @@ fun main(args: Array<String>) {
     DaemonCli().main(args)
 }
 
-private const val DAEMON_VERSION = "0.1.0"
+internal const val DAEMON_VERSION = "0.1.0"
 
 internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
     init {
@@ -181,6 +183,9 @@ fun Application.module(
     }
 
     routing {
+        get("/version") {
+            call.respondText(DAEMON_VERSION)
+        }
         rpc(DaemonTransport.DAEMON_RPC_PATH) {
             rpcConfig {
                 serialization {

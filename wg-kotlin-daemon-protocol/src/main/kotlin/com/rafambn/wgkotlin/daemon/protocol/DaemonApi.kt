@@ -14,8 +14,6 @@ import kotlinx.rpc.annotations.Rpc
  */
 @Rpc
 interface DaemonApi {
-    suspend fun ping(): PingResponse
-
     fun startSession(
         config: TunSessionConfig,
         outgoingPackets: Flow<ByteArray>,

@@ -3,6 +3,7 @@ package com.rafambn.wgkotlin.daemon.tun
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import uniffi.wg_kotlin_uniffi_tun_rs.TunDevice
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Real TUN device handle implementation using tun-rs via Rust FFI.
@@ -20,7 +21,7 @@ internal class RealTunHandle(
     private val logger = org.slf4j.LoggerFactory.getLogger(RealTunHandle::class.java)
 
     private var tunDevice: TunDevice? = null
-    private var isClosed = false
+    private val isClosed = AtomicBoolean(false)
     private var openedInterfaceName: String = requestedInterfaceName
 
     override val interfaceName: String
@@ -45,7 +46,7 @@ internal class RealTunHandle(
                 logger.info("TUN device opened successfully: $openedInterfaceName")
             } catch (e: Exception) {
                 logger.error("Failed to open TUN device: $requestedInterfaceName", e)
-                isClosed = true
+                isClosed.set(true)
                 throw e
             }
         }
@@ -53,25 +54,22 @@ internal class RealTunHandle(
     }
 
     override suspend fun readPacket(): ByteArray? {
-        if (isClosed || tunDevice == null) {
+        if (isClosed.get() || tunDevice == null) {
             return null
         }
 
         return withContext(Dispatchers.IO) {
-            try {
-                // Read a packet from the Rust TUN device
-                val packet = tunDevice?.readPacket()
-                logger.trace("Read ${packet?.size ?: 0} bytes from TUN device")
-                packet
-            } catch (e: Exception) {
-                logger.error("Failed to read packet from TUN device", e)
-                null
-            }
+            // Read a packet from the Rust TUN device.
+            // Let real IO errors propagate so the session coroutine fails
+            // gracefully instead of busy-waiting.
+            val packet = tunDevice?.readPacket()
+            logger.trace("Read ${packet?.size ?: 0} bytes from TUN device")
+            packet
         }
     }
 
     override suspend fun writePacket(packet: ByteArray) {
-        if (isClosed || tunDevice == null) {
+        if (isClosed.get() || tunDevice == null) {
             logger.warn("Attempted to write to closed TUN device")
             return
         }
@@ -89,11 +87,10 @@ internal class RealTunHandle(
     }
 
     override fun close() {
-        if (isClosed) {
+        if (!isClosed.compareAndSet(false, true)) {
             return
         }
 
-        isClosed = true
         logger.info("Closing TUN device: $openedInterfaceName")
 
         try {

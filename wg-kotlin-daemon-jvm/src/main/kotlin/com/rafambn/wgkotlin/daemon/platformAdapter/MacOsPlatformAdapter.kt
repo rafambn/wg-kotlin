@@ -19,6 +19,7 @@ internal class MacOsPlatformAdapter(
 
     override suspend fun startSession(config: TunSessionConfig): TunHandle {
         val primaryAddress = extractPrimaryTunAddress(config)
+        validateInterfaceNameForScutil(config.interfaceName)
         val handle = RealTunHandle(
             requestedInterfaceName = config.interfaceName,
             ipAddress = primaryAddress.address,
@@ -120,6 +121,12 @@ internal class MacOsPlatformAdapter(
                 appendLine("quit")
             },
         )
+    }
+
+    private fun validateInterfaceNameForScutil(interfaceName: String) {
+        require(Regex("^[A-Za-z][A-Za-z0-9_.-]{0,31}$").matches(interfaceName)) {
+            "Interface name contains unsafe characters for scutil: $interfaceName"
+        }
     }
 
     private fun resolverPath(interfaceName: String): String {

@@ -19,20 +19,24 @@ internal object DaemonKoinBootstrap {
         }
     }
 
+    private var koinApp: org.koin.core.KoinApplication? = null
+
     fun resolveDependencies(overrideModules: List<Module> = emptyList()): DaemonRuntimeDependencies {
+        koinApp?.close()
         val app = koinApplication {
             allowOverride(true)
             modules(listOf(baseModule) + overrideModules)
         }
+        koinApp = app
+        return DaemonRuntimeDependencies(
+            adapter = app.koin.get(),
+            service = app.koin.get(),
+        )
+    }
 
-        return try {
-            DaemonRuntimeDependencies(
-                adapter = app.koin.get(),
-                service = app.koin.get(),
-            )
-        } finally {
-            app.close()
-        }
+    fun close() {
+        koinApp?.close()
+        koinApp = null
     }
 }
 

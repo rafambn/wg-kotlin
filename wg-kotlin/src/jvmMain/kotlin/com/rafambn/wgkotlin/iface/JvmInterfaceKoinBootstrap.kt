@@ -6,7 +6,6 @@ import org.koin.core.module.Module
 import org.koin.core.parameter.parametersOf
 import org.koin.dsl.koinApplication
 import org.koin.dsl.module
-import java.time.Duration
 
 internal object JvmInterfaceKoinBootstrap {
     private val baseModule: Module = module {
@@ -22,9 +21,6 @@ internal object JvmInterfaceKoinBootstrap {
                 else -> DaemonBackedInterfaceCommandExecutor(
                     host = System.getProperty(JvmInterfaceProperties.DAEMON_HOST, DaemonTransport.DEFAULT_DAEMON_HOST),
                     port = System.getProperty(JvmInterfaceProperties.DAEMON_PORT)?.toIntOrNull() ?: DaemonTransport.DEFAULT_DAEMON_PORT,
-                    timeout = Duration.ofMillis(
-                        System.getProperty(JvmInterfaceProperties.DAEMON_TIMEOUT_MILLIS)?.toLongOrNull() ?: 15_000L,
-                    ),
                 )
             }
         }

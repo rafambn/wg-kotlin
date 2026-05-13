@@ -26,14 +26,12 @@ import kotlinx.rpc.krpc.ktor.client.rpc
 import kotlinx.rpc.krpc.serialization.protobuf.protobuf
 import kotlinx.rpc.withService
 import kotlinx.serialization.ExperimentalSerializationApi
-import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 
 @OptIn(ExperimentalSerializationApi::class)
 class DaemonBackedInterfaceCommandExecutor(
     private val host: String,
     private val port: Int,
-    private val timeout: Duration,
 ) : InterfaceCommandExecutor {
     private val client: DaemonProcessClient by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         val httpClient = HttpClient(CIO) {
@@ -47,7 +45,6 @@ class DaemonBackedInterfaceCommandExecutor(
         val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = host, port = port))
         DaemonProcessClient(
             service = rpcClient.withService<DaemonApi>(),
-            timeout = timeout,
             resourceCloser = { httpClient.close() },
         )
     }

@@ -12,15 +12,17 @@ import org.apache.commons.exec.PumpStreamHandler
 
 internal class CommonsExecProcessLauncher(
     private val timeout: Duration = Duration.ofSeconds(20),
+    private val maxOutputBytes: Int = 1 * 1024 * 1024,
 ) : ProcessLauncher {
     init {
         require(timeout.toMillis() > 0L) { "Command timeout must be positive" }
+        require(maxOutputBytes > 0) { "maxOutputBytes must be positive" }
     }
 
     override fun run(invocation: ProcessInvocationModel): ProcessOutputModel {
         val executable = invocation.binary.executable
-        val stdout = ByteArrayOutputStream()
-        val stderr = ByteArrayOutputStream()
+        val stdout = CappedByteArrayOutputStream(maxOutputBytes)
+        val stderr = CappedByteArrayOutputStream(maxOutputBytes)
         val stdin = ByteArrayInputStream((invocation.stdin ?: "").toByteArray(Charsets.UTF_8))
 
         val watchdog = ExecuteWatchdog.builder()
@@ -68,7 +70,41 @@ internal class CommonsExecProcessLauncher(
 private fun toCommandLine(invocation: ProcessInvocationModel): CommandLine {
     val commandLine = CommandLine(invocation.binary.executable)
     invocation.arguments.forEach { argument ->
-        commandLine.addArgument(argument, false)
+        commandLine.addArgument(argument, true)
     }
     return commandLine
+}
+
+/**
+ * [ByteArrayOutputStream] that silently drops bytes once [maxBytes] is reached,
+ * protecting the daemon from unbounded output from a misbehaving child process.
+ */
+private class CappedByteArrayOutputStream(private val maxBytes: Int) : ByteArrayOutputStream() {
+    private var totalBytes = 0
+    private var capped = false
+
+    override fun write(b: Int) {
+        if (capped) return
+        if (totalBytes >= maxBytes) {
+            capped = true
+            return
+        }
+        super.write(b)
+        totalBytes++
+    }
+
+    override fun write(b: ByteArray, off: Int, len: Int) {
+        if (capped) return
+        val remaining = maxBytes - totalBytes
+        if (remaining <= 0) {
+            capped = true
+            return
+        }
+        val toWrite = len.coerceAtMost(remaining)
+        super.write(b, off, toWrite)
+        totalBytes += toWrite
+        if (toWrite < len) {
+            capped = true
+        }
+    }
 }

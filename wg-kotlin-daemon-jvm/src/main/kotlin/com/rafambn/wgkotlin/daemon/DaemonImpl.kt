@@ -14,8 +14,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal const val MAX_PACKET_FRAME_SIZE: Int = 65535
 
 class DaemonImpl internal constructor(
-    private val adapter: PlatformAdapter = PlatformAdapterFactory.fromOs(),
+    private val adapter: PlatformAdapter,
 ) : DaemonApi {
+    private val logger = org.slf4j.LoggerFactory.getLogger(DaemonImpl::class.java)
     private val activeSessionLock = Any()
     private val activeSessions = mutableSetOf<String>()
 
@@ -47,7 +48,8 @@ class DaemonImpl internal constructor(
             while (isActive) {
                 val packet = handle.readPacket() ?: continue
                 if (packet.size > MAX_PACKET_FRAME_SIZE) {
-                    throw IllegalStateException("Oversized packet from TUN: ${packet.size}")
+                    logger.warn("Dropping oversized packet from TUN: ${packet.size} bytes")
+                    continue
                 }
                 if (packet.isNotEmpty()) {
                     send(packet)
@@ -58,7 +60,8 @@ class DaemonImpl internal constructor(
         val writerJob = launch {
             outgoingPackets.collect { packet ->
                 if (packet.size > MAX_PACKET_FRAME_SIZE) {
-                    throw IllegalArgumentException("Oversized packet: ${packet.size}")
+                    logger.warn("Dropping oversized outbound packet: ${packet.size} bytes")
+                    return@collect
                 }
                 if (packet.isNotEmpty()) {
                     handle.writePacket(packet)

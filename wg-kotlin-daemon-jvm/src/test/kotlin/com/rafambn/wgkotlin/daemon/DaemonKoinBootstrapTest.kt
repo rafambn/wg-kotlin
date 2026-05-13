@@ -38,6 +38,7 @@ class DaemonKoinBootstrapTest {
         assertEquals(1, firstAdapter.startCalls)
         assertEquals(1, secondAdapter.startCalls)
         assertNotSame(firstDependencies.service, secondDependencies.service)
+        DaemonKoinBootstrap.close()
     }
 
     private class RecordingAdapter : PlatformAdapter {

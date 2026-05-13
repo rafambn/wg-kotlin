@@ -4,6 +4,7 @@ import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal object WindowsDllLoader {
     private val logger = org.slf4j.LoggerFactory.getLogger(WindowsDllLoader::class.java)
@@ -11,6 +12,7 @@ internal object WindowsDllLoader {
 
     @Volatile
     private var cachedWinTunDllPath: String? = null
+    private val dllLoaded = AtomicBoolean(false)
 
     /**
      * Ensures a Windows-compatible `wintun.dll` exists on disk and is loaded.
@@ -39,15 +41,17 @@ internal object WindowsDllLoader {
             val targetPath = extractAsCanonicalWinTunDll(sourceResource)
             val targetPathString = targetPath.toAbsolutePath().toString()
 
-            try {
-                System.load(targetPathString)
-                logger.info("Loaded WinTUN DLL from: $targetPathString")
-            } catch (e: UnsatisfiedLinkError) {
-                if (!e.message.orEmpty().contains("already loaded", ignoreCase = true)) {
+            if (dllLoaded.get()) {
+                logger.debug("WinTUN DLL already loaded")
+            } else {
+                try {
+                    System.load(targetPathString)
+                    dllLoaded.set(true)
+                    logger.info("Loaded WinTUN DLL from: $targetPathString")
+                } catch (e: UnsatisfiedLinkError) {
                     logger.error("Failed to load WinTUN DLL from: $targetPathString", e)
                     throw e
                 }
-                logger.debug("WinTUN DLL already loaded: $targetPathString")
             }
 
             cachedWinTunDllPath = targetPathString

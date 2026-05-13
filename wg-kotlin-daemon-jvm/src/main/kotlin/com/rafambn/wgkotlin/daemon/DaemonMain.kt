@@ -19,7 +19,6 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
-import com.sun.security.auth.module.UnixSystem
 import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -81,35 +80,42 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
         }
         val dependencies = DaemonKoinBootstrap.resolveDependencies()
         val adapter = dependencies.adapter
+        val shutdownHook = Thread({ DaemonKoinBootstrap.close() }, "wg-kotlin-daemon-koin-shutdown")
+        Runtime.getRuntime().addShutdownHook(shutdownHook)
 
-        val isPrivileged = hasRequiredPrivileges()
-        if (!isPrivileged) {
-            throw UsageError(
-                "Daemon must run with elevated privileges for `${adapter.platformId}` commands (current user: `${System.getProperty("user.name")}`).",
-            )
+        try {
+            val isPrivileged = hasRequiredPrivileges()
+            if (!isPrivileged) {
+                throw UsageError(
+                    "Daemon must run with elevated privileges for `${adapter.platformId}` commands (current user: `${System.getProperty("user.name")}`).",
+                )
+            }
+
+            val missingBinaries = adapter.requiredBinaries
+                .filterNot { binary -> isBinaryAvailableOnPath(binary.executable) }
+                .map { binary -> binary.executable }
+
+            if (missingBinaries.isNotEmpty()) {
+                throw UsageError(
+                    "Missing required privileged binaries for `${adapter.platformId}`: ${missingBinaries.joinToString(", ")}.",
+                )
+            }
+
+            createDaemonServer(
+                host = host,
+                port = port,
+                service = dependencies.service,
+            ).start(wait = true)
+        } finally {
+            DaemonKoinBootstrap.close()
+            runCatching { Runtime.getRuntime().removeShutdownHook(shutdownHook) }
         }
-
-        val missingBinaries = adapter.requiredBinaries
-            .filterNot { binary -> isBinaryAvailableOnPath(binary.executable) }
-            .map { binary -> binary.executable }
-
-        if (missingBinaries.isNotEmpty()) {
-            throw UsageError(
-                "Missing required privileged binaries for `${adapter.platformId}`: ${missingBinaries.joinToString(", ")}.",
-            )
-        }
-
-        createDaemonServer(
-            host = host,
-            port = port,
-            service = dependencies.service,
-        ).start(wait = true)
     }
 }
 
 internal fun hasRequiredPrivileges(
     osName: String = System.getProperty("os.name"),
-    unixUidProvider: () -> Long = { UnixSystem().uid },
+    unixUidProvider: () -> Long = ::currentUnixUid,
     commandRunner: (List<String>) -> Boolean = ::runCommandSuccessfully,
 ): Boolean {
     val normalizedOs = osName.lowercase()
@@ -131,7 +137,7 @@ internal fun hasRequiredPrivileges(
         }
         else -> try {
             unixUidProvider() == 0L
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
             false
         }
     }
@@ -144,16 +150,33 @@ internal fun runCommandSuccessfully(command: List<String>): Boolean {
             .start()
 
         val finished = process.waitFor(2, TimeUnit.SECONDS)
-        finished && process.exitValue() == 0
-    } catch (_: Throwable) {
+        if (!finished) {
+            process.destroyForcibly()
+            return false
+        }
+        process.exitValue() == 0
+    } catch (_: Exception) {
         false
     }
+}
+
+private fun currentUnixUid(): Long {
+    val process = ProcessBuilder("id", "-u")
+        .redirectErrorStream(true)
+        .start()
+
+    val finished = process.waitFor(2, TimeUnit.SECONDS)
+    if (!finished) {
+        process.destroyForcibly()
+        throw IllegalStateException("id -u timed out")
+    }
+    return process.inputStream.bufferedReader().readText().trim().toLong()
 }
 
 internal fun createDaemonServer(
     host: String,
     port: Int,
-    service: DaemonApi = DaemonImpl(),
+    service: DaemonApi,
 ) = embeddedServer(
     factory = Netty,
     host = host,
@@ -173,7 +196,7 @@ internal fun isBinaryAvailableOnPath(executable: String): Boolean {
 
 @OptIn(ExperimentalSerializationApi::class)
 fun Application.module(
-    service: DaemonApi = DaemonImpl(),
+    service: DaemonApi,
 ) {
     install(WebSockets)
     install(Krpc) {

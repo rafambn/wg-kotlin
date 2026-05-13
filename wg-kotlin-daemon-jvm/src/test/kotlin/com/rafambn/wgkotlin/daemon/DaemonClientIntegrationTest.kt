@@ -58,7 +58,6 @@ class DaemonClientIntegrationTest {
             host = "127.0.0.1",
             port = port,
             service = api,
-            authToken = "secret",
         ).start(wait = false)
         val httpClient = HttpClient(CIO) {
             install(WebSockets)
@@ -70,9 +69,7 @@ class DaemonClientIntegrationTest {
         }
 
         try {
-            val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = "127.0.0.1", port = port)) {
-                header(DaemonTransport.DAEMON_AUTH_HEADER, DaemonTransport.bearerTokenValue("secret"))
-            }
+            val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = "127.0.0.1", port = port))
             val packet = rpcClient.withService<DaemonApi>().startSession(
                 config = TunSessionConfig(interfaceName = "wg0", addresses = listOf("10.0.0.1/24")),
                 outgoingPackets = emptyFlow(),

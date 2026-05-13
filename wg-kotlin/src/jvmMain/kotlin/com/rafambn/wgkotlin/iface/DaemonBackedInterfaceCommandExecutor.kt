@@ -33,7 +33,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 class DaemonBackedInterfaceCommandExecutor(
     private val host: String,
     private val port: Int,
-    private val token: String,
 ) : InterfaceCommandExecutor {
     private val client: DaemonProcessClient by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         val httpClient = HttpClient(CIO) {
@@ -44,9 +43,7 @@ class DaemonBackedInterfaceCommandExecutor(
                 }
             }
         }
-        val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = host, port = port)) {
-            header(DaemonTransport.DAEMON_AUTH_HEADER, DaemonTransport.bearerTokenValue(token))
-        }
+        val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = host, port = port))
         DaemonProcessClient(
             service = rpcClient.withService<DaemonApi>(),
             resourceCloser = { httpClient.close() },

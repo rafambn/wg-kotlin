@@ -40,14 +40,6 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
         parsed
     }.default(DaemonTransport.DEFAULT_DAEMON_PORT)
 
-    private val token: String? by option(
-        "--token",
-        help = "Bearer token required by daemon RPC clients. Defaults to -D${DaemonTransport.DAEMON_TOKEN_PROPERTY} or ${DaemonTransport.DAEMON_TOKEN_ENV}.",
-    ).convert { value ->
-        value.trim().takeIf(String::isNotEmpty)
-            ?: fail("Daemon token cannot be blank.")
-    }
-
     override fun run() {
         val address = bindAddressOrUsageError(host)
 
@@ -87,18 +79,12 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
                 )
             }
 
-            val authToken = token ?: DaemonTransport.configuredToken()
-                ?: throw UsageError(
-                    "Daemon RPC auth token is required. Pass --token, set -D${DaemonTransport.DAEMON_TOKEN_PROPERTY}, or set ${DaemonTransport.DAEMON_TOKEN_ENV}.",
-                )
-
             adapter.cleanupStaleState()
 
             createDaemonServer(
                 host = host,
                 port = port,
                 service = dependencies.service,
-                authToken = authToken,
             ).start(wait = true)
         } finally {
             closeDependenciesOnce()

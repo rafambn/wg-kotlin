@@ -10,7 +10,6 @@ class DaemonBackedInterfaceCommandExecutorTest {
         val executor = DaemonBackedInterfaceCommandExecutor(
             host = "127.0.0.1",
             port = 65535,
-            token = "test-token",
         )
 
         assertNotNull(executor)

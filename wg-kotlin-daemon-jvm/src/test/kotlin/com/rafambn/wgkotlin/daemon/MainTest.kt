@@ -47,13 +47,6 @@ class MainTest {
     }
 
     @Test
-    fun daemonRpcAuthRequiresMatchingBearerToken() {
-        assertTrue(isAuthorizedDaemonRpcHeader("Bearer secret", "secret"))
-        assertFalse(isAuthorizedDaemonRpcHeader(null, "secret"))
-        assertFalse(isAuthorizedDaemonRpcHeader("Bearer wrong", "secret"))
-    }
-
-    @Test
     fun bindAddressRejectsUnknownHostsWithoutCatchingFatalErrors() {
         assertFailsWith<UsageError> {
             bindAddressOrUsageError("not a host name.invalid")

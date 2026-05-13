@@ -85,29 +85,5 @@ class DaemonProtocolSmokeTest {
         assertEquals("127.0.0.1", DaemonTransport.DEFAULT_DAEMON_HOST)
         assertEquals(8787, DaemonTransport.DEFAULT_DAEMON_PORT)
         assertEquals("/services", DaemonTransport.DAEMON_RPC_PATH)
-        assertEquals("Authorization", DaemonTransport.DAEMON_AUTH_HEADER)
-    }
-
-    @Test
-    fun daemonTransportBuildsBearerTokenHeaderAndReadsConfiguredToken() {
-        assertEquals("Bearer secret", DaemonTransport.bearerTokenValue("secret"))
-        assertEquals(
-            "system-secret",
-            DaemonTransport.configuredToken(
-                systemPropertyProvider = { name ->
-                    if (name == DaemonTransport.DAEMON_TOKEN_PROPERTY) " system-secret " else null
-                },
-                environmentProvider = { "env-secret" },
-            ),
-        )
-        assertEquals(
-            "env-secret",
-            DaemonTransport.configuredToken(
-                systemPropertyProvider = { null },
-                environmentProvider = { name ->
-                    if (name == DaemonTransport.DAEMON_TOKEN_ENV) "env-secret" else null
-                },
-            ),
-        )
     }
 }

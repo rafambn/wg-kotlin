@@ -33,11 +33,7 @@ internal object DaemonClientKoinBootstrap {
         factory<DaemonApi> { params ->
             val httpClient = params.get<HttpClient>()
             val config = params.get<DaemonClientConfig>()
-            val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = config.host, port = config.port)) {
-                config.token?.let { token ->
-                    header(DaemonTransport.DAEMON_AUTH_HEADER, DaemonTransport.bearerTokenValue(token))
-                }
-            }
+            val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = config.host, port = config.port))
             rpcClient.withService<DaemonApi>()
         }
     }

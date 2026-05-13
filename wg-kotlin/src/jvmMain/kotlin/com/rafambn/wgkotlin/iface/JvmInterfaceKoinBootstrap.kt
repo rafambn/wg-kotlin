@@ -22,10 +22,6 @@ internal object JvmInterfaceKoinBootstrap {
                 else -> DaemonBackedInterfaceCommandExecutor(
                     host = System.getProperty(JvmInterfaceProperties.DAEMON_HOST, DaemonTransport.DEFAULT_DAEMON_HOST),
                     port = System.getProperty(JvmInterfaceProperties.DAEMON_PORT)?.toIntOrNull() ?: DaemonTransport.DEFAULT_DAEMON_PORT,
-                    token = DaemonTransport.configuredToken()
-                        ?: error(
-                            "Daemon auth token is required. Set -D${DaemonTransport.DAEMON_TOKEN_PROPERTY} or ${DaemonTransport.DAEMON_TOKEN_ENV}.",
-                        ),
                 )
             }
         }

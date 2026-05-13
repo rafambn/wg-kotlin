@@ -16,16 +16,15 @@ import kotlin.test.assertTrue
 class WindowsPlatformAdapterTest {
 
     @Test
-    fun cleanupStaleStateRemovesAllManagedNrptRules() {
+    fun constructionCleansUpStaleNrptRules() {
         val invocations = mutableListOf<ProcessInvocationModel>()
-        val adapter = WindowsPlatformAdapter(
+
+        WindowsPlatformAdapter(
             processLauncher = ProcessLauncher { invocation ->
                 invocations += invocation
                 ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
             },
         )
-
-        adapter.cleanupStaleState()
 
         val invocation = invocations.single()
         assertEquals(CommandBinary.POWERSHELL, invocation.binary)
@@ -50,7 +49,11 @@ class WindowsPlatformAdapterTest {
 
             val adapter = WindowsPlatformAdapter(
                 processLauncher = ProcessLauncher { invocation ->
-                    check(handleOpened) { "Commands must execute only after TUN handle is open" }
+                    // init block runs stale-state cleanup before startSession;
+                    // only NETSH / route commands require the TUN handle to be open.
+                    if (invocation.binary == CommandBinary.NETSH) {
+                        check(handleOpened) { "NETSH commands must execute only after TUN handle is open" }
+                    }
                     invocations += invocation
                     ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
                 },

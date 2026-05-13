@@ -66,8 +66,6 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
             )
         }
 
-        adapter.cleanupStaleState()
-
         createDaemonServer(
             host = host,
             port = port,

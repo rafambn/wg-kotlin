@@ -105,8 +105,8 @@ internal class MacOsPlatformAdapter(
                 cleanup = { clearDnsEntries(interfaceName) },
             )
         } catch (failure: Throwable) {
-            runCatching { handle.close() }
-            runCatching { clearDnsEntries(handle.interfaceName) }
+            runCleanup("close-tun-handle", failure) { handle.close() }
+            runCleanup("clear-dns", failure) { clearDnsEntries(handle.interfaceName) }
             throw failure
         }
     }

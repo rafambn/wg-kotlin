@@ -1,6 +1,5 @@
 import java.io.File
 import java.util.Properties
-import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.file.Directory
 import org.gradle.api.file.RegularFile
 import org.gradle.jvm.toolchain.JavaLanguageVersion
@@ -94,20 +93,6 @@ fun staticJavaLauncher(javaHome: File): JavaLauncher {
     }
 }
 
-fun selectedWintunResourceName(osName: String, archName: String): String? {
-    val normalizedOs = osName.lowercase()
-    if (!normalizedOs.contains("win")) return null
-
-    val normalizedArch = archName.lowercase()
-    return when {
-        normalizedArch.contains("amd64") || normalizedArch.contains("x86_64") -> "wintun-x64.dll"
-        normalizedArch.contains("aarch64") || normalizedArch.contains("arm64") -> "wintun-arm64.dll"
-        normalizedArch.contains("x86") || normalizedArch.contains("i386") || normalizedArch.contains("i486") ||
-            normalizedArch.contains("i586") || normalizedArch.contains("i686") -> "wintun-x86.dll"
-        else -> error("Unsupported Windows architecture for WinTUN resource packaging: $archName")
-    }
-}
-
 val localGraalVm25Home = findLocalGraalVm25Home(File(System.getProperty("user.home")))
 
 val graalVm25Launcher = localGraalVm25Home?.let { javaHome ->
@@ -164,19 +149,4 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
-}
-
-tasks.processResources {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-
-    val selectedWintunResource = selectedWintunResourceName(
-        osName = System.getProperty("os.name"),
-        archName = System.getProperty("os.arch"),
-    )
-
-    filesMatching("wintun/*.dll") {
-        if (selectedWintunResource == null || name != selectedWintunResource) {
-            exclude()
-        }
-    }
 }

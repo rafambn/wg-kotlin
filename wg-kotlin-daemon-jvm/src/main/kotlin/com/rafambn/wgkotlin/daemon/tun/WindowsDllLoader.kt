@@ -4,6 +4,7 @@ import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.Comparator
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal object WindowsDllLoader {
@@ -80,17 +81,41 @@ internal object WindowsDllLoader {
         val input = openResource(resourcePath)
             ?: throw IllegalStateException("WinTUN DLL not found in resources: $resourcePath")
 
-        val targetDir = Path.of(System.getProperty("java.io.tmpdir"), "wg-kotlin", "wintun")
-        Files.createDirectories(targetDir)
+        val tempRoot = Path.of(System.getProperty("java.io.tmpdir"))
+        cleanupOldTempDirs(tempRoot)
+        val targetDir = Files.createTempDirectory(tempRoot, TEMP_DIR_PREFIX)
         val targetPath = targetDir.resolve("wintun.dll")
 
         input.use { stream ->
             Files.copy(stream, targetPath, StandardCopyOption.REPLACE_EXISTING)
         }
 
+        targetDir.toFile().deleteOnExit()
         targetPath.toFile().deleteOnExit()
         logger.debug("Extracted WinTUN resource `$sourceDllName` to `$targetPath`")
         return targetPath
+    }
+
+    private fun cleanupOldTempDirs(tempRoot: Path) {
+        runCatching {
+            Files.list(tempRoot).use { paths ->
+                paths
+                    .filter { path -> Files.isDirectory(path) && path.fileName.toString().startsWith(TEMP_DIR_PREFIX) }
+                    .forEach { path ->
+                        runCatching {
+                            Files.walk(path).use { entries ->
+                                entries
+                                    .sorted(Comparator.reverseOrder())
+                                    .forEach(Files::deleteIfExists)
+                            }
+                        }.onFailure { failure ->
+                            logger.debug("Failed to remove old WinTUN temp directory `$path`", failure)
+                        }
+                    }
+            }
+        }.onFailure { failure ->
+            logger.debug("Failed to scan WinTUN temp directory root `$tempRoot`", failure)
+        }
     }
 
     internal fun openResource(resourcePath: String): InputStream? {
@@ -106,4 +131,6 @@ internal object WindowsDllLoader {
         X64,
         ARM64,
     }
+
+    private const val TEMP_DIR_PREFIX = "wg-kotlin-wintun-"
 }

@@ -130,12 +130,15 @@ internal class WindowsPlatformAdapter(
                 .distinct()
             if (namespaces.isNotEmpty() && dnsServers.isNotEmpty()) {
                 namespaces.forEach { namespace ->
-                    val script = "Add-DnsClientNrptRule -Namespace '${escapePowerShellSingleQuoted(namespace)}' " +
-                        "-NameServers ${toPowerShellArrayLiteral(dnsServers)} -Comment '${escapePowerShellSingleQuoted(ruleComment(interfaceName))}'"
                     runCommand(
                         operationLabel = "set-nrpt-rule",
                         binary = CommandBinary.POWERSHELL,
-                        arguments = listOf("-NoProfile", "-NonInteractive", "-Command", script),
+                        arguments = listOf("-NoProfile", "-NonInteractive", "-Command", SET_NRPT_RULE_SCRIPT),
+                        environment = mapOf(
+                            ENV_DNS_NAMESPACE to namespace,
+                            ENV_DNS_SERVERS to dnsServers.joinToString("\n"),
+                            ENV_NRPT_COMMENT to ruleComment(interfaceName),
+                        ),
                     )
                 }
             }
@@ -144,18 +147,18 @@ internal class WindowsPlatformAdapter(
                 cleanup = { clearNrptRules(interfaceName) },
             )
         } catch (failure: Throwable) {
-            runCatching { baseHandle.close() }
-            runCatching { clearNrptRules(baseHandle.interfaceName) }
+            runCleanup("close-tun-handle", failure) { baseHandle.close() }
+            runCleanup("clear-nrpt-rules", failure) { clearNrptRules(baseHandle.interfaceName) }
             throw failure
         }
     }
 
     private fun clearNrptRules(interfaceName: String) {
-        val script = "Get-DnsClientNrptRule | Where-Object { \$_.Comment -eq '${escapePowerShellSingleQuoted(ruleComment(interfaceName))}' } | Remove-DnsClientNrptRule -Force"
         runCommand(
             operationLabel = "clear-nrpt-rules",
             binary = CommandBinary.POWERSHELL,
-            arguments = listOf("-NoProfile", "-NonInteractive", "-Command", script),
+            arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_NRPT_RULES_SCRIPT),
+            environment = mapOf(ENV_NRPT_COMMENT to ruleComment(interfaceName)),
         )
     }
 
@@ -172,15 +175,6 @@ internal class WindowsPlatformAdapter(
         return value.substringBefore("/").contains(":")
     }
 
-    private fun escapePowerShellSingleQuoted(value: String): String {
-        return value.replace("'", "''")
-    }
-
-    private fun toPowerShellArrayLiteral(values: List<String>): String {
-        val quotedValues = values.joinToString(",") { value -> "'${escapePowerShellSingleQuoted(value)}'" }
-        return "@($quotedValues)"
-    }
-
     private fun prefixToMask(prefix: Int): String {
         val mask = if (prefix == 0) {
             0L
@@ -189,5 +183,22 @@ internal class WindowsPlatformAdapter(
         }
         return listOf(24, 16, 8, 0)
             .joinToString(".") { shift -> ((mask shr shift) and 0xff).toString() }
+    }
+
+    private companion object {
+        const val ENV_DNS_NAMESPACE = "WG_KOTLIN_DNS_NAMESPACE"
+        const val ENV_DNS_SERVERS = "WG_KOTLIN_DNS_SERVERS"
+        const val ENV_NRPT_COMMENT = "WG_KOTLIN_NRPT_COMMENT"
+
+        val SET_NRPT_RULE_SCRIPT = """
+            ${'$'}ErrorActionPreference = 'Stop'
+            ${'$'}nameServers = (${'$'}env:$ENV_DNS_SERVERS -split "`n") | Where-Object { ${'$'}_ -ne '' }
+            Add-DnsClientNrptRule -Namespace ${'$'}env:$ENV_DNS_NAMESPACE -NameServers ${'$'}nameServers -Comment ${'$'}env:$ENV_NRPT_COMMENT
+        """.trimIndent()
+
+        val CLEAR_NRPT_RULES_SCRIPT = """
+            ${'$'}ErrorActionPreference = 'Stop'
+            Get-DnsClientNrptRule | Where-Object { ${'$'}_.Comment -eq ${'$'}env:$ENV_NRPT_COMMENT } | Remove-DnsClientNrptRule -Force
+        """.trimIndent()
     }
 }

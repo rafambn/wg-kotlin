@@ -20,6 +20,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
 import java.net.InetAddress
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.rpc.krpc.ktor.server.Krpc
@@ -78,9 +79,17 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
                 "Refusing to bind daemon to non-loopback host `$host`. Pass `--allow-remote` if you really want remote exposure.",
             )
         }
+
         val dependencies = DaemonKoinBootstrap.resolveDependencies()
         val adapter = dependencies.adapter
-        val shutdownHook = Thread({ DaemonKoinBootstrap.close() }, "wg-kotlin-daemon-koin-shutdown")
+        val cleanupStarted = AtomicBoolean(false)
+        fun closeDependenciesOnce() {
+            if (cleanupStarted.compareAndSet(false, true)) {
+                DaemonKoinBootstrap.close()
+            }
+        }
+
+        val shutdownHook = Thread(::closeDependenciesOnce, "wg-kotlin-daemon-koin-shutdown")
         Runtime.getRuntime().addShutdownHook(shutdownHook)
 
         try {
@@ -107,7 +116,7 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
                 service = dependencies.service,
             ).start(wait = true)
         } finally {
-            DaemonKoinBootstrap.close()
+            closeDependenciesOnce()
             runCatching { Runtime.getRuntime().removeShutdownHook(shutdownHook) }
         }
     }
@@ -144,9 +153,11 @@ internal fun hasRequiredPrivileges(
 }
 
 internal fun runCommandSuccessfully(command: List<String>): Boolean {
+    var process: Process? = null
     return try {
-        val process = ProcessBuilder(command)
-            .redirectErrorStream(true)
+        process = ProcessBuilder(command)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
             .start()
 
         val finished = process.waitFor(2, TimeUnit.SECONDS)
@@ -157,6 +168,10 @@ internal fun runCommandSuccessfully(command: List<String>): Boolean {
         process.exitValue() == 0
     } catch (_: Exception) {
         false
+    } finally {
+        process?.outputStream?.close()
+        process?.inputStream?.close()
+        process?.errorStream?.close()
     }
 }
 
@@ -165,12 +180,20 @@ private fun currentUnixUid(): Long {
         .redirectErrorStream(true)
         .start()
 
-    val finished = process.waitFor(2, TimeUnit.SECONDS)
-    if (!finished) {
-        process.destroyForcibly()
-        throw IllegalStateException("id -u timed out")
+    try {
+        val finished = process.waitFor(2, TimeUnit.SECONDS)
+        if (!finished) {
+            process.destroyForcibly()
+            throw IllegalStateException("id -u timed out")
+        }
+        return process.inputStream.bufferedReader().use { reader ->
+            reader.readText().trim().toLong()
+        }
+    } finally {
+        process.outputStream.close()
+        process.inputStream.close()
+        process.errorStream.close()
     }
-    return process.inputStream.bufferedReader().readText().trim().toLong()
 }
 
 internal fun createDaemonServer(

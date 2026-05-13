@@ -6,6 +6,7 @@ import com.rafambn.wgkotlin.daemon.protocol.DaemonApi
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -74,11 +75,12 @@ class DaemonImpl internal constructor(
                 return@awaitClose
             }
             runCatching { handle.close() }
+                .onFailure { failure -> logger.warn("Failed to close TUN handle for ${config.interfaceName}", failure) }
             readerJob.cancel()
             writerJob.cancel()
             synchronized(activeSessionLock) {
                 activeSessions.remove(config.interfaceName)
             }
         }
-    }
+    }.buffer(0)
 }

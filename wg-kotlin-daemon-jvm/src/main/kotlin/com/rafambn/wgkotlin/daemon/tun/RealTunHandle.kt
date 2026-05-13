@@ -96,6 +96,7 @@ internal class RealTunHandle(
         try {
             onClose()
             // Close the Rust TUN device via uniffi
+            tunDevice?.shutdown()
             tunDevice?.close()
             tunDevice = null
         } catch (e: Exception) {

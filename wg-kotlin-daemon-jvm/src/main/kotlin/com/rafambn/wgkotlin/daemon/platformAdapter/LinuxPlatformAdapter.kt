@@ -3,6 +3,7 @@ package com.rafambn.wgkotlin.daemon.platformAdapter
 import com.rafambn.wgkotlin.daemon.command.CommandBinary
 import com.rafambn.wgkotlin.daemon.command.ProcessLauncher
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
+import com.rafambn.wgkotlin.daemon.tun.CleanupTunHandle
 import com.rafambn.wgkotlin.daemon.tun.RealTunHandle
 import com.rafambn.wgkotlin.daemon.tun.TunHandle
 
@@ -84,10 +85,22 @@ internal class LinuxPlatformAdapter(
                     arguments = listOf("domain", interfaceName) + routingDomains,
                 )
             }
-            handle
+            CleanupTunHandle(
+                delegate = handle,
+                cleanup = { revertDns(interfaceName) },
+            )
         } catch (failure: Throwable) {
-            runCatching { handle.close() }
+            runCleanup("revert-dns", failure) { revertDns(handle.interfaceName) }
+            runCleanup("close-tun-handle", failure) { handle.close() }
             throw failure
         }
+    }
+
+    private fun revertDns(interfaceName: String) {
+        runCommand(
+            operationLabel = "revert-dns",
+            binary = CommandBinary.RESOLVECTL,
+            arguments = listOf("revert", interfaceName),
+        )
     }
 }

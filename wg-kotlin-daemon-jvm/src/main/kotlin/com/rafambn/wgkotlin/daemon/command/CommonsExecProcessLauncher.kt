@@ -35,7 +35,7 @@ internal class CommonsExecProcessLauncher(
         executor.setExitValues(null)
 
         val exitCode = try {
-            executor.execute(toCommandLine(invocation))
+            executor.execute(toCommandLine(invocation), mergedEnvironment(invocation.environment))
         } catch (failure: ExecuteException) {
             if (watchdog.killedProcess()) {
                 throw TimeoutFailure(
@@ -73,6 +73,15 @@ private fun toCommandLine(invocation: ProcessInvocationModel): CommandLine {
         commandLine.addArgument(argument, true)
     }
     return commandLine
+}
+
+private fun mergedEnvironment(overrides: Map<String, String>): Map<String, String>? {
+    if (overrides.isEmpty()) {
+        return null
+    }
+    return System.getenv().toMutableMap().apply {
+        putAll(overrides)
+    }
 }
 
 /**

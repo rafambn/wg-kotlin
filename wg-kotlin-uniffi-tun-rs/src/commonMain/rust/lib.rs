@@ -1,6 +1,16 @@
+use std::cell::RefCell;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::{net::IpAddr, str::FromStr};
-use tun_rs::SyncDevice;
+use tun_rs::{InterruptEvent, SyncDevice};
+
+thread_local! {
+    static READ_BUFFER: RefCell<Vec<u8>> = RefCell::new(vec![0; 65536]);
+}
+
+struct DeviceState {
+    device: Option<Arc<SyncDevice>>,
+    interrupt: Option<Arc<InterruptEvent>>,
+}
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum TunError {
@@ -16,7 +26,7 @@ pub enum TunError {
 
 #[derive(uniffi::Object)]
 pub struct TunDevice {
-    device: Arc<StdMutex<Option<SyncDevice>>>,
+    state: Arc<StdMutex<DeviceState>>,
     interface_name: String,
 }
 
@@ -25,7 +35,10 @@ impl TunDevice {
     #[uniffi::constructor]
     pub fn new(interface_name: String) -> Arc<Self> {
         Arc::new(TunDevice {
-            device: Arc::new(StdMutex::new(None)),
+            state: Arc::new(StdMutex::new(DeviceState {
+                device: None,
+                interrupt: None,
+            })),
             interface_name,
         })
     }
@@ -60,56 +73,110 @@ impl TunDevice {
             .build_sync()
             .map_err(|e: std::io::Error| TunError::DeviceCreationFailed(e.to_string()))?;
 
-        let mut guard = self.device.lock().map_err(|_| {
+        #[cfg(unix)]
+        device
+            .set_nonblocking(true)
+            .map_err(|e: std::io::Error| TunError::DeviceCreationFailed(e.to_string()))?;
+
+        let interrupt = InterruptEvent::new()
+            .map_err(|e: std::io::Error| TunError::DeviceCreationFailed(e.to_string()))?;
+
+        let mut guard = self.state.lock().map_err(|_| {
             TunError::DeviceCreationFailed("Failed to acquire device lock".to_string())
         })?;
-        *guard = Some(device);
+        guard.device = Some(Arc::new(device));
+        guard.interrupt = Some(Arc::new(interrupt));
 
         Ok(())
     }
 
     pub fn read_packet(&self) -> Result<Vec<u8>, TunError> {
-        let mut guard = self.device.lock().map_err(|_| {
-            TunError::ReadFailed("Failed to acquire device lock".to_string())
-        })?;
-        let device = guard.as_mut().ok_or(TunError::DeviceClosed)?;
+        let (device, interrupt) = self.device_handles_for_read()?;
 
-        let mut buf = vec![0; 65536];
-        let len = device
-            .recv(&mut buf)
-            .map_err(|e: std::io::Error| TunError::ReadFailed(e.to_string()))?;
+        READ_BUFFER.with(|buffer_cell| {
+            let mut buffer = buffer_cell.borrow_mut();
+            if buffer.len() < 65536 {
+                buffer.resize(65536, 0);
+            }
 
-        buf.truncate(len);
-        Ok(buf)
+            let len = device
+                .recv_intr(&mut buffer, &interrupt)
+                .map_err(|e: std::io::Error| {
+                    if e.kind() == std::io::ErrorKind::Interrupted {
+                        TunError::DeviceClosed
+                    } else {
+                        TunError::ReadFailed(e.to_string())
+                    }
+                })?;
+
+            Ok(buffer[..len].to_vec())
+        })
     }
 
     pub fn write_packet(&self, packet: Vec<u8>) -> Result<(), TunError> {
-        let mut guard = self.device.lock().map_err(|_| {
-            TunError::WriteFailed("Failed to acquire device lock".to_string())
-        })?;
-        let device = guard.as_mut().ok_or(TunError::DeviceClosed)?;
+        let (device, interrupt) = self.device_handles_for_write()?;
 
         device
-            .send(&packet)
-            .map_err(|e: std::io::Error| TunError::WriteFailed(e.to_string()))?;
+            .send_intr(&packet, &interrupt)
+            .map_err(|e: std::io::Error| {
+                if e.kind() == std::io::ErrorKind::Interrupted {
+                    TunError::DeviceClosed
+                } else {
+                    TunError::WriteFailed(e.to_string())
+                }
+            })?;
 
         Ok(())
     }
 
     pub fn get_interface_name(&self) -> String {
-        self.device
+        self.state
             .lock()
             .ok()
-            .and_then(|guard| guard.as_ref().and_then(|device| device.name().ok()))
+            .and_then(|guard| guard.device.as_ref().and_then(|device| device.name().ok()))
             .unwrap_or_else(|| self.interface_name.clone())
     }
 
     pub fn shutdown(&self) -> Result<(), TunError> {
-        let mut guard = self.device.lock().map_err(|_| {
+        let interrupt = {
+            let guard = self.state.lock().map_err(|_| {
+                TunError::DeviceCreationFailed("Failed to acquire device lock".to_string())
+            })?;
+            guard.interrupt.clone()
+        };
+
+        if let Some(interrupt) = interrupt {
+            interrupt
+                .trigger()
+                .map_err(|e: std::io::Error| TunError::DeviceCreationFailed(e.to_string()))?;
+        }
+
+        let mut guard = self.state.lock().map_err(|_| {
             TunError::DeviceCreationFailed("Failed to acquire device lock".to_string())
         })?;
-        *guard = None;
+        guard.device = None;
+        guard.interrupt = None;
         Ok(())
+    }
+}
+
+impl TunDevice {
+    fn device_handles_for_read(&self) -> Result<(Arc<SyncDevice>, Arc<InterruptEvent>), TunError> {
+        let guard = self.state.lock().map_err(|_| {
+            TunError::ReadFailed("Failed to acquire device lock".to_string())
+        })?;
+        let device = guard.device.as_ref().ok_or(TunError::DeviceClosed)?;
+        let interrupt = guard.interrupt.as_ref().ok_or(TunError::DeviceClosed)?;
+        Ok((Arc::clone(device), Arc::clone(interrupt)))
+    }
+
+    fn device_handles_for_write(&self) -> Result<(Arc<SyncDevice>, Arc<InterruptEvent>), TunError> {
+        let guard = self.state.lock().map_err(|_| {
+            TunError::WriteFailed("Failed to acquire device lock".to_string())
+        })?;
+        let device = guard.device.as_ref().ok_or(TunError::DeviceClosed)?;
+        let interrupt = guard.interrupt.as_ref().ok_or(TunError::DeviceClosed)?;
+        Ok((Arc::clone(device), Arc::clone(interrupt)))
     }
 }
 

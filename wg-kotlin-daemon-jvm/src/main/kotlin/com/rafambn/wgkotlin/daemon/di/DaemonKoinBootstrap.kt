@@ -11,6 +11,7 @@ import org.koin.dsl.koinApplication
 import org.koin.dsl.module
 
 internal object DaemonKoinBootstrap {
+    private val lock = Any()
     private val baseModule: Module = module {
         single<ProcessLauncher> { CommonsExecProcessLauncher() }
         single<PlatformAdapter> { PlatformAdapterFactory.fromOs(processLauncher = get()) }
@@ -22,21 +23,26 @@ internal object DaemonKoinBootstrap {
     private var koinApp: org.koin.core.KoinApplication? = null
 
     fun resolveDependencies(overrideModules: List<Module> = emptyList()): DaemonRuntimeDependencies {
-        koinApp?.close()
-        val app = koinApplication {
-            allowOverride(true)
-            modules(listOf(baseModule) + overrideModules)
+        synchronized(lock) {
+            koinApp?.close()
+            val app = koinApplication {
+                allowOverride(true)
+                modules(listOf(baseModule) + overrideModules)
+            }
+            koinApp = app
+            return DaemonRuntimeDependencies(
+                adapter = app.koin.get(),
+                service = app.koin.get(),
+            )
         }
-        koinApp = app
-        return DaemonRuntimeDependencies(
-            adapter = app.koin.get(),
-            service = app.koin.get(),
-        )
     }
 
     fun close() {
-        koinApp?.close()
-        koinApp = null
+        synchronized(lock) {
+            val app = koinApp
+            koinApp = null
+            app?.close()
+        }
     }
 }
 

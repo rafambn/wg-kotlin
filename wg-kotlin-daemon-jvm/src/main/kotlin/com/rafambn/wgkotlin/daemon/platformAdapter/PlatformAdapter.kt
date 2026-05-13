@@ -8,6 +8,7 @@ import com.rafambn.wgkotlin.daemon.command.ProcessLauncher
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.tun.TunHandle
 import java.util.Locale
+import org.slf4j.LoggerFactory
 
 internal interface PlatformAdapter {
     val platformId: String
@@ -34,11 +35,14 @@ internal object PlatformAdapterFactory {
 internal abstract class BasePlatformAdapter(
     protected val processLauncher: ProcessLauncher,
 ) : PlatformAdapter {
+    protected val logger = LoggerFactory.getLogger(javaClass)
+
     protected fun runCommand(
         operationLabel: String,
         binary: CommandBinary,
         arguments: List<String> = emptyList(),
         stdin: String? = null,
+        environment: Map<String, String> = emptyMap(),
         acceptedExitCodes: Set<Int> = setOf(0),
     ) {
         val output = processLauncher.run(
@@ -46,6 +50,7 @@ internal abstract class BasePlatformAdapter(
                 binary = binary,
                 arguments = arguments,
                 stdin = stdin,
+                environment = environment,
             ),
         )
         if (output.exitCode !in acceptedExitCodes) {
@@ -55,6 +60,17 @@ internal abstract class BasePlatformAdapter(
                 stdout = output.stdout,
                 stderr = output.stderr,
             )
+        }
+    }
+
+    protected fun runCleanup(
+        operationLabel: String,
+        primaryFailure: Throwable,
+        cleanup: () -> Unit,
+    ) {
+        runCatching(cleanup).onFailure { cleanupFailure ->
+            primaryFailure.addSuppressed(cleanupFailure)
+            logger.warn("Cleanup `$operationLabel` failed", cleanupFailure)
         }
     }
 }

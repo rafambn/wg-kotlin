@@ -7,13 +7,13 @@ internal class CleanupTunHandle(
     override fun close() {
         var failure: Throwable? = null
         try {
-            delegate.close()
+            cleanup()
         } catch (throwable: Throwable) {
             failure = throwable
         }
 
         try {
-            cleanup()
+            delegate.close()
         } catch (throwable: Throwable) {
             if (failure == null) {
                 failure = throwable

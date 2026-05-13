@@ -9,5 +9,5 @@ path = "src/commonMain/rust/lib.rs"
 
 [dependencies]
 thiserror = "2.0.17"
-tun-rs = "2.8"
+tun-rs = { version = "2.8", features = ["interruptible"] }
 uniffi = { version = "0.29.4", features = ["bindgen"] }

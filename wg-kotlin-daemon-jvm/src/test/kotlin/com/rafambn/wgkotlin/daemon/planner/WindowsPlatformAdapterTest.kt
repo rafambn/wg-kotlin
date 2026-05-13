@@ -63,9 +63,8 @@ class WindowsPlatformAdapterTest {
             )
             assertTrue(
                 invocations.any { invocation ->
-                    invocation.binary == CommandBinary.POWERSHELL && invocation.arguments.any { arg ->
-                        arg.contains("kmpvpn-daemon:wintun-opened")
-                    }
+                    invocation.binary == CommandBinary.POWERSHELL &&
+                        invocation.environment.values.any { value -> value.contains("kmpvpn-daemon:wintun-opened") }
                 },
             )
         } finally {

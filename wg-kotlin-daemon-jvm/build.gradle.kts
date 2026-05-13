@@ -19,7 +19,7 @@ kotlin {
     jvmToolchain(17)
 }
 
-val daemonMainClass = "com.rafambn.wgkotlin.daemon.DaemonMainKt"
+val daemonMainClass = "com.rafambn.wgkotlin.daemon.MainKt"
 
 application {
     mainClass.set(daemonMainClass)

@@ -42,8 +42,26 @@ class DaemonMainTest {
 
     @Test
     fun unixPrivilegeCheckUsesUidInsteadOfUsername() {
-        assertTrue(hasRequiredPrivileges(osName = "Linux", unixUidProvider = { 0L }))
-        assertFalse(hasRequiredPrivileges(osName = "Linux", unixUidProvider = { 1000L }))
+        assertTrue(hasRequiredPrivileges(osName = "Linux", unixUidProvider = { 0L }, linuxEffectiveCapabilitiesProvider = { null }))
+        assertFalse(hasRequiredPrivileges(osName = "Linux", unixUidProvider = { 1000L }, linuxEffectiveCapabilitiesProvider = { null }))
+    }
+
+    @Test
+    fun linuxPrivilegeCheckAcceptsNetAdminCapabilityWithoutRootUid() {
+        assertTrue(
+            hasRequiredPrivileges(
+                osName = "Linux",
+                unixUidProvider = { 1000L },
+                linuxEffectiveCapabilitiesProvider = { 1L shl 12 },
+            ),
+        )
+    }
+
+    @Test
+    fun daemonRpcAuthRequiresMatchingBearerToken() {
+        assertTrue(isAuthorizedDaemonRpcHeader("Bearer secret", "secret"))
+        assertFalse(isAuthorizedDaemonRpcHeader(null, "secret"))
+        assertFalse(isAuthorizedDaemonRpcHeader("Bearer wrong", "secret"))
     }
 
     @Test

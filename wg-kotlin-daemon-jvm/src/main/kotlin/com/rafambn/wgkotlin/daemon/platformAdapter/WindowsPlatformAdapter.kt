@@ -16,6 +16,10 @@ internal class WindowsPlatformAdapter(
         CommandBinary.POWERSHELL,
     )
 
+    override fun cleanupStaleState() {
+        clearAllManagedNrptRulesBlocking()
+    }
+
     override suspend fun startSession(config: TunSessionConfig): TunHandle {
         val primaryAddress = extractPrimaryTunAddress(config)
         val baseHandle = RealTunHandle(
@@ -214,8 +218,17 @@ internal class WindowsPlatformAdapter(
         )
     }
 
+    private fun clearAllManagedNrptRulesBlocking() {
+        runCommandBlocking(
+            operationLabel = "clear-stale-nrpt-rules",
+            binary = CommandBinary.POWERSHELL,
+            arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_ALL_NRPT_RULES_SCRIPT),
+            environment = mapOf(ENV_NRPT_COMMENT_PREFIX to NRPT_COMMENT_PREFIX),
+        )
+    }
+
     private fun ruleComment(interfaceName: String): String {
-        return "kmpvpn-daemon:$interfaceName"
+        return "$NRPT_COMMENT_PREFIX$interfaceName"
     }
 
     private fun splitCidr(cidr: String): Pair<String, Int> {
@@ -252,6 +265,8 @@ internal class WindowsPlatformAdapter(
         const val ENV_DNS_NAMESPACE = "WG_KOTLIN_DNS_NAMESPACE"
         const val ENV_DNS_SERVERS = "WG_KOTLIN_DNS_SERVERS"
         const val ENV_NRPT_COMMENT = "WG_KOTLIN_NRPT_COMMENT"
+        const val ENV_NRPT_COMMENT_PREFIX = "WG_KOTLIN_NRPT_COMMENT_PREFIX"
+        const val NRPT_COMMENT_PREFIX = "kmpvpn-daemon:"
 
         val SET_NRPT_RULE_SCRIPT = """
             ${'$'}ErrorActionPreference = 'Stop'
@@ -262,6 +277,11 @@ internal class WindowsPlatformAdapter(
         val CLEAR_NRPT_RULES_SCRIPT = """
             ${'$'}ErrorActionPreference = 'Stop'
             Get-DnsClientNrptRule | Where-Object { ${'$'}_.Comment -eq ${'$'}env:$ENV_NRPT_COMMENT } | Remove-DnsClientNrptRule -Force
+        """.trimIndent()
+
+        val CLEAR_ALL_NRPT_RULES_SCRIPT = """
+            ${'$'}ErrorActionPreference = 'Stop'
+            Get-DnsClientNrptRule | Where-Object { ${'$'}_.Comment -like "${'$'}env:$ENV_NRPT_COMMENT_PREFIX*" } | Remove-DnsClientNrptRule -Force
         """.trimIndent()
 
         val NOT_FOUND_FAILURE_PATTERNS = listOf(

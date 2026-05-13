@@ -18,8 +18,11 @@ import kotlin.test.assertTrue
 class PlatformAdapterFailureCleanupTest {
 
     @Test
-    fun linuxDoesNotRequireResolvectlAtDaemonStartup() {
-        assertEquals(setOf(CommandBinary.IP), LinuxPlatformAdapter(processLauncher = ProcessLauncher { error("unused") }).requiredBinaries)
+    fun linuxRequiresResolvectlAtDaemonStartup() {
+        assertEquals(
+            setOf(CommandBinary.IP, CommandBinary.RESOLVECTL),
+            LinuxPlatformAdapter(processLauncher = ProcessLauncher { error("unused") }).requiredBinaries,
+        )
     }
 
     @Test

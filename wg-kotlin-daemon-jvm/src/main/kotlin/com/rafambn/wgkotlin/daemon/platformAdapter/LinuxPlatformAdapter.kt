@@ -13,6 +13,7 @@ internal class LinuxPlatformAdapter(
     override val platformId: String = "linux"
     override val requiredBinaries: Set<CommandBinary> = setOf(
         CommandBinary.IP,
+        CommandBinary.RESOLVECTL,
     )
 
     override suspend fun startSession(config: TunSessionConfig): TunHandle {

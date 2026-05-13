@@ -76,13 +76,28 @@ private fun toCommandLine(invocation: ProcessInvocationModel): CommandLine {
 }
 
 private fun mergedEnvironment(overrides: Map<String, String>): Map<String, String>? {
-    if (overrides.isEmpty()) {
-        return null
-    }
-    return System.getenv().toMutableMap().apply {
-        putAll(overrides)
+    val inherited = System.getenv()
+        .filterKeys { key -> key.uppercase() in INHERITED_ENVIRONMENT_ALLOWLIST }
+        .toMutableMap()
+    inherited.putAll(overrides)
+    return if (inherited.isEmpty()) {
+        emptyMap()
+    } else {
+        inherited
     }
 }
+
+private val INHERITED_ENVIRONMENT_ALLOWLIST = setOf(
+    "COMSPEC",
+    "PATH",
+    "PATHEXT",
+    "PSMODULEPATH",
+    "SYSTEMDRIVE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "WINDIR",
+)
 
 /**
  * [ByteArrayOutputStream] that silently drops bytes once [maxBytes] is reached,

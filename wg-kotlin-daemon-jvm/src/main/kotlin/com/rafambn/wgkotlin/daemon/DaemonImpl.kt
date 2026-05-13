@@ -32,6 +32,9 @@ class DaemonImpl internal constructor(
             if (activeSessions.contains(config.interfaceName)) {
                 throw IllegalStateException("Session already active for ${config.interfaceName}")
             }
+            if (activeSessions.size >= MAX_ACTIVE_SESSIONS) {
+                throw IllegalStateException("Daemon session limit reached ($MAX_ACTIVE_SESSIONS)")
+            }
             activeSessions.add(config.interfaceName)
         }
 
@@ -85,3 +88,5 @@ class DaemonImpl internal constructor(
         }
     }.buffer(PACKET_FLOW_BUFFER_CAPACITY)
 }
+
+private const val MAX_ACTIVE_SESSIONS: Int = 16

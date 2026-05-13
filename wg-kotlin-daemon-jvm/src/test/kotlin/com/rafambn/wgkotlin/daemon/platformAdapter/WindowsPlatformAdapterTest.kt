@@ -16,6 +16,25 @@ import kotlin.test.assertTrue
 class WindowsPlatformAdapterTest {
 
     @Test
+    fun cleanupStaleStateRemovesAllManagedNrptRules() {
+        val invocations = mutableListOf<ProcessInvocationModel>()
+        val adapter = WindowsPlatformAdapter(
+            processLauncher = ProcessLauncher { invocation ->
+                invocations += invocation
+                ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
+            },
+        )
+
+        adapter.cleanupStaleState()
+
+        val invocation = invocations.single()
+        assertEquals(CommandBinary.POWERSHELL, invocation.binary)
+        assertTrue(invocation.arguments.last().contains("Get-DnsClientNrptRule"))
+        assertTrue(invocation.arguments.last().contains("Remove-DnsClientNrptRule"))
+        assertEquals("kmpvpn-daemon:", invocation.environment.values.single())
+    }
+
+    @Test
     fun startSessionOpensHandleBeforeRunningCommandsAndUsesOpenedInterfaceName() = runBlocking {
         var handleOpened = false
         val invocations = mutableListOf<ProcessInvocationModel>()

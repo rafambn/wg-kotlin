@@ -9,6 +9,8 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.versionOption
 import com.rafambn.wgkotlin.daemon.di.DaemonKoinBootstrap
 import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
+import io.netty.util.NetUtil
+import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
@@ -41,13 +43,8 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
     }.default(DaemonTransport.DEFAULT_DAEMON_PORT)
 
     override fun run() {
-        val address = bindAddressOrUsageError(host)
-
-        if (!address.isLoopbackAddress) {
-            throw UsageError(
-                "Refusing to bind daemon to non-loopback host `$host`.",
-            )
-        }
+        if (!isLoopbackAddress(host))
+            throw UsageError("Refusing to bind daemon to non-loopback host `$host`.")
 
         val dependencies = DaemonKoinBootstrap.resolveDependencies()
         val adapter = dependencies.adapter
@@ -65,7 +62,11 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
             val isPrivileged = hasRequiredPrivileges()
             if (!isPrivileged) {
                 throw UsageError(
-                    "Daemon must run with network administration privileges for `${adapter.platformId}` commands (current user: `${System.getProperty("user.name")}`).",
+                    "Daemon must run with network administration privileges for `${adapter.platformId}` commands (current user: `${
+                        System.getProperty(
+                            "user.name"
+                        )
+                    }`).",
                 )
             }
 
@@ -90,5 +91,14 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
             closeDependenciesOnce()
             runCatching { Runtime.getRuntime().removeShutdownHook(shutdownHook) }
         }
+    }
+
+    private fun isLoopbackAddress(host: String): Boolean {
+        val normalizedHost = host.trim().removeSurrounding("[", "]")
+        val addressBytes = NetUtil.createByteArrayFromIpAddressString(normalizedHost)
+        return if (addressBytes == null)
+            throw UsageError("Daemon host `$host` is not a valid bind address.")
+        else
+            InetAddress.getByAddress(addressBytes).isLoopbackAddress
     }
 }

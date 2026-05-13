@@ -5,6 +5,7 @@ import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.request.header
 import kotlinx.rpc.krpc.ktor.client.installKrpc
 import kotlinx.rpc.krpc.ktor.client.rpc
 import kotlinx.rpc.krpc.serialization.protobuf.protobuf
@@ -32,7 +33,9 @@ internal object DaemonClientKoinBootstrap {
         factory<DaemonApi> { params ->
             val httpClient = params.get<HttpClient>()
             val config = params.get<DaemonClientConfig>()
-            val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = config.host, port = config.port))
+            val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = config.host, port = config.port)) {
+                header(DaemonTransport.DAEMON_AUTH_HEADER, DaemonTransport.bearerTokenValue(config.token))
+            }
             rpcClient.withService<DaemonApi>()
         }
     }

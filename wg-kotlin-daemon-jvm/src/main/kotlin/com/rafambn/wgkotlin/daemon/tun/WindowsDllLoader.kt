@@ -2,9 +2,12 @@ package com.rafambn.wgkotlin.daemon.tun
 
 import java.io.InputStream
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
+import java.security.MessageDigest
 import java.util.Comparator
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal object WindowsDllLoader {
@@ -64,8 +67,8 @@ internal object WindowsDllLoader {
         archProperty: String = System.getProperty("os.arch"),
         bitsProperty: String? = System.getProperty("sun.arch.data.model"),
     ): Architecture {
-        val arch = archProperty.lowercase()
-        val bits = bitsProperty?.lowercase()
+        val arch = archProperty.lowercase(Locale.ROOT)
+        val bits = bitsProperty?.lowercase(Locale.ROOT)
 
         return when {
             arch.contains("amd64") || arch.contains("x86_64") -> Architecture.X64
@@ -80,27 +83,44 @@ internal object WindowsDllLoader {
         val resourcePath = "/wintun/$sourceDllName"
         val input = openResource(resourcePath)
             ?: throw IllegalStateException("WinTUN DLL not found in resources: $resourcePath")
+        val resourceBytes = input.use(InputStream::readBytes)
+        val resourceHash = sha256Hex(resourceBytes).take(16)
 
         val tempRoot = Path.of(System.getProperty("java.io.tmpdir"))
-        cleanupOldTempDirs(tempRoot)
-        val targetDir = Files.createTempDirectory(tempRoot, TEMP_DIR_PREFIX)
+        val targetDir = tempRoot.resolve("$TEMP_DIR_PREFIX$resourceHash")
+        cleanupOldTempDirs(tempRoot, targetDir)
+        Files.createDirectories(targetDir)
         val targetPath = targetDir.resolve("wintun.dll")
 
-        input.use { stream ->
-            Files.copy(stream, targetPath, StandardCopyOption.REPLACE_EXISTING)
+        val existingBytes = if (Files.isRegularFile(targetPath, LinkOption.NOFOLLOW_LINKS)) {
+            runCatching { Files.readAllBytes(targetPath) }.getOrNull()
+        } else {
+            null
+        }
+        if (existingBytes == null || !MessageDigest.isEqual(existingBytes, resourceBytes)) {
+            Files.write(
+                targetPath,
+                resourceBytes,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE,
+            )
         }
 
-        targetDir.toFile().deleteOnExit()
-        targetPath.toFile().deleteOnExit()
         logger.debug("Extracted WinTUN resource `$sourceDllName` to `$targetPath`")
         return targetPath
     }
 
-    private fun cleanupOldTempDirs(tempRoot: Path) {
+    private fun cleanupOldTempDirs(tempRoot: Path, keepDir: Path) {
+        val normalizedKeepDir = keepDir.toAbsolutePath().normalize()
         runCatching {
             Files.list(tempRoot).use { paths ->
                 paths
-                    .filter { path -> Files.isDirectory(path) && path.fileName.toString().startsWith(TEMP_DIR_PREFIX) }
+                    .filter { path ->
+                        Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS) &&
+                            path.fileName.toString().startsWith(TEMP_DIR_PREFIX) &&
+                            path.toAbsolutePath().normalize() != normalizedKeepDir
+                    }
                     .forEach { path ->
                         runCatching {
                             Files.walk(path).use { entries ->
@@ -122,8 +142,14 @@ internal object WindowsDllLoader {
         return WindowsDllLoader::class.java.getResourceAsStream(resourcePath)
     }
 
+    private fun sha256Hex(bytes: ByteArray): String {
+        return MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { byte -> "%02x".format(byte) }
+    }
+
     private fun isWindows(osName: String = System.getProperty("os.name")): Boolean {
-        return osName.lowercase().contains("win")
+        return osName.lowercase(Locale.ROOT).contains("win")
     }
 
     internal enum class Architecture {

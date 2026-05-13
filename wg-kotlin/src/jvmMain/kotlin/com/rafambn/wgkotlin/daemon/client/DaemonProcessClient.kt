@@ -44,11 +44,16 @@ class DaemonProcessClient(
 data class DaemonClientConfig(
     val host: String = DaemonTransport.DEFAULT_DAEMON_HOST,
     val port: Int,
+    val token: String = DaemonTransport.configuredToken()
+        ?: error(
+            "Daemon auth token is required. Set -D${DaemonTransport.DAEMON_TOKEN_PROPERTY} or ${DaemonTransport.DAEMON_TOKEN_ENV}.",
+        ),
     val timeout: Duration = Duration.ofSeconds(15),
 ) {
     init {
         require(host.isNotBlank()) { "Daemon host cannot be blank" }
         require(port in 1..65535) { "Daemon port must be between 1 and 65535" }
+        require(token.isNotBlank()) { "Daemon token cannot be blank" }
         require(timeout.toMillis() > 0L) { "Timeout must be positive" }
     }
 }

@@ -1,10 +1,9 @@
-package com.rafambn.wgkotlin.daemon.planner
+package com.rafambn.wgkotlin.daemon.platformAdapter
 
 import com.rafambn.wgkotlin.daemon.command.CommandBinary
 import com.rafambn.wgkotlin.daemon.command.ProcessInvocationModel
 import com.rafambn.wgkotlin.daemon.command.ProcessLauncher
 import com.rafambn.wgkotlin.daemon.command.ProcessOutputModel
-import com.rafambn.wgkotlin.daemon.platformAdapter.WindowsPlatformAdapter
 import com.rafambn.wgkotlin.daemon.protocol.DnsConfig
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.tun.RealTunHandle
@@ -67,6 +66,38 @@ class WindowsPlatformAdapterTest {
                         invocation.environment.values.any { value -> value.contains("kmpvpn-daemon:wintun-opened") }
                 },
             )
+        } finally {
+            unmockkConstructor(RealTunHandle::class)
+        }
+    }
+
+    @Test
+    fun startSessionAppliesMtuForIpv6Addresses() = runBlocking {
+        val invocations = mutableListOf<ProcessInvocationModel>()
+        val openedHandle = mockk<RealTunHandle>()
+
+        mockkConstructor(RealTunHandle::class)
+        try {
+            every { openedHandle.interfaceName } returns "wintun-opened"
+            coEvery { anyConstructed<RealTunHandle>().openDevice() } returns openedHandle
+
+            val adapter = WindowsPlatformAdapter(
+                processLauncher = ProcessLauncher { invocation ->
+                    invocations += invocation
+                    ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
+                },
+            )
+
+            adapter.startSession(
+                TunSessionConfig(
+                    interfaceName = "requested-wg0",
+                    mtu = 1400,
+                    addresses = listOf("10.10.10.2/24", "fd00::2/64"),
+                ),
+            )
+
+            assertTrue(invocations.any { invocation -> invocation.arguments.take(3) == listOf("interface", "ipv4", "set") })
+            assertTrue(invocations.any { invocation -> invocation.arguments.take(3) == listOf("interface", "ipv6", "set") })
         } finally {
             unmockkConstructor(RealTunHandle::class)
         }

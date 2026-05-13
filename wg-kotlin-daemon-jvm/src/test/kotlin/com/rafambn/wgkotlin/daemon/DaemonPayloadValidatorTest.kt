@@ -85,4 +85,28 @@ class DaemonPayloadValidatorTest {
             ),
         )
     }
+
+    @Test
+    fun validateSessionRejectsIpv6MtuBelowProtocolMinimum() {
+        assertFailsWith<PayloadValidationException> {
+            DaemonPayloadValidator.validate(
+                TunSessionConfig(
+                    interfaceName = "wg0",
+                    mtu = 1000,
+                    addresses = listOf("fd00::1/64"),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun validateSessionAllowsIpv4MtuBelowIpv6Minimum() {
+        DaemonPayloadValidator.validate(
+            TunSessionConfig(
+                interfaceName = "wg0",
+                mtu = 1000,
+                addresses = listOf("10.0.0.1/24"),
+            ),
+        )
+    }
 }

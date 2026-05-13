@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val MAX_PACKET_FRAME_SIZE: Int = 65535
+private const val PACKET_FLOW_BUFFER_CAPACITY: Int = 64
 
 class DaemonImpl internal constructor(
     private val adapter: PlatformAdapter,
@@ -82,5 +83,5 @@ class DaemonImpl internal constructor(
                 activeSessions.remove(config.interfaceName)
             }
         }
-    }.buffer(0)
+    }.buffer(PACKET_FLOW_BUFFER_CAPACITY)
 }

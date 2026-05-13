@@ -41,7 +41,7 @@ class DaemonClientSmokeTest {
             },
         )
 
-        val client = DaemonProcessClient.create(config = DaemonClientConfig(port = port))
+        val client = DaemonProcessClient.create(config = DaemonClientConfig(port = port, token = "test-token"))
 
         try {
             val packets: List<ByteArray> = client.startSession(
@@ -68,11 +68,11 @@ class DaemonClientSmokeTest {
         }
 
         val first = DaemonProcessClient.create(
-            config = DaemonClientConfig(port = 8787),
+            config = DaemonClientConfig(port = 8787, token = "test-token"),
             overrideModules = listOf(overrideModule),
         )
         val second = DaemonProcessClient.create(
-            config = DaemonClientConfig(port = 8788),
+            config = DaemonClientConfig(port = 8788, token = "test-token"),
             overrideModules = listOf(overrideModule),
         )
 

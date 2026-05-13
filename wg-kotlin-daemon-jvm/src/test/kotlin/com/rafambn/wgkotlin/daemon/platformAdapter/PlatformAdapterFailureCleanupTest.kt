@@ -79,7 +79,7 @@ class PlatformAdapterFailureCleanupTest {
                 1,
                 invocations.count { invocation ->
                     invocation.binary == CommandBinary.SCUTIL &&
-                        invocation.stdin?.contains("remove State:/Network/Service/utun7") == true
+                        invocation.stdin?.contains("remove State:/Network/Interface/utun7") == true
                 },
             )
         } finally {

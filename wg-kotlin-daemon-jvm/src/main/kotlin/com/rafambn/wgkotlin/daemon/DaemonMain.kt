@@ -5,21 +5,29 @@ import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
-import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.versionOption
 import com.rafambn.wgkotlin.daemon.di.DaemonKoinBootstrap
 import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import com.rafambn.wgkotlin.daemon.protocol.DaemonApi
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCallPipeline
+import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import io.ktor.server.request.header
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
+import io.ktor.server.routing.intercept
+import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
 import java.net.InetAddress
+import java.net.UnknownHostException
+import java.security.MessageDigest
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -40,7 +48,7 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
 
     private val host: String by option(
         "--host",
-        help = "Host/interface to bind the daemon listener (default: 127.0.0.1). Non-loopback hosts require --allow-remote.",
+        help = "Loopback host/interface to bind the daemon listener (default: 127.0.0.1).",
     ).convert { value ->
         if (value.isBlank()) {
             fail("Daemon host cannot be blank.")
@@ -62,21 +70,24 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
         parsed
     }.default(DaemonTransport.DEFAULT_DAEMON_PORT)
 
-    private val allowRemote: Boolean by option(
-        "--allow-remote",
-        help = "Allow binding to non-loopback addresses (e.g. 0.0.0.0 or LAN IPs). Use only in trusted environments.",
-    ).flag(default = false)
+    private val token: String? by option(
+        "--token",
+        help = "Bearer token required by daemon clients. Falls back to ${DaemonTransport.DAEMON_TOKEN_PROPERTY} or ${DaemonTransport.DAEMON_TOKEN_ENV}.",
+    ).convert { value ->
+        value.trim().takeIf(String::isNotEmpty)
+            ?: fail("Daemon token cannot be blank.")
+    }
 
     override fun run() {
-        val address = try {
-            InetAddress.getByName(host)
-        } catch (_: Throwable) {
-            throw UsageError("Daemon host `$host` is not a valid bind address.")
-        }
+        val address = bindAddressOrUsageError(host)
+        val daemonToken = resolveDaemonToken(token)
+            ?: throw UsageError(
+                "Daemon auth token is required. Provide --token, -D${DaemonTransport.DAEMON_TOKEN_PROPERTY}, or ${DaemonTransport.DAEMON_TOKEN_ENV}.",
+            )
 
-        if (!allowRemote && !address.isLoopbackAddress) {
+        if (!address.isLoopbackAddress) {
             throw UsageError(
-                "Refusing to bind daemon to non-loopback host `$host`. Pass `--allow-remote` if you really want remote exposure.",
+                "Refusing to bind daemon to non-loopback host `$host`.",
             )
         }
 
@@ -114,6 +125,7 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
                 host = host,
                 port = port,
                 service = dependencies.service,
+                daemonToken = daemonToken,
             ).start(wait = true)
         } finally {
             closeDependenciesOnce()
@@ -127,7 +139,7 @@ internal fun hasRequiredPrivileges(
     unixUidProvider: () -> Long = ::currentUnixUid,
     commandRunner: (List<String>) -> Boolean = ::runCommandSuccessfully,
 ): Boolean {
-    val normalizedOs = osName.lowercase()
+    val normalizedOs = osName.lowercase(Locale.ROOT)
     return when {
         normalizedOs.contains("win") -> {
             val script =
@@ -200,15 +212,16 @@ internal fun createDaemonServer(
     host: String,
     port: Int,
     service: DaemonApi,
+    daemonToken: String,
 ) = embeddedServer(
     factory = Netty,
     host = host,
     port = port,
-    module = { module(service = service) },
+    module = { module(service = service, daemonToken = daemonToken) },
 )
 
 internal fun isBinaryAvailableOnPath(executable: String): Boolean {
-    val lookupCommand = if (System.getProperty("os.name").lowercase().contains("win")) {
+    val lookupCommand = if (System.getProperty("os.name").lowercase(Locale.ROOT).contains("win")) {
         listOf("where", executable)
     } else {
         listOf("which", executable)
@@ -220,6 +233,7 @@ internal fun isBinaryAvailableOnPath(executable: String): Boolean {
 @OptIn(ExperimentalSerializationApi::class)
 fun Application.module(
     service: DaemonApi,
+    daemonToken: String,
 ) {
     install(WebSockets)
     install(Krpc) {
@@ -232,15 +246,48 @@ fun Application.module(
         get("/version") {
             call.respondText(DAEMON_VERSION)
         }
-        rpc(DaemonTransport.DAEMON_RPC_PATH) {
-            rpcConfig {
-                serialization {
-                    protobuf()
+        route(DaemonTransport.DAEMON_RPC_PATH) {
+            intercept(ApplicationCallPipeline.Plugins) {
+                if (!isAuthorizedDaemonCall(call.request.header(DaemonTransport.DAEMON_AUTH_HEADER), daemonToken)) {
+                    call.respondText("Unauthorized", status = HttpStatusCode.Unauthorized)
+                    finish()
+                    return@intercept
                 }
             }
-            registerService<DaemonApi> {
-                service
+            rpc {
+                rpcConfig {
+                    serialization {
+                        protobuf()
+                    }
+                }
+                registerService<DaemonApi> {
+                    service
+                }
             }
         }
     }
+}
+
+internal fun bindAddressOrUsageError(host: String): InetAddress {
+    return try {
+        InetAddress.getByName(host)
+    } catch (_: UnknownHostException) {
+        throw UsageError("Daemon host `$host` is not a valid bind address.")
+    }
+}
+
+internal fun resolveDaemonToken(
+    cliToken: String?,
+    configuredTokenProvider: () -> String? = DaemonTransport::configuredToken,
+): String? {
+    return cliToken?.trim()?.takeIf(String::isNotEmpty) ?: configuredTokenProvider()
+}
+
+internal fun isAuthorizedDaemonCall(actualHeader: String?, expectedToken: String): Boolean {
+    val actual = actualHeader ?: return false
+    val expected = DaemonTransport.bearerTokenValue(expectedToken)
+    return MessageDigest.isEqual(
+        actual.toByteArray(Charsets.UTF_8),
+        expected.toByteArray(Charsets.UTF_8),
+    )
 }

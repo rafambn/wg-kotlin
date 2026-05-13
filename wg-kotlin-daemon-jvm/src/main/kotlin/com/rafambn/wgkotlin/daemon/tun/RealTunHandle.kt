@@ -93,14 +93,25 @@ internal class RealTunHandle(
 
         logger.info("Closing TUN device: $openedInterfaceName")
 
-        try {
-            onClose()
-            // Close the Rust TUN device via uniffi
-            tunDevice?.shutdown()
-            tunDevice?.close()
-            tunDevice = null
-        } catch (e: Exception) {
-            logger.error("Error closing TUN device", e)
+        var failure: Throwable? = null
+        fun captureCloseFailure(block: () -> Unit) {
+            runCatching(block).onFailure { throwable ->
+                val existingFailure = failure
+                if (existingFailure == null) {
+                    failure = throwable
+                } else {
+                    existingFailure.addSuppressed(throwable)
+                }
+            }
+        }
+
+        captureCloseFailure { onClose() }
+        captureCloseFailure { tunDevice?.shutdown() }
+        captureCloseFailure { tunDevice?.close() }
+        tunDevice = null
+
+        failure?.let { throwable ->
+            logger.error("Error closing TUN device", throwable)
         }
     }
 }

@@ -1,7 +1,9 @@
 package com.rafambn.wgkotlin.daemon
 
 import com.github.ajalt.clikt.core.PrintMessage
+import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.core.parse
+import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -43,5 +45,25 @@ class DaemonMainTest {
     fun unixPrivilegeCheckUsesUidInsteadOfUsername() {
         assertTrue(hasRequiredPrivileges(osName = "Linux", unixUidProvider = { 0L }))
         assertFalse(hasRequiredPrivileges(osName = "Linux", unixUidProvider = { 1000L }))
+    }
+
+    @Test
+    fun bindAddressRejectsUnknownHostsWithoutCatchingFatalErrors() {
+        assertFailsWith<UsageError> {
+            bindAddressOrUsageError("not a host name.invalid")
+        }
+    }
+
+    @Test
+    fun daemonTokenUsesCliValueBeforeConfiguredValue() {
+        assertEquals("cli-secret", resolveDaemonToken(" cli-secret ") { "configured-secret" })
+        assertEquals("configured-secret", resolveDaemonToken(null) { "configured-secret" })
+    }
+
+    @Test
+    fun daemonAuthRequiresExpectedBearerToken() {
+        assertTrue(isAuthorizedDaemonCall(DaemonTransport.bearerTokenValue("secret"), "secret"))
+        assertFalse(isAuthorizedDaemonCall(null, "secret"))
+        assertFalse(isAuthorizedDaemonCall(DaemonTransport.bearerTokenValue("wrong"), "secret"))
     }
 }

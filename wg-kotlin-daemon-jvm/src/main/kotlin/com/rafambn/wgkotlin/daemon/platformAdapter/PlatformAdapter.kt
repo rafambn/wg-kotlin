@@ -8,6 +8,8 @@ import com.rafambn.wgkotlin.daemon.command.ProcessLauncher
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.tun.TunHandle
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 
 internal interface PlatformAdapter {
@@ -37,7 +39,27 @@ internal abstract class BasePlatformAdapter(
 ) : PlatformAdapter {
     protected val logger = LoggerFactory.getLogger(javaClass)
 
-    protected fun runCommand(
+    protected suspend fun runCommand(
+        operationLabel: String,
+        binary: CommandBinary,
+        arguments: List<String> = emptyList(),
+        stdin: String? = null,
+        environment: Map<String, String> = emptyMap(),
+        acceptedExitCodes: Set<Int> = setOf(0),
+    ) {
+        withContext(Dispatchers.IO) {
+            runCommandBlocking(
+                operationLabel = operationLabel,
+                binary = binary,
+                arguments = arguments,
+                stdin = stdin,
+                environment = environment,
+                acceptedExitCodes = acceptedExitCodes,
+            )
+        }
+    }
+
+    protected fun runCommandBlocking(
         operationLabel: String,
         binary: CommandBinary,
         arguments: List<String> = emptyList(),
@@ -63,7 +85,20 @@ internal abstract class BasePlatformAdapter(
         }
     }
 
-    protected fun runCleanup(
+    protected suspend fun runSuspendCleanup(
+        operationLabel: String,
+        primaryFailure: Throwable,
+        cleanup: suspend () -> Unit,
+    ) {
+        try {
+            cleanup()
+        } catch (cleanupFailure: Throwable) {
+            primaryFailure.addSuppressed(cleanupFailure)
+            logger.warn("Cleanup `$operationLabel` failed", cleanupFailure)
+        }
+    }
+
+    protected fun runBlockingCleanup(
         operationLabel: String,
         primaryFailure: Throwable,
         cleanup: () -> Unit,

@@ -6,6 +6,7 @@ import io.netty.util.NetUtil
 
 internal object DaemonPayloadValidator {
     private const val MIN_MTU = 576
+    private const val MIN_IPV6_MTU = 1280
     private const val MAX_MTU = 65535
     private const val MAX_DNS_DOMAINS = 64
     private const val MAX_DNS_SERVERS = 64
@@ -36,7 +37,7 @@ internal object DaemonPayloadValidator {
         validateInterfaceName(config.interfaceName)
         validateAddresses(config.addresses)
         validateRoutes(config.routes)
-        config.mtu?.let(::validateMtu)
+        config.mtu?.let { mtu -> validateMtuForAddresses(mtu, config.addresses) }
         validateDns(config.dns)
     }
 
@@ -73,6 +74,16 @@ internal object DaemonPayloadValidator {
     fun validateAddresses(addresses: List<String>) {
         validateMaxCount(fieldName = "addresses", count = addresses.size, max = MAX_ADDRESSES)
         validateCidrs(fieldName = "addresses", values = addresses)
+    }
+
+    private fun validateMtuForAddresses(mtu: Int, addresses: List<String>) {
+        validateMtu(mtu)
+        val hasIpv6Address = addresses
+            .map { address -> address.trim().substringBefore("/") }
+            .any(NetUtil::isValidIpV6Address)
+        if (hasIpv6Address && mtu < MIN_IPV6_MTU) {
+            throw PayloadValidationException("MTU must be at least $MIN_IPV6_MTU when IPv6 addresses are configured")
+        }
     }
 
     fun validateRoutes(routes: List<String>) {

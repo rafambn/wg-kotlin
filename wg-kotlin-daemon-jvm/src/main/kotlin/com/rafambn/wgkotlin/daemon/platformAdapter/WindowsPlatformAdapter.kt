@@ -27,21 +27,40 @@ internal class WindowsPlatformAdapter(
             val interfaceName = baseHandle.interfaceName
             val addresses = normalizeCidrs(config.addresses)
             val routes = normalizeCidrs(config.routes)
+            val hasIpv4Address = addresses.any { address -> !isIpv6AddressLiteral(address) }
+            val hasIpv6Address = addresses.any(::isIpv6AddressLiteral)
 
             config.mtu?.let { mtu ->
-                runCommand(
-                    operationLabel = "apply-mtu",
-                    binary = CommandBinary.NETSH,
-                    arguments = listOf(
-                        "interface",
-                        "ipv4",
-                        "set",
-                        "subinterface",
-                        interfaceName,
-                        "mtu=$mtu",
-                        "store=active",
-                    ),
-                )
+                if (hasIpv4Address) {
+                    runCommand(
+                        operationLabel = "apply-ipv4-mtu",
+                        binary = CommandBinary.NETSH,
+                        arguments = listOf(
+                            "interface",
+                            "ipv4",
+                            "set",
+                            "subinterface",
+                            interfaceName,
+                            "mtu=$mtu",
+                            "store=active",
+                        ),
+                    )
+                }
+                if (hasIpv6Address) {
+                    runCommand(
+                        operationLabel = "apply-ipv6-mtu",
+                        binary = CommandBinary.NETSH,
+                        arguments = listOf(
+                            "interface",
+                            "ipv6",
+                            "set",
+                            "subinterface",
+                            interfaceName,
+                            "mtu=$mtu",
+                            "store=active",
+                        ),
+                    )
+                }
             }
 
             addresses.forEach { address ->
@@ -144,17 +163,26 @@ internal class WindowsPlatformAdapter(
             }
             CleanupTunHandle(
                 delegate = baseHandle,
-                cleanup = { clearNrptRules(interfaceName) },
+                cleanup = { clearNrptRulesBlocking(interfaceName) },
             )
         } catch (failure: Throwable) {
-            runCleanup("close-tun-handle", failure) { baseHandle.close() }
-            runCleanup("clear-nrpt-rules", failure) { clearNrptRules(baseHandle.interfaceName) }
+            runBlockingCleanup("close-tun-handle", failure) { baseHandle.close() }
+            runSuspendCleanup("clear-nrpt-rules", failure) { clearNrptRules(baseHandle.interfaceName) }
             throw failure
         }
     }
 
-    private fun clearNrptRules(interfaceName: String) {
+    private suspend fun clearNrptRules(interfaceName: String) {
         runCommand(
+            operationLabel = "clear-nrpt-rules",
+            binary = CommandBinary.POWERSHELL,
+            arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_NRPT_RULES_SCRIPT),
+            environment = mapOf(ENV_NRPT_COMMENT to ruleComment(interfaceName)),
+        )
+    }
+
+    private fun clearNrptRulesBlocking(interfaceName: String) {
+        runCommandBlocking(
             operationLabel = "clear-nrpt-rules",
             binary = CommandBinary.POWERSHELL,
             arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_NRPT_RULES_SCRIPT),

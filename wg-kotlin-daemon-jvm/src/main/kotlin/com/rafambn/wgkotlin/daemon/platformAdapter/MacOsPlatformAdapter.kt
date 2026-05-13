@@ -102,17 +102,29 @@ internal class MacOsPlatformAdapter(
             }
             CleanupTunHandle(
                 delegate = handle,
-                cleanup = { clearDnsEntries(interfaceName) },
+                cleanup = { clearDnsEntriesBlocking(interfaceName) },
             )
         } catch (failure: Throwable) {
-            runCleanup("close-tun-handle", failure) { handle.close() }
-            runCleanup("clear-dns", failure) { clearDnsEntries(handle.interfaceName) }
+            runBlockingCleanup("close-tun-handle", failure) { handle.close() }
+            runSuspendCleanup("clear-dns", failure) { clearDnsEntries(handle.interfaceName) }
             throw failure
         }
     }
 
-    private fun clearDnsEntries(interfaceName: String) {
+    private suspend fun clearDnsEntries(interfaceName: String) {
         runCommand(
+            operationLabel = "clear-dns",
+            binary = CommandBinary.SCUTIL,
+            stdin = buildString {
+                appendLine("remove ${resolverPath(interfaceName)}")
+                appendLine("remove ${resolverRootPath(interfaceName)}")
+                appendLine("quit")
+            },
+        )
+    }
+
+    private fun clearDnsEntriesBlocking(interfaceName: String) {
+        runCommandBlocking(
             operationLabel = "clear-dns",
             binary = CommandBinary.SCUTIL,
             stdin = buildString {
@@ -130,10 +142,10 @@ internal class MacOsPlatformAdapter(
     }
 
     private fun resolverPath(interfaceName: String): String {
-        return "State:/Network/Service/$interfaceName/DNS"
+        return "State:/Network/Interface/$interfaceName/DNS"
     }
 
     private fun resolverRootPath(interfaceName: String): String {
-        return "State:/Network/Service/$interfaceName"
+        return "State:/Network/Interface/$interfaceName"
     }
 }

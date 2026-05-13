@@ -8,6 +8,7 @@ import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.request.header
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
@@ -32,6 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class DaemonBackedInterfaceCommandExecutor(
     private val host: String,
     private val port: Int,
+    private val token: String,
 ) : InterfaceCommandExecutor {
     private val client: DaemonProcessClient by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         val httpClient = HttpClient(CIO) {
@@ -42,7 +44,9 @@ class DaemonBackedInterfaceCommandExecutor(
                 }
             }
         }
-        val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = host, port = port))
+        val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = host, port = port)) {
+            header(DaemonTransport.DAEMON_AUTH_HEADER, DaemonTransport.bearerTokenValue(token))
+        }
         DaemonProcessClient(
             service = rpcClient.withService<DaemonApi>(),
             resourceCloser = { httpClient.close() },

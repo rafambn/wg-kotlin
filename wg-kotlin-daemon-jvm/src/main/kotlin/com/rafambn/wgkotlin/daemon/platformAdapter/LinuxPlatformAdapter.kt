@@ -87,17 +87,25 @@ internal class LinuxPlatformAdapter(
             }
             CleanupTunHandle(
                 delegate = handle,
-                cleanup = { revertDns(interfaceName) },
+                cleanup = { revertDnsBlocking(interfaceName) },
             )
         } catch (failure: Throwable) {
-            runCleanup("revert-dns", failure) { revertDns(handle.interfaceName) }
-            runCleanup("close-tun-handle", failure) { handle.close() }
+            runSuspendCleanup("revert-dns", failure) { revertDns(handle.interfaceName) }
+            runBlockingCleanup("close-tun-handle", failure) { handle.close() }
             throw failure
         }
     }
 
-    private fun revertDns(interfaceName: String) {
+    private suspend fun revertDns(interfaceName: String) {
         runCommand(
+            operationLabel = "revert-dns",
+            binary = CommandBinary.RESOLVECTL,
+            arguments = listOf("revert", interfaceName),
+        )
+    }
+
+    private fun revertDnsBlocking(interfaceName: String) {
+        runCommandBlocking(
             operationLabel = "revert-dns",
             binary = CommandBinary.RESOLVECTL,
             arguments = listOf("revert", interfaceName),

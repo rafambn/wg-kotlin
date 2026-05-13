@@ -2,6 +2,7 @@ package com.rafambn.wgkotlin.iface
 
 import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
+import java.util.Locale
 import org.koin.core.module.Module
 import org.koin.core.parameter.parametersOf
 import org.koin.dsl.koinApplication
@@ -15,12 +16,16 @@ internal object JvmInterfaceKoinBootstrap {
                 System.getProperty(
                     JvmInterfaceProperties.INTERFACE_MODE,
                     JvmInterfaceProperties.INTERFACE_MODE_PRODUCTION,
-                ).lowercase()
+                ).lowercase(Locale.ROOT)
             ) {
                 JvmInterfaceProperties.INTERFACE_MODE_IN_MEMORY -> InMemoryInterfaceCommandExecutor()
                 else -> DaemonBackedInterfaceCommandExecutor(
                     host = System.getProperty(JvmInterfaceProperties.DAEMON_HOST, DaemonTransport.DEFAULT_DAEMON_HOST),
                     port = System.getProperty(JvmInterfaceProperties.DAEMON_PORT)?.toIntOrNull() ?: DaemonTransport.DEFAULT_DAEMON_PORT,
+                    token = DaemonTransport.configuredToken()
+                        ?: error(
+                            "Daemon auth token is required. Set -D${DaemonTransport.DAEMON_TOKEN_PROPERTY} or ${DaemonTransport.DAEMON_TOKEN_ENV}.",
+                        ),
                 )
             }
         }

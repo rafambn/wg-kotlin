@@ -164,7 +164,7 @@ class PlatformAdapterFailureCleanupTest {
 
             verify(exactly = 1) { openedHandle.close() }
             assertEquals(
-                2,
+                3,
                 invocations.count { invocation ->
                     invocation.binary == CommandBinary.POWERSHELL &&
                         invocation.arguments.last().contains("Get-DnsClientNrptRule")

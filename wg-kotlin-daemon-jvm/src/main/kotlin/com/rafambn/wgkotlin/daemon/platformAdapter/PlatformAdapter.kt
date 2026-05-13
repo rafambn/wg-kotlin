@@ -17,8 +17,6 @@ internal interface PlatformAdapter {
     val platformId: String
     val requiredBinaries: Set<CommandBinary>
 
-    fun cleanupStaleState() {}
-
     suspend fun startSession(config: TunSessionConfig): TunHandle
 }
 

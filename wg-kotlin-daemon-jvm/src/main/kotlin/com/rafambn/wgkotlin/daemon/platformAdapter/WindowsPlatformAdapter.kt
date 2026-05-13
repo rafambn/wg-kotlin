@@ -16,7 +16,7 @@ internal class WindowsPlatformAdapter(
         CommandBinary.POWERSHELL,
     )
 
-    override fun cleanupStaleState() {
+    init {
         clearAllManagedNrptRulesBlocking()
     }
 

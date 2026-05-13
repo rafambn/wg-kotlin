@@ -2,7 +2,6 @@ package com.rafambn.wgkotlin.daemon
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.UsageError
-import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
@@ -11,6 +10,9 @@ import com.rafambn.wgkotlin.daemon.di.DaemonKoinBootstrap
 import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import io.netty.util.NetUtil
 import java.net.InetAddress
+import java.util.Locale
+import java.util.concurrent.TimeUnit
+
 internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
     init {
         versionOption(version = DAEMON_VERSION, names = setOf("--version", "-v"))
@@ -44,23 +46,15 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
         if (!isLoopbackAddress(host))
             throw UsageError("Refusing to bind daemon to non-loopback host `$host`.")
 
+        if (!isPrivileged())
+            throw UsageError("Daemon must run in privileged mode")
+
         val dependencies = DaemonKoinBootstrap.resolveDependencies()
         val adapter = dependencies.adapter
 
         Runtime.getRuntime().addShutdownHook(
             Thread({ DaemonKoinBootstrap.close() }, "wg-kotlin-daemon-koin-shutdown")
         )
-
-        val isPrivileged = hasRequiredPrivileges()
-        if (!isPrivileged) {
-            throw UsageError(
-                "Daemon must run with network administration privileges for `${adapter.platformId}` commands (current user: `${
-                    System.getProperty(
-                        "user.name"
-                    )
-                }`).",
-            )
-        }
 
         val missingBinaries = adapter.requiredBinaries
             .filterNot { binary -> isBinaryAvailableOnPath(binary.executable) }
@@ -88,5 +82,51 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
             throw UsageError("Daemon host `$host` is not a valid bind address.")
         else
             InetAddress.getByAddress(addressBytes).isLoopbackAddress
+    }
+
+    private fun isPrivileged(
+        osName: String = System.getProperty("os.name"),
+        unixUidProvider: () -> Long = ::currentUnixUid,
+    ): Boolean {
+        val os = osName.lowercase(Locale.ROOT)
+        val isRoot = runCatching { unixUidProvider() == 0L }.getOrDefault(false)
+        return when {
+            "win" in os ->
+                runCommandSuccessfully(
+                    listOf(
+                        "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                        "${'$'}i=[Security.Principal.WindowsIdentity]::GetCurrent();${'$'}p=[Security.Principal.WindowsPrincipal]::new(${'$'}i);" +
+                                "if(${'$'}i.IsSystem -or ${'$'}p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){exit 0}else{exit 1}"
+                    )
+                )
+
+            else -> isRoot
+        }
+    }
+
+    private fun isBinaryAvailableOnPath(executable: String): Boolean {
+        val isWin = System.getProperty("os.name").lowercase(Locale.ROOT).contains("win")
+        return runCommandSuccessfully(listOf(if (isWin) "where" else "which", executable))
+    }
+
+    private fun runCommandSuccessfully(command: List<String>): Boolean = runCatching {
+        ProcessBuilder(command)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start()
+            .let {
+                it.outputStream.close()
+                it.waitFor(2, TimeUnit.SECONDS) && it.exitValue() == 0
+            }
+    }.getOrDefault(false)
+
+    private fun currentUnixUid(): Long {
+        val p = ProcessBuilder("id", "-u").redirectErrorStream(true).start()
+        p.outputStream.close()
+        if (!p.waitFor(2, TimeUnit.SECONDS)) {
+            p.destroyForcibly()
+            throw IllegalStateException("id -u timed out")
+        }
+        return p.inputStream.bufferedReader().use { it.readText().trim().toLong() }
     }
 }

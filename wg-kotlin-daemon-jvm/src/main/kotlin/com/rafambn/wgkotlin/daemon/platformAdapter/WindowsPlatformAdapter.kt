@@ -23,10 +23,10 @@ internal class WindowsPlatformAdapter(
             ipAddress = primaryAddress.address,
             prefixLength = primaryAddress.prefixLength,
         ).openDevice()
+        val addresses = normalizeCidrs(config.addresses)
+        val routes = normalizeCidrs(config.routes)
         return try {
             val interfaceName = baseHandle.interfaceName
-            val addresses = normalizeCidrs(config.addresses)
-            val routes = normalizeCidrs(config.routes)
             val hasIpv4Address = addresses.any { address -> !isIpv6AddressLiteral(address) }
             val hasIpv6Address = addresses.any(::isIpv6AddressLiteral)
 
@@ -76,7 +76,7 @@ internal class WindowsPlatformAdapter(
                             "interface=$interfaceName",
                             "address=$address",
                         ),
-                        acceptedExitCodes = setOf(0, 1),
+                        ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
                     )
                     runCommand(
                         operationLabel = "add-address",
@@ -104,7 +104,7 @@ internal class WindowsPlatformAdapter(
                             "address=$ip",
                             "gateway=all",
                         ),
-                        acceptedExitCodes = setOf(0, 1),
+                        ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
                     )
                     runCommand(
                         operationLabel = "add-address",
@@ -123,18 +123,8 @@ internal class WindowsPlatformAdapter(
             }
 
             routes.forEach { route ->
-                runCommand(
-                    operationLabel = "add-route",
-                    binary = CommandBinary.NETSH,
-                    arguments = listOf(
-                        "interface",
-                        if (route.substringBefore("/").contains(":")) "ipv6" else "ipv4",
-                        "add",
-                        "route",
-                        "prefix=$route",
-                        "interface=$interfaceName",
-                    ),
-                )
+                deleteRoute(route = route, interfaceName = interfaceName)
+                addRoute(route = route, interfaceName = interfaceName)
             }
 
             clearNrptRules(interfaceName)
@@ -163,12 +153,46 @@ internal class WindowsPlatformAdapter(
             }
             CleanupTunHandle(
                 delegate = baseHandle,
-                cleanup = { clearNrptRulesBlocking(interfaceName) },
+                cleanup = {
+                    deleteRoutesBlocking(routes = routes, interfaceName = interfaceName)
+                    clearNrptRulesBlocking(interfaceName)
+                },
             )
         } catch (failure: Throwable) {
+            routes.asReversed().forEach { route ->
+                runSuspendCleanup("delete-route", failure) { deleteRoute(route = route, interfaceName = baseHandle.interfaceName) }
+            }
             runBlockingCleanup("close-tun-handle", failure) { baseHandle.close() }
             runSuspendCleanup("clear-nrpt-rules", failure) { clearNrptRules(baseHandle.interfaceName) }
             throw failure
+        }
+    }
+
+    private suspend fun addRoute(route: String, interfaceName: String) {
+        runCommand(
+            operationLabel = "add-route",
+            binary = CommandBinary.NETSH,
+            arguments = routeArguments(command = "add", route = route, interfaceName = interfaceName),
+        )
+    }
+
+    private suspend fun deleteRoute(route: String, interfaceName: String) {
+        runCommand(
+            operationLabel = "delete-route",
+            binary = CommandBinary.NETSH,
+            arguments = routeArguments(command = "delete", route = route, interfaceName = interfaceName),
+            ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
+        )
+    }
+
+    private fun deleteRoutesBlocking(routes: List<String>, interfaceName: String) {
+        routes.asReversed().forEach { route ->
+            runCommandBlocking(
+                operationLabel = "delete-route",
+                binary = CommandBinary.NETSH,
+                arguments = routeArguments(command = "delete", route = route, interfaceName = interfaceName),
+                ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
+            )
         }
     }
 
@@ -203,6 +227,17 @@ internal class WindowsPlatformAdapter(
         return value.substringBefore("/").contains(":")
     }
 
+    private fun routeArguments(command: String, route: String, interfaceName: String): List<String> {
+        return listOf(
+            "interface",
+            if (isIpv6AddressLiteral(route)) "ipv6" else "ipv4",
+            command,
+            "route",
+            "prefix=$route",
+            "interface=$interfaceName",
+        )
+    }
+
     private fun prefixToMask(prefix: Int): String {
         val mask = if (prefix == 0) {
             0L
@@ -228,5 +263,13 @@ internal class WindowsPlatformAdapter(
             ${'$'}ErrorActionPreference = 'Stop'
             Get-DnsClientNrptRule | Where-Object { ${'$'}_.Comment -eq ${'$'}env:$ENV_NRPT_COMMENT } | Remove-DnsClientNrptRule -Force
         """.trimIndent()
+
+        val NOT_FOUND_FAILURE_PATTERNS = listOf(
+            Regex("not found", RegexOption.IGNORE_CASE),
+            Regex("cannot find", RegexOption.IGNORE_CASE),
+            Regex("does not exist", RegexOption.IGNORE_CASE),
+            Regex("element not found", RegexOption.IGNORE_CASE),
+            Regex("object was not found", RegexOption.IGNORE_CASE),
+        )
     }
 }

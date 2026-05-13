@@ -13,7 +13,6 @@ internal class LinuxPlatformAdapter(
     override val platformId: String = "linux"
     override val requiredBinaries: Set<CommandBinary> = setOf(
         CommandBinary.IP,
-        CommandBinary.RESOLVECTL,
     )
 
     override suspend fun startSession(config: TunSessionConfig): TunHandle {
@@ -23,10 +22,20 @@ internal class LinuxPlatformAdapter(
             ipAddress = primaryAddress.address,
             prefixLength = primaryAddress.prefixLength,
         ).openDevice()
+        val addresses = normalizeCidrs(config.addresses)
+        val routes = normalizeCidrs(config.routes)
+        val routingDomains = config.dns.searchDomains
+            .map { domain -> domain.trim() }
+            .filter { domain -> domain.isNotBlank() }
+            .distinct()
+            .map { domain -> "~${domain.removePrefix(".")}" }
+        val dnsServers = config.dns.servers
+            .map { server -> server.trim() }
+            .filter { server -> server.isNotBlank() }
+            .distinct()
+        val hasDnsConfiguration = routingDomains.isNotEmpty() && dnsServers.isNotEmpty()
         return try {
             val interfaceName = handle.interfaceName
-            val addresses = normalizeCidrs(config.addresses)
-            val routes = normalizeCidrs(config.routes)
 
             config.mtu?.let { mtu ->
                 runCommand(
@@ -50,30 +59,10 @@ internal class LinuxPlatformAdapter(
             }
 
             routes.forEach { route ->
-                runCommand(
-                    operationLabel = "add-route",
-                    binary = CommandBinary.IP,
-                    arguments = listOf("route", "replace", route, "dev", interfaceName),
-                )
+                addRoute(route = route, interfaceName = interfaceName)
             }
 
-            val routingDomains = config.dns.searchDomains
-                .map { domain -> domain.trim() }
-                .filter { domain -> domain.isNotBlank() }
-                .distinct()
-                .map { domain -> "~${domain.removePrefix(".")}" }
-            val dnsServers = config.dns.servers
-                .map { server -> server.trim() }
-                .filter { server -> server.isNotBlank() }
-                .distinct()
-
-            if (routingDomains.isEmpty() || dnsServers.isEmpty()) {
-                runCommand(
-                    operationLabel = "revert-dns",
-                    binary = CommandBinary.RESOLVECTL,
-                    arguments = listOf("revert", interfaceName),
-                )
-            } else {
+            if (hasDnsConfiguration) {
                 runCommand(
                     operationLabel = "set-dns",
                     binary = CommandBinary.RESOLVECTL,
@@ -87,12 +76,50 @@ internal class LinuxPlatformAdapter(
             }
             CleanupTunHandle(
                 delegate = handle,
-                cleanup = { revertDnsBlocking(interfaceName) },
+                cleanup = {
+                    deleteRoutesBlocking(routes = routes, interfaceName = interfaceName)
+                    if (hasDnsConfiguration) {
+                        revertDnsBlocking(interfaceName)
+                    }
+                },
             )
         } catch (failure: Throwable) {
-            runSuspendCleanup("revert-dns", failure) { revertDns(handle.interfaceName) }
+            routes.asReversed().forEach { route ->
+                runSuspendCleanup("delete-route", failure) { deleteRoute(route = route, interfaceName = handle.interfaceName) }
+            }
+            if (hasDnsConfiguration) {
+                runSuspendCleanup("revert-dns", failure) { revertDns(handle.interfaceName) }
+            }
             runBlockingCleanup("close-tun-handle", failure) { handle.close() }
             throw failure
+        }
+    }
+
+    private suspend fun addRoute(route: String, interfaceName: String) {
+        runCommand(
+            operationLabel = "add-route",
+            binary = CommandBinary.IP,
+            arguments = listOf("route", "replace", route, "dev", interfaceName),
+        )
+    }
+
+    private suspend fun deleteRoute(route: String, interfaceName: String) {
+        runCommand(
+            operationLabel = "delete-route",
+            binary = CommandBinary.IP,
+            arguments = listOf("route", "delete", route, "dev", interfaceName),
+            ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
+        )
+    }
+
+    private fun deleteRoutesBlocking(routes: List<String>, interfaceName: String) {
+        routes.asReversed().forEach { route ->
+            runCommandBlocking(
+                operationLabel = "delete-route",
+                binary = CommandBinary.IP,
+                arguments = listOf("route", "delete", route, "dev", interfaceName),
+                ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
+            )
         }
     }
 
@@ -109,6 +136,14 @@ internal class LinuxPlatformAdapter(
             operationLabel = "revert-dns",
             binary = CommandBinary.RESOLVECTL,
             arguments = listOf("revert", interfaceName),
+        )
+    }
+
+    private companion object {
+        val NOT_FOUND_FAILURE_PATTERNS = listOf(
+            Regex("not found", RegexOption.IGNORE_CASE),
+            Regex("no such process", RegexOption.IGNORE_CASE),
+            Regex("cannot find", RegexOption.IGNORE_CASE),
         )
     }
 }

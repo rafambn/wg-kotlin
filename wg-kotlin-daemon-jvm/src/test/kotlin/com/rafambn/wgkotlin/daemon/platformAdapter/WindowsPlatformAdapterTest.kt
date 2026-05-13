@@ -66,6 +66,10 @@ class WindowsPlatformAdapterTest {
                         invocation.environment.values.any { value -> value.contains("kmpvpn-daemon:wintun-opened") }
                 },
             )
+            val routeCommands = invocations
+                .filter { invocation -> invocation.binary == CommandBinary.NETSH && invocation.arguments.contains("route") }
+                .map { invocation -> invocation.arguments[2] }
+            assertEquals(listOf("delete", "add"), routeCommands)
         } finally {
             unmockkConstructor(RealTunHandle::class)
         }

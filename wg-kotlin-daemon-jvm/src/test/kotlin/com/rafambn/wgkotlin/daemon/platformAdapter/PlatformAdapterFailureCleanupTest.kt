@@ -13,8 +13,14 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class PlatformAdapterFailureCleanupTest {
+
+    @Test
+    fun linuxDoesNotRequireResolvectlAtDaemonStartup() {
+        assertEquals(setOf(CommandBinary.IP), LinuxPlatformAdapter(processLauncher = ProcessLauncher { error("unused") }).requiredBinaries)
+    }
 
     @Test
     fun linuxClosesTunHandleWhenConfigurationFails() = runBlocking {
@@ -80,6 +86,39 @@ class PlatformAdapterFailureCleanupTest {
                 invocations.count { invocation ->
                     invocation.binary == CommandBinary.SCUTIL &&
                         invocation.stdin?.contains("remove State:/Network/Interface/utun7") == true
+                },
+            )
+        } finally {
+            unmockkConstructor(RealTunHandle::class)
+        }
+    }
+
+    @Test
+    fun macOsUsesIpv6AddressFamilyForIpv6Routes() = runBlocking {
+        val invocations = mutableListOf<ProcessInvocationModel>()
+
+        mockkConstructor(RealTunHandle::class)
+        try {
+            mockOpenedTunHandle("utun7")
+            val adapter = MacOsPlatformAdapter(
+                processLauncher = ProcessLauncher { invocation ->
+                    invocations += invocation
+                    ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
+                },
+            )
+
+            adapter.startSession(
+                TunSessionConfig(
+                    interfaceName = "utun7",
+                    addresses = listOf("fd00::2/64"),
+                    routes = listOf("::/0"),
+                ),
+            )
+
+            assertTrue(
+                invocations.any { invocation ->
+                    invocation.binary == CommandBinary.ROUTE &&
+                        invocation.arguments == listOf("-n", "-inet6", "add", "-net", "::/0", "-interface", "utun7")
                 },
             )
         } finally {
@@ -165,6 +204,18 @@ class PlatformAdapterFailureCleanupTest {
                 ),
             ),
         )
+    }
+
+    @Test
+    fun extractPrimaryTunAddressRejectsInvalidFirstAddress() {
+        assertFailsWith<IllegalArgumentException> {
+            extractPrimaryTunAddress(
+                TunSessionConfig(
+                    interfaceName = "wg0",
+                    addresses = listOf("not-a-cidr", "10.10.10.2/24"),
+                ),
+            )
+        }
     }
 
     private fun mockOpenedTunHandle(interfaceName: String): RealTunHandle {

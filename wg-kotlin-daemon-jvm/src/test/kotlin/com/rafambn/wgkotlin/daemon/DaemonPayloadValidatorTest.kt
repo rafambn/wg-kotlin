@@ -87,6 +87,16 @@ class DaemonPayloadValidatorTest {
     }
 
     @Test
+    fun validateDnsAcceptsIpv6ServersWithScopeIds() {
+        DaemonPayloadValidator.validateDns(
+            DnsConfig(
+                searchDomains = listOf("corp.local"),
+                servers = listOf("fe80::1%eth0"),
+            ),
+        )
+    }
+
+    @Test
     fun validateSessionRejectsIpv6MtuBelowProtocolMinimum() {
         assertFailsWith<PayloadValidationException> {
             DaemonPayloadValidator.validate(

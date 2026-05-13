@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import uniffi.wg_kotlin_uniffi_tun_rs.TunDevice
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Real TUN device handle implementation using tun-rs via Rust FFI.
@@ -20,7 +21,7 @@ internal class RealTunHandle(
 
     private val logger = org.slf4j.LoggerFactory.getLogger(RealTunHandle::class.java)
 
-    private var tunDevice: TunDevice? = null
+    private val tunDevice = AtomicReference<TunDevice?>(null)
     private val isClosed = AtomicBoolean(false)
     private var openedInterfaceName: String = requestedInterfaceName
 
@@ -37,11 +38,12 @@ internal class RealTunHandle(
         withContext(Dispatchers.IO) {
             try {
                 // Create the TUN device via uniffi bindings
-                tunDevice = TunDevice(requestedInterfaceName)
+                tunDevice.set(TunDevice(requestedInterfaceName))
 
                 // Open the device with the specified primary tunnel address.
-                tunDevice?.open(ipAddress, prefixLength, winTunDllPath)
-                openedInterfaceName = tunDevice?.getInterfaceName() ?: requestedInterfaceName
+                val openedDevice = tunDevice.get()
+                openedDevice?.open(ipAddress, prefixLength, winTunDllPath)
+                openedInterfaceName = openedDevice?.getInterfaceName() ?: requestedInterfaceName
 
                 logger.info("TUN device opened successfully: $openedInterfaceName")
             } catch (e: Exception) {
@@ -54,7 +56,7 @@ internal class RealTunHandle(
     }
 
     override suspend fun readPacket(): ByteArray? {
-        if (isClosed.get() || tunDevice == null) {
+        if (isClosed.get() || tunDevice.get() == null) {
             return null
         }
 
@@ -62,14 +64,14 @@ internal class RealTunHandle(
             // Read a packet from the Rust TUN device.
             // Let real IO errors propagate so the session coroutine fails
             // gracefully instead of busy-waiting.
-            val packet = tunDevice?.readPacket()
+            val packet = tunDevice.get()?.readPacket()
             logger.trace("Read ${packet?.size ?: 0} bytes from TUN device")
             packet
         }
     }
 
     override suspend fun writePacket(packet: ByteArray) {
-        if (isClosed.get() || tunDevice == null) {
+        if (isClosed.get() || tunDevice.get() == null) {
             logger.warn("Attempted to write to closed TUN device")
             return
         }
@@ -77,7 +79,7 @@ internal class RealTunHandle(
         withContext(Dispatchers.IO) {
             try {
                 // Write packet to the Rust TUN device
-                tunDevice?.writePacket(packet)
+                tunDevice.get()?.writePacket(packet)
                 logger.trace("Wrote ${packet.size} bytes to TUN device")
             } catch (e: Exception) {
                 logger.error("Failed to write packet to TUN device", e)
@@ -92,6 +94,7 @@ internal class RealTunHandle(
         }
 
         logger.info("Closing TUN device: $openedInterfaceName")
+        val device = tunDevice.getAndSet(null)
 
         var failure: Throwable? = null
         fun captureCloseFailure(block: () -> Unit) {
@@ -106,9 +109,8 @@ internal class RealTunHandle(
         }
 
         captureCloseFailure { onClose() }
-        captureCloseFailure { tunDevice?.shutdown() }
-        captureCloseFailure { tunDevice?.close() }
-        tunDevice = null
+        captureCloseFailure { device?.shutdown() }
+        captureCloseFailure { device?.close() }
 
         failure?.let { throwable ->
             logger.error("Error closing TUN device", throwable)

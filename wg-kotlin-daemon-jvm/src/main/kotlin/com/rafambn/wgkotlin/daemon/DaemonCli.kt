@@ -11,8 +11,6 @@ import com.rafambn.wgkotlin.daemon.di.DaemonKoinBootstrap
 import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import io.netty.util.NetUtil
 import java.net.InetAddress
-import java.util.concurrent.atomic.AtomicBoolean
-
 internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
     init {
         versionOption(version = DAEMON_VERSION, names = setOf("--version", "-v"))
@@ -48,49 +46,39 @@ internal class DaemonCli : CliktCommand(name = "vpn-daemon") {
 
         val dependencies = DaemonKoinBootstrap.resolveDependencies()
         val adapter = dependencies.adapter
-        val cleanupStarted = AtomicBoolean(false)
-        fun closeDependenciesOnce() {
-            if (cleanupStarted.compareAndSet(false, true)) {
-                DaemonKoinBootstrap.close()
-            }
+
+        Runtime.getRuntime().addShutdownHook(
+            Thread({ DaemonKoinBootstrap.close() }, "wg-kotlin-daemon-koin-shutdown")
+        )
+
+        val isPrivileged = hasRequiredPrivileges()
+        if (!isPrivileged) {
+            throw UsageError(
+                "Daemon must run with network administration privileges for `${adapter.platformId}` commands (current user: `${
+                    System.getProperty(
+                        "user.name"
+                    )
+                }`).",
+            )
         }
 
-        val shutdownHook = Thread(::closeDependenciesOnce, "wg-kotlin-daemon-koin-shutdown")
-        Runtime.getRuntime().addShutdownHook(shutdownHook)
+        val missingBinaries = adapter.requiredBinaries
+            .filterNot { binary -> isBinaryAvailableOnPath(binary.executable) }
+            .map { binary -> binary.executable }
 
-        try {
-            val isPrivileged = hasRequiredPrivileges()
-            if (!isPrivileged) {
-                throw UsageError(
-                    "Daemon must run with network administration privileges for `${adapter.platformId}` commands (current user: `${
-                        System.getProperty(
-                            "user.name"
-                        )
-                    }`).",
-                )
-            }
-
-            val missingBinaries = adapter.requiredBinaries
-                .filterNot { binary -> isBinaryAvailableOnPath(binary.executable) }
-                .map { binary -> binary.executable }
-
-            if (missingBinaries.isNotEmpty()) {
-                throw UsageError(
-                    "Missing required privileged binaries for `${adapter.platformId}`: ${missingBinaries.joinToString(", ")}.",
-                )
-            }
-
-            adapter.cleanupStaleState()
-
-            createDaemonServer(
-                host = host,
-                port = port,
-                service = dependencies.service,
-            ).start(wait = true)
-        } finally {
-            closeDependenciesOnce()
-            runCatching { Runtime.getRuntime().removeShutdownHook(shutdownHook) }
+        if (missingBinaries.isNotEmpty()) {
+            throw UsageError(
+                "Missing required privileged binaries for `${adapter.platformId}`: ${missingBinaries.joinToString(", ")}.",
+            )
         }
+
+        adapter.cleanupStaleState()
+
+        createDaemonServer(
+            host = host,
+            port = port,
+            service = dependencies.service,
+        ).start(wait = true)
     }
 
     private fun isLoopbackAddress(host: String): Boolean {

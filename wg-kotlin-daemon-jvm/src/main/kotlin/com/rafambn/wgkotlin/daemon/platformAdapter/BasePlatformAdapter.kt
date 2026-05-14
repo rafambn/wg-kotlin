@@ -6,12 +6,10 @@ import com.rafambn.wgkotlin.daemon.command.ProcessInvocationModel
 import com.rafambn.wgkotlin.daemon.command.ProcessLauncher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.slf4j.LoggerFactory
 
 internal abstract class BasePlatformAdapter(
     protected val processLauncher: ProcessLauncher,
 ) : PlatformAdapter {
-    protected val logger = LoggerFactory.getLogger(javaClass)
 
     protected suspend fun runCommand(
         operationLabel: String,
@@ -75,7 +73,6 @@ internal abstract class BasePlatformAdapter(
             cleanup()
         } catch (cleanupFailure: Throwable) {
             primaryFailure.addSuppressed(cleanupFailure)
-            logger.warn("Cleanup `$operationLabel` failed", cleanupFailure)
         }
     }
 
@@ -86,7 +83,6 @@ internal abstract class BasePlatformAdapter(
     ) {
         runCatching(cleanup).onFailure { cleanupFailure ->
             primaryFailure.addSuppressed(cleanupFailure)
-            logger.warn("Cleanup `$operationLabel` failed", cleanupFailure)
         }
     }
 }

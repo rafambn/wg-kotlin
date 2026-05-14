@@ -11,7 +11,6 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal object WindowsDllLoader {
-    private val logger = org.slf4j.LoggerFactory.getLogger(WindowsDllLoader::class.java)
     private val lock = Any()
 
     @Volatile
@@ -26,7 +25,6 @@ internal object WindowsDllLoader {
      */
     fun prepareWinTunDllPath(): String? {
         if (!isWindows()) {
-            logger.debug("Not running on Windows, skipping WinTUN DLL preparation")
             return null
         }
 
@@ -45,15 +43,11 @@ internal object WindowsDllLoader {
             val targetPath = extractAsCanonicalWinTunDll(sourceResource)
             val targetPathString = targetPath.toAbsolutePath().toString()
 
-            if (dllLoaded.get()) {
-                logger.debug("WinTUN DLL already loaded")
-            } else {
+            if (!dllLoaded.get()) {
                 try {
                     System.load(targetPathString)
                     dllLoaded.set(true)
-                    logger.info("Loaded WinTUN DLL from: $targetPathString")
                 } catch (e: UnsatisfiedLinkError) {
-                    logger.error("Failed to load WinTUN DLL from: $targetPathString", e)
                     throw e
                 }
             }
@@ -107,7 +101,6 @@ internal object WindowsDllLoader {
             )
         }
 
-        logger.debug("Extracted WinTUN resource `$sourceDllName` to `$targetPath`")
         return targetPath
     }
 
@@ -128,13 +121,9 @@ internal object WindowsDllLoader {
                                     .sorted(Comparator.reverseOrder())
                                     .forEach(Files::deleteIfExists)
                             }
-                        }.onFailure { failure ->
-                            logger.debug("Failed to remove old WinTUN temp directory `$path`", failure)
                         }
                     }
             }
-        }.onFailure { failure ->
-            logger.debug("Failed to scan WinTUN temp directory root `$tempRoot`", failure)
         }
     }
 

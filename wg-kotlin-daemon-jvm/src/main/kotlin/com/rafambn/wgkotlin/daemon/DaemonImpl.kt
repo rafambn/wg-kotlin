@@ -15,7 +15,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 class DaemonImpl internal constructor(
     private val adapter: PlatformAdapter,
 ) : DaemonApi {
-    private val logger = org.slf4j.LoggerFactory.getLogger(DaemonImpl::class.java)
     private val activeSessionLock = Any()
     private val activeSessions = mutableSetOf<String>()
 
@@ -50,7 +49,6 @@ class DaemonImpl internal constructor(
             while (isActive) {
                 val packet = handle.readPacket() ?: continue
                 if (packet.size > MAX_PACKET_FRAME_SIZE) {
-                    logger.warn("Dropping oversized packet from TUN: ${packet.size} bytes")
                     continue
                 }
                 if (packet.isNotEmpty()) {
@@ -62,7 +60,6 @@ class DaemonImpl internal constructor(
         val writerJob = launch {
             outgoingPackets.collect { packet ->
                 if (packet.size > MAX_PACKET_FRAME_SIZE) {
-                    logger.warn("Dropping oversized outbound packet: ${packet.size} bytes")
                     return@collect
                 }
                 if (packet.isNotEmpty()) {
@@ -76,7 +73,6 @@ class DaemonImpl internal constructor(
                 return@awaitClose
             }
             runCatching { handle.close() }
-                .onFailure { failure -> logger.warn("Failed to close TUN handle for ${config.interfaceName}", failure) }
             readerJob.cancel()
             writerJob.cancel()
             synchronized(activeSessionLock) {

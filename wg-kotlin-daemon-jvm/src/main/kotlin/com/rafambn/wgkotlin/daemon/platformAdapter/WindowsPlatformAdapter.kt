@@ -17,7 +17,12 @@ internal class WindowsPlatformAdapter(
     )
 
     init {
-        clearAllManagedNrptRulesBlocking()
+        runCommand(
+            operationLabel = "clear-stale-nrpt-rules",
+            binary = CommandBinary.POWERSHELL,
+            arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_ALL_NRPT_RULES_SCRIPT),
+            environment = mapOf(ENV_NRPT_COMMENT_PREFIX to NRPT_COMMENT_PREFIX),
+        )
     }
 
     override suspend fun startSession(config: TunSessionConfig): TunHandle {
@@ -158,16 +163,31 @@ internal class WindowsPlatformAdapter(
             CleanupTunHandle(
                 delegate = baseHandle,
                 cleanup = {
-                    deleteRoutesBlocking(routes = routes, interfaceName = interfaceName)
-                    clearNrptRulesBlocking(interfaceName)
+                    routes.asReversed().forEach { route ->
+                        runCommand(
+                            operationLabel = "delete-route",
+                            binary = CommandBinary.NETSH,
+                            arguments = routeArguments(command = "delete", route = route, interfaceName = interfaceName),
+                            ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
+                        )
+                    }
+                    runCommand(
+                        operationLabel = "clear-nrpt-rules",
+                        binary = CommandBinary.POWERSHELL,
+                        arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_NRPT_RULES_SCRIPT),
+                        environment = mapOf(ENV_NRPT_COMMENT to ruleComment(interfaceName)),
+                    )
                 },
             )
         } catch (failure: Throwable) {
             routes.asReversed().forEach { route ->
-                runSuspendCleanup("delete-route", failure) { deleteRoute(route = route, interfaceName = baseHandle.interfaceName) }
+                runCatching { deleteRoute(route = route, interfaceName = baseHandle.interfaceName) }
+                    .onFailure(failure::addSuppressed)
             }
-            runBlockingCleanup("close-tun-handle", failure) { baseHandle.close() }
-            runSuspendCleanup("clear-nrpt-rules", failure) { clearNrptRules(baseHandle.interfaceName) }
+            runCatching { baseHandle.close() }
+                .onFailure(failure::addSuppressed)
+            runCatching { clearNrptRules(baseHandle.interfaceName) }
+                .onFailure(failure::addSuppressed)
             throw failure
         }
     }
@@ -189,41 +209,12 @@ internal class WindowsPlatformAdapter(
         )
     }
 
-    private fun deleteRoutesBlocking(routes: List<String>, interfaceName: String) {
-        routes.asReversed().forEach { route ->
-            runCommandBlocking(
-                operationLabel = "delete-route",
-                binary = CommandBinary.NETSH,
-                arguments = routeArguments(command = "delete", route = route, interfaceName = interfaceName),
-                ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
-            )
-        }
-    }
-
     private suspend fun clearNrptRules(interfaceName: String) {
         runCommand(
             operationLabel = "clear-nrpt-rules",
             binary = CommandBinary.POWERSHELL,
             arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_NRPT_RULES_SCRIPT),
             environment = mapOf(ENV_NRPT_COMMENT to ruleComment(interfaceName)),
-        )
-    }
-
-    private fun clearNrptRulesBlocking(interfaceName: String) {
-        runCommandBlocking(
-            operationLabel = "clear-nrpt-rules",
-            binary = CommandBinary.POWERSHELL,
-            arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_NRPT_RULES_SCRIPT),
-            environment = mapOf(ENV_NRPT_COMMENT to ruleComment(interfaceName)),
-        )
-    }
-
-    private fun clearAllManagedNrptRulesBlocking() {
-        runCommandBlocking(
-            operationLabel = "clear-stale-nrpt-rules",
-            binary = CommandBinary.POWERSHELL,
-            arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_ALL_NRPT_RULES_SCRIPT),
-            environment = mapOf(ENV_NRPT_COMMENT_PREFIX to NRPT_COMMENT_PREFIX),
         )
     }
 

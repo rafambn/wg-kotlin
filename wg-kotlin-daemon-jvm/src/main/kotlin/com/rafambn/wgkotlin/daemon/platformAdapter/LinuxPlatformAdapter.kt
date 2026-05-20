@@ -78,20 +78,34 @@ internal class LinuxPlatformAdapter(
             CleanupTunHandle(
                 delegate = handle,
                 cleanup = {
-                    deleteRoutesBlocking(routes = routes, interfaceName = interfaceName)
+                    routes.asReversed().forEach { route ->
+                        runCommand(
+                            operationLabel = "delete-route",
+                            binary = CommandBinary.IP,
+                            arguments = listOf("route", "delete", route, "dev", interfaceName),
+                            ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
+                        )
+                    }
                     if (hasDnsConfiguration) {
-                        revertDnsBlocking(interfaceName)
+                        runCommand(
+                            operationLabel = "revert-dns",
+                            binary = CommandBinary.RESOLVECTL,
+                            arguments = listOf("revert", interfaceName),
+                        )
                     }
                 },
             )
         } catch (failure: Throwable) {
             routes.asReversed().forEach { route ->
-                runSuspendCleanup("delete-route", failure) { deleteRoute(route = route, interfaceName = handle.interfaceName) }
+                runCatching { deleteRoute(route = route, interfaceName = handle.interfaceName) }
+                    .onFailure(failure::addSuppressed)
             }
             if (hasDnsConfiguration) {
-                runSuspendCleanup("revert-dns", failure) { revertDns(handle.interfaceName) }
+                runCatching { revertDns(handle.interfaceName) }
+                    .onFailure(failure::addSuppressed)
             }
-            runBlockingCleanup("close-tun-handle", failure) { handle.close() }
+            runCatching { handle.close() }
+                .onFailure(failure::addSuppressed)
             throw failure
         }
     }
@@ -113,27 +127,8 @@ internal class LinuxPlatformAdapter(
         )
     }
 
-    private fun deleteRoutesBlocking(routes: List<String>, interfaceName: String) {
-        routes.asReversed().forEach { route ->
-            runCommandBlocking(
-                operationLabel = "delete-route",
-                binary = CommandBinary.IP,
-                arguments = listOf("route", "delete", route, "dev", interfaceName),
-                ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
-            )
-        }
-    }
-
     private suspend fun revertDns(interfaceName: String) {
         runCommand(
-            operationLabel = "revert-dns",
-            binary = CommandBinary.RESOLVECTL,
-            arguments = listOf("revert", interfaceName),
-        )
-    }
-
-    private fun revertDnsBlocking(interfaceName: String) {
-        runCommandBlocking(
             operationLabel = "revert-dns",
             binary = CommandBinary.RESOLVECTL,
             arguments = listOf("revert", interfaceName),

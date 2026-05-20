@@ -94,20 +94,42 @@ internal class MacOsPlatformAdapter(
             CleanupTunHandle(
                 delegate = handle,
                 cleanup = {
-                    deleteRoutesBlocking(routes = routes, interfaceName = interfaceName)
-                    deleteAddressesBlocking(addresses = addresses, interfaceName = interfaceName)
-                    clearDnsEntriesBlocking(interfaceName)
+                    routes.asReversed().forEach { route ->
+                        runCommand(
+                            operationLabel = "delete-route",
+                            binary = CommandBinary.ROUTE,
+                            arguments = routeArguments(command = "delete", route = route, interfaceName = interfaceName),
+                            ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
+                        )
+                    }
+                    addresses.asReversed().forEach { address ->
+                        runCommand(
+                            operationLabel = "delete-address",
+                            binary = CommandBinary.IFCONFIG,
+                            arguments = deleteAddressArguments(address = address, interfaceName = interfaceName),
+                            ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
+                        )
+                    }
+                    runCommand(
+                        operationLabel = "clear-dns",
+                        binary = CommandBinary.SCUTIL,
+                        stdin = clearDnsStdin(interfaceName),
+                    )
                 },
             )
         } catch (failure: Throwable) {
             routes.asReversed().forEach { route ->
-                runSuspendCleanup("delete-route", failure) { deleteRoute(route = route, interfaceName = handle.interfaceName) }
+                runCatching { deleteRoute(route = route, interfaceName = handle.interfaceName) }
+                    .onFailure(failure::addSuppressed)
             }
             addresses.asReversed().forEach { address ->
-                runSuspendCleanup("delete-address", failure) { deleteAddress(address = address, interfaceName = handle.interfaceName) }
+                runCatching { deleteAddress(address = address, interfaceName = handle.interfaceName) }
+                    .onFailure(failure::addSuppressed)
             }
-            runBlockingCleanup("close-tun-handle", failure) { handle.close() }
-            runSuspendCleanup("clear-dns", failure) { clearDnsEntries(handle.interfaceName) }
+            runCatching { handle.close() }
+                .onFailure(failure::addSuppressed)
+            runCatching { clearDnsEntries(handle.interfaceName) }
+                .onFailure(failure::addSuppressed)
             throw failure
         }
     }
@@ -129,17 +151,6 @@ internal class MacOsPlatformAdapter(
         )
     }
 
-    private fun deleteRoutesBlocking(routes: List<String>, interfaceName: String) {
-        routes.asReversed().forEach { route ->
-            runCommandBlocking(
-                operationLabel = "delete-route",
-                binary = CommandBinary.ROUTE,
-                arguments = routeArguments(command = "delete", route = route, interfaceName = interfaceName),
-                ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
-            )
-        }
-    }
-
     private suspend fun deleteAddress(address: String, interfaceName: String) {
         runCommand(
             operationLabel = "delete-address",
@@ -147,17 +158,6 @@ internal class MacOsPlatformAdapter(
             arguments = deleteAddressArguments(address = address, interfaceName = interfaceName),
             ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
         )
-    }
-
-    private fun deleteAddressesBlocking(addresses: List<String>, interfaceName: String) {
-        addresses.asReversed().forEach { address ->
-            runCommandBlocking(
-                operationLabel = "delete-address",
-                binary = CommandBinary.IFCONFIG,
-                arguments = deleteAddressArguments(address = address, interfaceName = interfaceName),
-                ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
-            )
-        }
     }
 
     private fun routeArguments(command: String, route: String, interfaceName: String): List<String> {
@@ -178,24 +178,16 @@ internal class MacOsPlatformAdapter(
         runCommand(
             operationLabel = "clear-dns",
             binary = CommandBinary.SCUTIL,
-            stdin = buildString {
-                appendLine("remove ${resolverPath(interfaceName)}")
-                appendLine("remove ${resolverRootPath(interfaceName)}")
-                appendLine("quit")
-            },
+            stdin = clearDnsStdin(interfaceName),
         )
     }
 
-    private fun clearDnsEntriesBlocking(interfaceName: String) {
-        runCommandBlocking(
-            operationLabel = "clear-dns",
-            binary = CommandBinary.SCUTIL,
-            stdin = buildString {
-                appendLine("remove ${resolverPath(interfaceName)}")
-                appendLine("remove ${resolverRootPath(interfaceName)}")
-                appendLine("quit")
-            },
-        )
+    private fun clearDnsStdin(interfaceName: String): String {
+        return buildString {
+            appendLine("remove ${resolverPath(interfaceName)}")
+            appendLine("remove ${resolverRootPath(interfaceName)}")
+            appendLine("quit")
+        }
     }
 
     private fun validateInterfaceNameForScutil(interfaceName: String) {

@@ -177,6 +177,44 @@ class PlatformAdapterFailureCleanupTest {
     }
 
     @Test
+    fun macOsWritesDnsServersAndDomainsAsArrays() = runBlocking {
+        val invocations = mutableListOf<ProcessInvocationModel>()
+
+        mockkConstructor(RealTunHandle::class)
+        try {
+            mockOpenedTunHandle("utun7")
+            val adapter = MacOsPlatformAdapter(
+                processLauncher = ProcessLauncher { invocation ->
+                    invocations += invocation
+                    ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
+                },
+            )
+
+            adapter.startSession(
+                TunSessionConfig(
+                    interfaceName = "utun7",
+                    addresses = listOf("10.10.10.2/24"),
+                    dns = DnsConfig(
+                        searchDomains = listOf("corp.local"),
+                        servers = listOf("1.1.1.1"),
+                    ),
+                ),
+            )
+
+            assertTrue(
+                invocations.any { invocation ->
+                    val stdin = invocation.stdin
+                    invocation.binary == CommandBinary.SCUTIL &&
+                        stdin?.contains("d.add ServerAddresses * 1.1.1.1") == true &&
+                        stdin.contains("d.add SupplementalMatchDomains * corp.local")
+                },
+            )
+        } finally {
+            unmockkConstructor(RealTunHandle::class)
+        }
+    }
+
+    @Test
     fun macOsDoesNotAddPrimaryAddressAgainAfterOpeningTunDevice() = runBlocking {
         val invocations = mutableListOf<ProcessInvocationModel>()
 

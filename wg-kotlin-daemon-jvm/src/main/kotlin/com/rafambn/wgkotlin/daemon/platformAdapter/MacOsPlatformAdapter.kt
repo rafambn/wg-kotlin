@@ -75,8 +75,8 @@ internal class MacOsPlatformAdapter(
                     binary = CommandBinary.SCUTIL,
                     stdin = buildString {
                         appendLine("d.init")
-                        appendLine("d.add ServerAddresses ${dnsServers.joinToString(" ")}")
-                        appendLine("d.add SupplementalMatchDomains ${domains.joinToString(" ")}")
+                        appendLine("d.add ServerAddresses * ${dnsServers.joinToString(" ")}")
+                        appendLine("d.add SupplementalMatchDomains * ${domains.joinToString(" ")}")
                         appendLine("set $resolverPath")
                         appendLine("quit")
                     },

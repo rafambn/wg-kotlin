@@ -1,7 +1,7 @@
 package com.rafambn.wgkotlin.daemon.platformAdapter
 
-import com.rafambn.wgkotlin.daemon.command.ProcessLauncher
 import com.rafambn.wgkotlin.daemon.command.CommonsExecProcessLauncher
+import com.rafambn.wgkotlin.daemon.command.ProcessLauncher
 import java.util.Locale
 
 internal object PlatformAdapterFactory {

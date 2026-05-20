@@ -6,7 +6,6 @@ import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
-import java.util.Comparator
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 

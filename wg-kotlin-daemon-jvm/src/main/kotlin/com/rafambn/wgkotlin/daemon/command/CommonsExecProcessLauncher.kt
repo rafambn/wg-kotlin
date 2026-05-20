@@ -1,14 +1,14 @@
 package com.rafambn.wgkotlin.daemon.command
 
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.io.IOException
-import java.time.Duration
 import org.apache.commons.exec.CommandLine
 import org.apache.commons.exec.DefaultExecutor
 import org.apache.commons.exec.ExecuteException
 import org.apache.commons.exec.ExecuteWatchdog
 import org.apache.commons.exec.PumpStreamHandler
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.time.Duration
 
 internal class CommonsExecProcessLauncher(
     private val timeout: Duration = Duration.ofSeconds(20),

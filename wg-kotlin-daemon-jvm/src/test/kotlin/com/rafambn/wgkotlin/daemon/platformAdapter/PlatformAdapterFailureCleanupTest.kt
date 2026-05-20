@@ -8,7 +8,14 @@ import com.rafambn.wgkotlin.daemon.command.ProcessOutputModel
 import com.rafambn.wgkotlin.daemon.protocol.DnsConfig
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.tun.RealTunHandle
-import io.mockk.*
+import io.mockk.coEvery
+import io.mockk.every
+import io.mockk.just
+import io.mockk.mockk
+import io.mockk.mockkConstructor
+import io.mockk.runs
+import io.mockk.unmockkConstructor
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals

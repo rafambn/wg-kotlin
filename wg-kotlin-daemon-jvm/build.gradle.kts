@@ -1,11 +1,11 @@
-import java.io.File
-import java.util.Properties
 import org.gradle.api.file.Directory
 import org.gradle.api.file.RegularFile
-import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaInstallationMetadata
+import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaLauncher
 import org.gradle.jvm.toolchain.JvmVendorSpec
+import java.io.File
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.kotlin.jvm)

@@ -3,8 +3,8 @@ package com.rafambn.wgkotlin.daemon
 import com.github.ajalt.clikt.core.PrintMessage
 import com.github.ajalt.clikt.core.parse
 import kotlin.test.Test
-import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class DaemonCliTest {
 

@@ -3,24 +3,18 @@ package com.rafambn.wgkotlin.daemon
 import com.rafambn.wgkotlin.daemon.protocol.DaemonApi
 import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import io.ktor.server.application.Application
-import io.ktor.server.application.ApplicationCallPipeline
-import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
-import io.ktor.server.request.header
 import io.ktor.server.netty.Netty
 import io.ktor.server.response.respondText
-import io.ktor.http.HttpStatusCode
 import io.ktor.server.routing.get
 import io.ktor.server.routing.route
-import io.ktor.server.routing.Route
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
-import java.security.MessageDigest
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.rpc.krpc.ktor.server.Krpc
 import kotlinx.rpc.krpc.ktor.server.rpc
 import kotlinx.rpc.krpc.serialization.protobuf.protobuf
+import kotlinx.serialization.ExperimentalSerializationApi
 
 internal fun createDaemonServer(
     host: String,

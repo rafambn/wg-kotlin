@@ -1,7 +1,6 @@
 package com.rafambn.wgkotlin.daemon
 
 import com.rafambn.wgkotlin.daemon.platformAdapter.PlatformAdapter
-import com.rafambn.wgkotlin.daemon.platformAdapter.PlatformAdapterFactory
 import com.rafambn.wgkotlin.daemon.protocol.DaemonApi
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
 import kotlinx.coroutines.Dispatchers

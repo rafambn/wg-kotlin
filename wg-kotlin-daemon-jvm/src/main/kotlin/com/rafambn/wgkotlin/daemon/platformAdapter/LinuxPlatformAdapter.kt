@@ -78,21 +78,36 @@ internal class LinuxPlatformAdapter(
             CleanupTunHandle(
                 delegate = handle,
                 cleanup = {
+                    var cleanupFailure: Throwable? = null
+                    fun recordCleanupFailure(throwable: Throwable) {
+                        val existingFailure = cleanupFailure
+                        if (existingFailure == null) {
+                            cleanupFailure = throwable
+                        } else {
+                            existingFailure.addSuppressed(throwable)
+                        }
+                    }
+
                     routes.asReversed().forEach { route ->
-                        runCommand(
-                            operationLabel = "delete-route",
-                            binary = CommandBinary.IP,
-                            arguments = listOf("route", "delete", route, "dev", interfaceName),
-                            ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
-                        )
+                        runCatching {
+                            runCommand(
+                                operationLabel = "delete-route",
+                                binary = CommandBinary.IP,
+                                arguments = listOf("route", "delete", route, "dev", interfaceName),
+                                ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
+                            )
+                        }.onFailure(::recordCleanupFailure)
                     }
                     if (hasDnsConfiguration) {
-                        runCommand(
-                            operationLabel = "revert-dns",
-                            binary = CommandBinary.RESOLVECTL,
-                            arguments = listOf("revert", interfaceName),
-                        )
+                        runCatching {
+                            runCommand(
+                                operationLabel = "revert-dns",
+                                binary = CommandBinary.RESOLVECTL,
+                                arguments = listOf("revert", interfaceName),
+                            )
+                        }.onFailure(::recordCleanupFailure)
                     }
+                    cleanupFailure?.let { throw it }
                 },
             )
         } catch (failure: Throwable) {

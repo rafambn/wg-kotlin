@@ -29,7 +29,7 @@ class DaemonApplicationSmokeTest {
         val api = DaemonImpl(adapter = adapter)
 
         val packet = api.startSession(
-            config = TunSessionConfig(interfaceName = "wg0", addresses = listOf("10.0.0.1/24")),
+            config = TunSessionConfig(interfaceName = "utun0", addresses = listOf("10.0.0.1/24")),
             outgoingPackets = emptyFlow(),
         ).first()
 
@@ -40,11 +40,11 @@ class DaemonApplicationSmokeTest {
 
     @Test
     fun cancellingSessionClosesBlockedHandleAndReleasesActiveSession() = runBlocking {
-        val firstHandle = BlockingReadHandle(interfaceName = "wg0")
+        val firstHandle = BlockingReadHandle(interfaceName = "utun0")
         val secondHandle = RecordingHandle()
         val adapter = QueuedAdapter(firstHandle, secondHandle)
         val api = DaemonImpl(adapter = adapter)
-        val config = TunSessionConfig(interfaceName = "wg0", addresses = listOf("10.0.0.1/24"))
+        val config = TunSessionConfig(interfaceName = "utun0", addresses = listOf("10.0.0.1/24"))
 
         val firstSession = launch {
             api.startSession(config = config, outgoingPackets = emptyFlow()).collect()
@@ -69,9 +69,9 @@ class DaemonApplicationSmokeTest {
 
     @Test
     fun duplicateSessionReportsActiveInterfaceName() = runBlocking {
-        val handle = BlockingReadHandle(interfaceName = "wg0")
+        val handle = BlockingReadHandle(interfaceName = "utun0")
         val api = DaemonImpl(adapter = QueuedAdapter(handle))
-        val config = TunSessionConfig(interfaceName = "wg0", addresses = listOf("10.0.0.1/24"))
+        val config = TunSessionConfig(interfaceName = "utun0", addresses = listOf("10.0.0.1/24"))
 
         val firstSession = launch {
             api.startSession(config = config, outgoingPackets = emptyFlow()).collect()
@@ -83,7 +83,7 @@ class DaemonApplicationSmokeTest {
             api.startSession(config = config, outgoingPackets = emptyFlow()).first()
         }
 
-        assertEquals("Session already active for wg0", failure.message)
+        assertEquals("Session already active for utun0", failure.message)
 
         firstSession.cancelAndJoin()
     }
@@ -101,7 +101,7 @@ class DaemonApplicationSmokeTest {
     }
 
     private class RecordingHandle : TunHandle {
-        override val interfaceName: String = "wg0"
+        override val interfaceName: String = "utun0"
         var closeCalls: Int = 0
         private var emitted = false
 

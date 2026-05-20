@@ -10,6 +10,11 @@
 
 Keep module boundaries intact: `:wg-kotlin` must not depend on `:wg-kotlin-daemon-jvm`; daemon modules communicate through `:wg-kotlin-daemon-protocol`.
 
+## Daemon Platform Policy
+- Daemon sessions intentionally accept only interface names matching `utun[0-9]+`, even on Linux and Windows, to keep cross-platform behavior consistent.
+- Linux route installation intentionally uses host route replacement/deletion semantics instead of separate routing tables or route snapshot restoration. This keeps platform behavior simple and aligned across adapters; callers are expected to understand the routing impact of the routes they request.
+- Linux daemon startup intentionally requires `resolvectl`, even for sessions that do not configure DNS.
+
 ## Build, Test, and Development Commands
 - `./gradlew build`: compile all modules and run their default verification tasks.
 - `./gradlew ciPhase01`: run the phase 01 CI entry task, including architecture boundary checks.

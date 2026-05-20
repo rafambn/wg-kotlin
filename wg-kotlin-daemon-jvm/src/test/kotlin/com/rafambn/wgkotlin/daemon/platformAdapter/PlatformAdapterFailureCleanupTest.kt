@@ -43,13 +43,60 @@ class PlatformAdapterFailureCleanupTest {
             assertFailsWith<CommandFailed> {
                 adapter.startSession(
                     TunSessionConfig(
-                        interfaceName = "wg0",
+                        interfaceName = "utun0",
                         addresses = listOf("10.10.10.2/24"),
                     ),
                 )
             }
 
             verify(exactly = 1) { openedHandle.close() }
+        } finally {
+            unmockkConstructor(RealTunHandle::class)
+        }
+    }
+
+    @Test
+    fun linuxRevertsDnsWhenRouteCleanupFailsOnClose() = runBlocking {
+        val invocations = mutableListOf<ProcessInvocationModel>()
+
+        mockkConstructor(RealTunHandle::class)
+        try {
+            val openedHandle = mockOpenedTunHandle("linux-opened")
+            val adapter = LinuxPlatformAdapter(
+                processLauncher = ProcessLauncher { invocation ->
+                    invocations += invocation
+                    if (invocation.binary == CommandBinary.IP && invocation.arguments.take(2) == listOf("route", "delete")) {
+                        ProcessOutputModel(exitCode = 1, stdout = "", stderr = "route delete failed")
+                    } else {
+                        ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
+                    }
+                },
+            )
+
+            val handle = adapter.startSession(
+                TunSessionConfig(
+                    interfaceName = "utun0",
+                    addresses = listOf("10.10.10.2/24"),
+                    routes = listOf("10.20.0.0/16"),
+                    dns = DnsConfig(
+                        searchDomains = listOf("corp.local"),
+                        servers = listOf("1.1.1.1"),
+                    ),
+                ),
+            )
+
+            assertFailsWith<CommandFailed> {
+                handle.close()
+            }
+
+            verify(exactly = 1) { openedHandle.close() }
+            assertEquals(
+                1,
+                invocations.count { invocation ->
+                    invocation.binary == CommandBinary.RESOLVECTL &&
+                        invocation.arguments == listOf("revert", "linux-opened")
+                },
+            )
         } finally {
             unmockkConstructor(RealTunHandle::class)
         }
@@ -130,6 +177,104 @@ class PlatformAdapterFailureCleanupTest {
     }
 
     @Test
+    fun macOsDoesNotAddPrimaryAddressAgainAfterOpeningTunDevice() = runBlocking {
+        val invocations = mutableListOf<ProcessInvocationModel>()
+
+        mockkConstructor(RealTunHandle::class)
+        try {
+            mockOpenedTunHandle("utun7")
+            val adapter = MacOsPlatformAdapter(
+                processLauncher = ProcessLauncher { invocation ->
+                    invocations += invocation
+                    ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
+                },
+            )
+
+            adapter.startSession(
+                TunSessionConfig(
+                    interfaceName = "utun7",
+                    addresses = listOf("10.10.10.2/24", "10.10.10.3/24"),
+                ),
+            )
+
+            val addressCommands = invocations
+                .filter { invocation -> invocation.binary == CommandBinary.IFCONFIG }
+                .map { invocation -> invocation.arguments }
+            assertEquals(
+                0,
+                addressCommands.count { arguments ->
+                    arguments == listOf("utun7", "inet", "10.10.10.2/24", "alias")
+                },
+            )
+            assertEquals(
+                1,
+                addressCommands.count { arguments ->
+                    arguments == listOf("utun7", "inet", "10.10.10.3/24", "alias")
+                },
+            )
+        } finally {
+            unmockkConstructor(RealTunHandle::class)
+        }
+    }
+
+    @Test
+    fun macOsClearsDnsWhenRouteCleanupFailsOnClose() = runBlocking {
+        val invocations = mutableListOf<ProcessInvocationModel>()
+
+        mockkConstructor(RealTunHandle::class)
+        try {
+            val openedHandle = mockOpenedTunHandle("utun7")
+            var routeAdded = false
+            val adapter = MacOsPlatformAdapter(
+                processLauncher = ProcessLauncher { invocation ->
+                    invocations += invocation
+                    if (invocation.binary == CommandBinary.ROUTE && invocation.arguments.contains("add")) {
+                        routeAdded = true
+                    }
+                    if (invocation.binary == CommandBinary.ROUTE && invocation.arguments.contains("delete") && routeAdded) {
+                        ProcessOutputModel(exitCode = 1, stdout = "", stderr = "route delete failed")
+                    } else {
+                        ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
+                    }
+                },
+            )
+
+            val handle = adapter.startSession(
+                TunSessionConfig(
+                    interfaceName = "utun7",
+                    addresses = listOf("10.10.10.2/24", "10.10.10.3/24"),
+                    routes = listOf("10.20.0.0/16"),
+                    dns = DnsConfig(
+                        searchDomains = listOf("corp.local"),
+                        servers = listOf("1.1.1.1"),
+                    ),
+                ),
+            )
+
+            assertFailsWith<CommandFailed> {
+                handle.close()
+            }
+
+            verify(exactly = 1) { openedHandle.close() }
+            assertEquals(
+                1,
+                invocations.count { invocation ->
+                    invocation.binary == CommandBinary.IFCONFIG &&
+                        invocation.arguments == listOf("utun7", "inet", "10.10.10.3", "-alias")
+                },
+            )
+            assertTrue(
+                invocations.any { invocation ->
+                    invocation.binary == CommandBinary.SCUTIL &&
+                        invocation.stdin?.contains("remove State:/Network/Interface/utun7/DNS") == true
+                },
+            )
+        } finally {
+            unmockkConstructor(RealTunHandle::class)
+        }
+    }
+
+    @Test
     fun windowsClosesTunHandleAndClearsNrptRulesWhenNrptSetupFails() = runBlocking {
         val invocations = mutableListOf<ProcessInvocationModel>()
 
@@ -185,7 +330,7 @@ class PlatformAdapterFailureCleanupTest {
             ),
             extractPrimaryTunAddress(
                 TunSessionConfig(
-                    interfaceName = "wg0",
+                    interfaceName = "utun0",
                     addresses = listOf(" 10.10.10.2/24 "),
                 ),
             ),
@@ -202,7 +347,7 @@ class PlatformAdapterFailureCleanupTest {
             ),
             extractPrimaryTunAddress(
                 TunSessionConfig(
-                    interfaceName = "wg0",
+                    interfaceName = "utun0",
                     addresses = listOf("fd00::2/64"),
                 ),
             ),
@@ -214,7 +359,7 @@ class PlatformAdapterFailureCleanupTest {
         assertFailsWith<IllegalArgumentException> {
             extractPrimaryTunAddress(
                 TunSessionConfig(
-                    interfaceName = "wg0",
+                    interfaceName = "utun0",
                     addresses = listOf("not-a-cidr", "10.10.10.2/24"),
                 ),
             )

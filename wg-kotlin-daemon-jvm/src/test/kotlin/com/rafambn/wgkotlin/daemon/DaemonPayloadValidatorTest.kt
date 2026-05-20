@@ -50,16 +50,20 @@ class DaemonPayloadValidatorTest {
     }
 
     @Test
-    fun validateInterfaceNameAcceptsCrossPlatformSafeNames() {
-        DaemonPayloadValidator.validateInterfaceName("wg0")
+    fun validateInterfaceNameAcceptsUtunNames() {
         DaemonPayloadValidator.validateInterfaceName("utun7")
-        DaemonPayloadValidator.validateInterfaceName("vpn-prod_1")
     }
 
     @Test
-    fun validateInterfaceNameRejectsUnsafeCharacters() {
+    fun validateInterfaceNameRejectsNonUtunNames() {
         assertFailsWith<PayloadValidationException> {
             DaemonPayloadValidator.validateInterfaceName("wg invalid")
+        }
+        assertFailsWith<PayloadValidationException> {
+            DaemonPayloadValidator.validateInterfaceName("wg0")
+        }
+        assertFailsWith<PayloadValidationException> {
+            DaemonPayloadValidator.validateInterfaceName("vpn-prod_1")
         }
     }
 
@@ -68,7 +72,7 @@ class DaemonPayloadValidatorTest {
         assertFailsWith<PayloadValidationException> {
             DaemonPayloadValidator.validate(
                 TunSessionConfig(
-                    interfaceName = "wg0",
+                    interfaceName = "utun0",
                     addresses = listOf("10.0.0.1/24"),
                     dns = DnsConfig(searchDomains = listOf("corp.local")),
                 ),
@@ -101,7 +105,7 @@ class DaemonPayloadValidatorTest {
         assertFailsWith<PayloadValidationException> {
             DaemonPayloadValidator.validate(
                 TunSessionConfig(
-                    interfaceName = "wg0",
+                    interfaceName = "utun0",
                     mtu = 1000,
                     addresses = listOf("fd00::1/64"),
                 ),
@@ -113,7 +117,7 @@ class DaemonPayloadValidatorTest {
     fun validateSessionAllowsIpv4MtuBelowIpv6Minimum() {
         DaemonPayloadValidator.validate(
             TunSessionConfig(
-                interfaceName = "wg0",
+                interfaceName = "utun0",
                 mtu = 1000,
                 addresses = listOf("10.0.0.1/24"),
             ),

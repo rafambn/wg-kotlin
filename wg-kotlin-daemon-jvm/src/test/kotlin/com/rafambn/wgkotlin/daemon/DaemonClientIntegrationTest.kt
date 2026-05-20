@@ -43,7 +43,7 @@ class DaemonClientIntegrationTest {
         val api = DaemonImpl(adapter = adapter)
 
         val packet = api.startSession(
-            config = TunSessionConfig(interfaceName = "wg0", addresses = listOf("10.0.0.1/24")),
+            config = TunSessionConfig(interfaceName = "utun0", addresses = listOf("10.0.0.1/24")),
             outgoingPackets = emptyFlow(),
         ).first()
 
@@ -71,7 +71,7 @@ class DaemonClientIntegrationTest {
         try {
             val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = "127.0.0.1", port = port))
             val packet = rpcClient.withService<DaemonApi>().startSession(
-                config = TunSessionConfig(interfaceName = "wg0", addresses = listOf("10.0.0.1/24")),
+                config = TunSessionConfig(interfaceName = "utun0", addresses = listOf("10.0.0.1/24")),
                 outgoingPackets = emptyFlow(),
             ).first()
 

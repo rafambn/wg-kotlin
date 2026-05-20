@@ -73,20 +73,8 @@ internal class WindowsPlatformAdapter(
             }
 
             addresses.forEach { address ->
+                deleteAddress(address = address, interfaceName = interfaceName)
                 if (isIpv6AddressLiteral(address)) {
-                    runCommand(
-                        operationLabel = "delete-address",
-                        binary = CommandBinary.NETSH,
-                        arguments = listOf(
-                            "interface",
-                            "ipv6",
-                            "delete",
-                            "address",
-                            "interface=$interfaceName",
-                            "address=$address",
-                        ),
-                        ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
-                    )
                     runCommand(
                         operationLabel = "add-address",
                         binary = CommandBinary.NETSH,
@@ -97,24 +85,11 @@ internal class WindowsPlatformAdapter(
                             "address",
                             "interface=$interfaceName",
                             "address=$address",
+                            "store=active",
                         ),
                     )
                 } else {
                     val (ip, prefix) = splitCidr(address)
-                    runCommand(
-                        operationLabel = "delete-address",
-                        binary = CommandBinary.NETSH,
-                        arguments = listOf(
-                            "interface",
-                            "ipv4",
-                            "delete",
-                            "address",
-                            "name=$interfaceName",
-                            "address=$ip",
-                            "gateway=all",
-                        ),
-                        ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
-                    )
                     runCommand(
                         operationLabel = "add-address",
                         binary = CommandBinary.NETSH,
@@ -126,6 +101,7 @@ internal class WindowsPlatformAdapter(
                             "name=$interfaceName",
                             "address=$ip",
                             "mask=${prefixToMask(prefix)}",
+                            "store=active",
                         ),
                     )
                 }
@@ -163,36 +139,28 @@ internal class WindowsPlatformAdapter(
             CleanupTunHandle(
                 delegate = baseHandle,
                 cleanup = {
-                    routes.asReversed().forEach { route ->
-                        runCommand(
-                            operationLabel = "delete-route",
-                            binary = CommandBinary.NETSH,
-                            arguments = routeArguments(command = "delete", route = route, interfaceName = interfaceName),
-                            ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
-                        )
-                    }
-                    runCommand(
-                        operationLabel = "clear-nrpt-rules",
-                        binary = CommandBinary.POWERSHELL,
-                        arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_NRPT_RULES_SCRIPT),
-                        environment = mapOf(ENV_NRPT_COMMENT to ruleComment(interfaceName)),
+                    cleanupWindowsSession(
+                        addresses = addresses,
+                        routes = routes,
+                        interfaceName = interfaceName,
                     )
                 },
             )
         } catch (failure: Throwable) {
-            routes.asReversed().forEach { route ->
-                runCatching { deleteRoute(route = route, interfaceName = baseHandle.interfaceName) }
-                    .onFailure(failure::addSuppressed)
-            }
+            runCatching {
+                cleanupWindowsSession(
+                    addresses = addresses,
+                    routes = routes,
+                    interfaceName = baseHandle.interfaceName,
+                )
+            }.onFailure(failure::addSuppressed)
             runCatching { baseHandle.close() }
-                .onFailure(failure::addSuppressed)
-            runCatching { clearNrptRules(baseHandle.interfaceName) }
                 .onFailure(failure::addSuppressed)
             throw failure
         }
     }
 
-    private suspend fun addRoute(route: String, interfaceName: String) {
+    private fun addRoute(route: String, interfaceName: String) {
         runCommand(
             operationLabel = "add-route",
             binary = CommandBinary.NETSH,
@@ -200,7 +168,7 @@ internal class WindowsPlatformAdapter(
         )
     }
 
-    private suspend fun deleteRoute(route: String, interfaceName: String) {
+    private fun deleteRoute(route: String, interfaceName: String) {
         runCommand(
             operationLabel = "delete-route",
             binary = CommandBinary.NETSH,
@@ -209,13 +177,53 @@ internal class WindowsPlatformAdapter(
         )
     }
 
-    private suspend fun clearNrptRules(interfaceName: String) {
+    private fun deleteAddress(address: String, interfaceName: String) {
+        deleteAddressArguments(address = address, interfaceName = interfaceName).forEach { arguments ->
+            runCommand(
+                operationLabel = "delete-address",
+                binary = CommandBinary.NETSH,
+                arguments = arguments,
+                ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
+            )
+        }
+    }
+
+    private fun clearNrptRules(interfaceName: String) {
         runCommand(
             operationLabel = "clear-nrpt-rules",
             binary = CommandBinary.POWERSHELL,
             arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_NRPT_RULES_SCRIPT),
             environment = mapOf(ENV_NRPT_COMMENT to ruleComment(interfaceName)),
         )
+    }
+
+    private fun cleanupWindowsSession(
+        addresses: List<String>,
+        routes: List<String>,
+        interfaceName: String,
+    ) {
+        var failure: Throwable? = null
+
+        fun captureFailure(block: () -> Unit) {
+            runCatching(block).onFailure { throwable ->
+                val currentFailure = failure
+                if (currentFailure == null) {
+                    failure = throwable
+                } else {
+                    currentFailure.addSuppressed(throwable)
+                }
+            }
+        }
+
+        routes.asReversed().forEach { route ->
+            captureFailure { deleteRoute(route = route, interfaceName = interfaceName) }
+        }
+        addresses.asReversed().forEach { address ->
+            captureFailure { deleteAddress(address = address, interfaceName = interfaceName) }
+        }
+        captureFailure { clearNrptRules(interfaceName) }
+
+        failure?.let { throw it }
     }
 
     private fun ruleComment(interfaceName: String): String {
@@ -239,7 +247,38 @@ internal class WindowsPlatformAdapter(
             "route",
             "prefix=$route",
             "interface=$interfaceName",
-        )
+        ) + if (command == "add") listOf("store=active") else emptyList()
+    }
+
+    private fun deleteAddressArguments(address: String, interfaceName: String): List<List<String>> {
+        return if (isIpv6AddressLiteral(address)) {
+            val addressLiteral = address.substringBefore("/")
+            listOf("active", "persistent").map { store ->
+                listOf(
+                    "interface",
+                    "ipv6",
+                    "delete",
+                    "address",
+                    "interface=$interfaceName",
+                    "address=$addressLiteral",
+                    "store=$store",
+                )
+            }
+        } else {
+            val (ip, _) = splitCidr(address)
+            listOf("active", "persistent").map { store ->
+                listOf(
+                    "interface",
+                    "ipv4",
+                    "delete",
+                    "address",
+                    "name=$interfaceName",
+                    "address=$ip",
+                    "gateway=all",
+                    "store=$store",
+                )
+            }
+        }
     }
 
     private fun prefixToMask(prefix: Int): String {

@@ -26,6 +26,7 @@ internal class MacOsPlatformAdapter(
             prefixLength = primaryAddress.prefixLength,
         ).openDevice()
         val addresses = normalizeCidrs(config.addresses)
+            .filterNot { address -> isPrimaryTunAddress(address, primaryAddress) }
         val routes = normalizeCidrs(config.routes)
         return try {
             val interfaceName = handle.interfaceName
@@ -94,47 +95,28 @@ internal class MacOsPlatformAdapter(
             CleanupTunHandle(
                 delegate = handle,
                 cleanup = {
-                    routes.asReversed().forEach { route ->
-                        runCommand(
-                            operationLabel = "delete-route",
-                            binary = CommandBinary.ROUTE,
-                            arguments = routeArguments(command = "delete", route = route, interfaceName = interfaceName),
-                            ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
-                        )
-                    }
-                    addresses.asReversed().forEach { address ->
-                        runCommand(
-                            operationLabel = "delete-address",
-                            binary = CommandBinary.IFCONFIG,
-                            arguments = deleteAddressArguments(address = address, interfaceName = interfaceName),
-                            ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
-                        )
-                    }
-                    runCommand(
-                        operationLabel = "clear-dns",
-                        binary = CommandBinary.SCUTIL,
-                        stdin = clearDnsStdin(interfaceName),
+                    cleanupMacOsSession(
+                        addresses = addresses,
+                        routes = routes,
+                        interfaceName = interfaceName,
                     )
                 },
             )
         } catch (failure: Throwable) {
-            routes.asReversed().forEach { route ->
-                runCatching { deleteRoute(route = route, interfaceName = handle.interfaceName) }
-                    .onFailure(failure::addSuppressed)
-            }
-            addresses.asReversed().forEach { address ->
-                runCatching { deleteAddress(address = address, interfaceName = handle.interfaceName) }
-                    .onFailure(failure::addSuppressed)
-            }
+            runCatching {
+                cleanupMacOsSession(
+                    addresses = addresses,
+                    routes = routes,
+                    interfaceName = handle.interfaceName,
+                )
+            }.onFailure(failure::addSuppressed)
             runCatching { handle.close() }
-                .onFailure(failure::addSuppressed)
-            runCatching { clearDnsEntries(handle.interfaceName) }
                 .onFailure(failure::addSuppressed)
             throw failure
         }
     }
 
-    private suspend fun addRoute(route: String, interfaceName: String) {
+    private fun addRoute(route: String, interfaceName: String) {
         runCommand(
             operationLabel = "add-route",
             binary = CommandBinary.ROUTE,
@@ -142,7 +124,7 @@ internal class MacOsPlatformAdapter(
         )
     }
 
-    private suspend fun deleteRoute(route: String, interfaceName: String) {
+    private fun deleteRoute(route: String, interfaceName: String) {
         runCommand(
             operationLabel = "delete-route",
             binary = CommandBinary.ROUTE,
@@ -151,7 +133,7 @@ internal class MacOsPlatformAdapter(
         )
     }
 
-    private suspend fun deleteAddress(address: String, interfaceName: String) {
+    private fun deleteAddress(address: String, interfaceName: String) {
         runCommand(
             operationLabel = "delete-address",
             binary = CommandBinary.IFCONFIG,
@@ -174,12 +156,48 @@ internal class MacOsPlatformAdapter(
         }
     }
 
-    private suspend fun clearDnsEntries(interfaceName: String) {
+    private fun isPrimaryTunAddress(address: String, primaryAddress: PrimaryTunAddress): Boolean {
+        val parts = address.split("/", limit = 2)
+        return parts.size == 2 &&
+            parts[0].trim() == primaryAddress.address &&
+            parts[1].trim().toIntOrNull() == primaryAddress.prefixLength.toInt()
+    }
+
+    private fun clearDnsEntries(interfaceName: String) {
         runCommand(
             operationLabel = "clear-dns",
             binary = CommandBinary.SCUTIL,
             stdin = clearDnsStdin(interfaceName),
         )
+    }
+
+    private fun cleanupMacOsSession(
+        addresses: List<String>,
+        routes: List<String>,
+        interfaceName: String,
+    ) {
+        var failure: Throwable? = null
+
+        fun captureFailure(block: () -> Unit) {
+            runCatching(block).onFailure { throwable ->
+                val currentFailure = failure
+                if (currentFailure == null) {
+                    failure = throwable
+                } else {
+                    currentFailure.addSuppressed(throwable)
+                }
+            }
+        }
+
+        routes.asReversed().forEach { route ->
+            captureFailure { deleteRoute(route = route, interfaceName = interfaceName) }
+        }
+        addresses.asReversed().forEach { address ->
+            captureFailure { deleteAddress(address = address, interfaceName = interfaceName) }
+        }
+        captureFailure { clearDnsEntries(interfaceName) }
+
+        failure?.let { throw it }
     }
 
     private fun clearDnsStdin(interfaceName: String): String {

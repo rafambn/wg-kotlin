@@ -27,11 +27,11 @@ class DaemonKoinBootstrapTest {
         )
 
         firstDependencies.service.startSession(
-            config = TunSessionConfig(interfaceName = "wg0", addresses = listOf("10.0.0.1/24")),
+            config = TunSessionConfig(interfaceName = "utun0", addresses = listOf("10.0.0.1/24")),
             outgoingPackets = emptyFlow(),
         ).first()
         secondDependencies.service.startSession(
-            config = TunSessionConfig(interfaceName = "wg1", addresses = listOf("10.0.0.2/24")),
+            config = TunSessionConfig(interfaceName = "utun1", addresses = listOf("10.0.0.2/24")),
             outgoingPackets = emptyFlow(),
         ).first()
 

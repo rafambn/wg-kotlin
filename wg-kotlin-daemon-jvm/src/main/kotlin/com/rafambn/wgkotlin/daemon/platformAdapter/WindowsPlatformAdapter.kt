@@ -16,17 +16,12 @@ internal class WindowsPlatformAdapter(
         CommandBinary.POWERSHELL,
     )
 
-    init {
-        runCommand(
-            operationLabel = "clear-stale-nrpt-rules",
-            binary = CommandBinary.POWERSHELL,
-            arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_ALL_NRPT_RULES_SCRIPT),
-            environment = mapOf(ENV_NRPT_COMMENT_PREFIX to NRPT_COMMENT_PREFIX),
-        )
-    }
+    private val staleNrptRulesCleanupLock = Any()
+    private var staleNrptRulesCleared = false
 
     override suspend fun startSession(config: TunSessionConfig): TunHandle {
         val primaryAddress = extractPrimaryTunAddress(config)
+        clearStaleNrptRulesOnce()
         val baseHandle = RealTunHandle(
             requestedInterfaceName = config.interfaceName,
             ipAddress = primaryAddress.address,
@@ -178,14 +173,27 @@ internal class WindowsPlatformAdapter(
     }
 
     private fun deleteAddress(address: String, interfaceName: String) {
+        var failure: Throwable? = null
+
         deleteAddressArguments(address = address, interfaceName = interfaceName).forEach { arguments ->
-            runCommand(
-                operationLabel = "delete-address",
-                binary = CommandBinary.NETSH,
-                arguments = arguments,
-                ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
-            )
+            runCatching {
+                runCommand(
+                    operationLabel = "delete-address",
+                    binary = CommandBinary.NETSH,
+                    arguments = arguments,
+                    ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
+                )
+            }.onFailure { throwable ->
+                val currentFailure = failure
+                if (currentFailure == null) {
+                    failure = throwable
+                } else {
+                    currentFailure.addSuppressed(throwable)
+                }
+            }
         }
+
+        failure?.let { throw it }
     }
 
     private fun clearNrptRules(interfaceName: String) {
@@ -195,6 +203,22 @@ internal class WindowsPlatformAdapter(
             arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_NRPT_RULES_SCRIPT),
             environment = mapOf(ENV_NRPT_COMMENT to ruleComment(interfaceName)),
         )
+    }
+
+    private fun clearStaleNrptRulesOnce() {
+        synchronized(staleNrptRulesCleanupLock) {
+            if (staleNrptRulesCleared) {
+                return
+            }
+
+            runCommand(
+                operationLabel = "clear-stale-nrpt-rules",
+                binary = CommandBinary.POWERSHELL,
+                arguments = listOf("-NoProfile", "-NonInteractive", "-Command", CLEAR_ALL_NRPT_RULES_SCRIPT),
+                environment = mapOf(ENV_NRPT_COMMENT_PREFIX to NRPT_COMMENT_PREFIX),
+            )
+            staleNrptRulesCleared = true
+        }
     }
 
     private fun cleanupWindowsSession(

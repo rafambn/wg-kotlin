@@ -13,12 +13,13 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class WindowsPlatformAdapterTest {
 
     @Test
-    fun constructionCleansUpStaleNrptRules() {
+    fun constructionDoesNotRunPrivilegedCommands() {
         val invocations = mutableListOf<ProcessInvocationModel>()
 
         WindowsPlatformAdapter(
@@ -28,11 +29,50 @@ class WindowsPlatformAdapterTest {
             },
         )
 
-        val invocation = invocations.single()
-        assertEquals(CommandBinary.POWERSHELL, invocation.binary)
-        assertTrue(invocation.arguments.last().contains("Get-DnsClientNrptRule"))
-        assertTrue(invocation.arguments.last().contains("Remove-DnsClientNrptRule"))
-        assertEquals("kmpvpn-daemon:", invocation.environment.values.single())
+        assertTrue(invocations.isEmpty())
+    }
+
+    @Test
+    fun startSessionCleansUpStaleNrptRulesOnceBeforeOpeningHandle() = runBlocking {
+        var handleOpened = false
+        val invocations = mutableListOf<ProcessInvocationModel>()
+        val openedHandle = mockk<RealTunHandle>()
+
+        mockkConstructor(RealTunHandle::class)
+        try {
+            every { openedHandle.interfaceName } returns "wintun-opened"
+            coEvery { anyConstructed<RealTunHandle>().openDevice() } answers {
+                handleOpened = true
+                openedHandle
+            }
+
+            val adapter = WindowsPlatformAdapter(
+                processLauncher = ProcessLauncher { invocation ->
+                    if (invocation.environment.containsKey("WG_KOTLIN_NRPT_COMMENT_PREFIX")) {
+                        assertFalse(handleOpened)
+                    }
+                    invocations += invocation
+                    ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
+                },
+            )
+
+            val config = TunSessionConfig(
+                interfaceName = "requested-wg0",
+                addresses = listOf("10.10.10.2/24"),
+            )
+            adapter.startSession(config)
+            adapter.startSession(config)
+
+            val staleCleanupInvocations = invocations.filter { invocation ->
+                invocation.binary == CommandBinary.POWERSHELL &&
+                    invocation.environment["WG_KOTLIN_NRPT_COMMENT_PREFIX"] == "kmpvpn-daemon:"
+            }
+
+            assertEquals(1, staleCleanupInvocations.size)
+            assertTrue(staleCleanupInvocations.single().arguments.last().contains("Remove-DnsClientNrptRule"))
+        } finally {
+            unmockkConstructor(RealTunHandle::class)
+        }
     }
 
     @Test
@@ -51,8 +91,8 @@ class WindowsPlatformAdapterTest {
 
             val adapter = WindowsPlatformAdapter(
                 processLauncher = ProcessLauncher { invocation ->
-                    // init block runs stale-state cleanup before startSession;
-                    // only NETSH / route commands require the TUN handle to be open.
+                    // Stale NRPT cleanup runs before opening the handle;
+                    // NETSH commands require the TUN handle to be open.
                     if (invocation.binary == CommandBinary.NETSH) {
                         check(handleOpened) { "NETSH commands must execute only after TUN handle is open" }
                     }
@@ -196,9 +236,15 @@ class WindowsPlatformAdapterTest {
                     if (
                         failCleanupRouteDelete &&
                         invocation.binary == CommandBinary.NETSH &&
-                        invocation.arguments.take(4) == listOf("interface", "ipv4", "delete", "route")
+                        (
+                            invocation.arguments.take(4) == listOf("interface", "ipv4", "delete", "route") ||
+                                (
+                                    invocation.arguments.take(4) == listOf("interface", "ipv4", "delete", "address") &&
+                                        invocation.arguments.contains("store=active")
+                                    )
+                            )
                     ) {
-                        ProcessOutputModel(exitCode = 1, stdout = "", stderr = "route delete failed")
+                        ProcessOutputModel(exitCode = 1, stdout = "", stderr = "cleanup failed")
                     } else {
                         ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
                     }
@@ -229,6 +275,14 @@ class WindowsPlatformAdapterTest {
                         invocation.arguments.take(4) == listOf("interface", "ipv4", "delete", "address") &&
                         invocation.arguments.contains("address=10.10.10.2") &&
                         invocation.arguments.contains("store=active")
+                },
+            )
+            assertTrue(
+                cleanupInvocations.any { invocation ->
+                    invocation.binary == CommandBinary.NETSH &&
+                        invocation.arguments.take(4) == listOf("interface", "ipv4", "delete", "address") &&
+                        invocation.arguments.contains("address=10.10.10.2") &&
+                        invocation.arguments.contains("store=persistent")
                 },
             )
             assertTrue(

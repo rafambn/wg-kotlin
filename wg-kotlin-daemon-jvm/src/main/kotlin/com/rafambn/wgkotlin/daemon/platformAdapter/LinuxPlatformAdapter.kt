@@ -28,8 +28,9 @@ internal class LinuxPlatformAdapter(
         val routingDomains = config.dns.searchDomains
             .map { domain -> domain.trim() }
             .filter { domain -> domain.isNotBlank() }
+            .map { domain -> domain.removePrefix(".") }
             .distinct()
-            .map { domain -> "~${domain.removePrefix(".")}" }
+            .map { domain -> "~$domain" }
         val dnsServers = config.dns.servers
             .map { server -> server.trim() }
             .filter { server -> server.isNotBlank() }
@@ -63,6 +64,7 @@ internal class LinuxPlatformAdapter(
                 addRoute(route = route, interfaceName = interfaceName)
             }
 
+            revertDns(interfaceName)
             if (hasDnsConfiguration) {
                 runCommand(
                     operationLabel = "set-dns",
@@ -98,15 +100,8 @@ internal class LinuxPlatformAdapter(
                             )
                         }.onFailure(::recordCleanupFailure)
                     }
-                    if (hasDnsConfiguration) {
-                        runCatching {
-                            runCommand(
-                                operationLabel = "revert-dns",
-                                binary = CommandBinary.RESOLVECTL,
-                                arguments = listOf("revert", interfaceName),
-                            )
-                        }.onFailure(::recordCleanupFailure)
-                    }
+                    runCatching { revertDns(interfaceName) }
+                        .onFailure(::recordCleanupFailure)
                     cleanupFailure?.let { throw it }
                 },
             )
@@ -115,17 +110,15 @@ internal class LinuxPlatformAdapter(
                 runCatching { deleteRoute(route = route, interfaceName = handle.interfaceName) }
                     .onFailure(failure::addSuppressed)
             }
-            if (hasDnsConfiguration) {
-                runCatching { revertDns(handle.interfaceName) }
-                    .onFailure(failure::addSuppressed)
-            }
+            runCatching { revertDns(handle.interfaceName) }
+                .onFailure(failure::addSuppressed)
             runCatching { handle.close() }
                 .onFailure(failure::addSuppressed)
             throw failure
         }
     }
 
-    private suspend fun addRoute(route: String, interfaceName: String) {
+    private fun addRoute(route: String, interfaceName: String) {
         runCommand(
             operationLabel = "add-route",
             binary = CommandBinary.IP,
@@ -133,7 +126,7 @@ internal class LinuxPlatformAdapter(
         )
     }
 
-    private suspend fun deleteRoute(route: String, interfaceName: String) {
+    private fun deleteRoute(route: String, interfaceName: String) {
         runCommand(
             operationLabel = "delete-route",
             binary = CommandBinary.IP,
@@ -142,7 +135,7 @@ internal class LinuxPlatformAdapter(
         )
     }
 
-    private suspend fun revertDns(interfaceName: String) {
+    private fun revertDns(interfaceName: String) {
         runCommand(
             operationLabel = "revert-dns",
             binary = CommandBinary.RESOLVECTL,

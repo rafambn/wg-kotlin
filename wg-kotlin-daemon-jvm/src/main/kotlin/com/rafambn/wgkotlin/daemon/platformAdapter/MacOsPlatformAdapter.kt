@@ -40,6 +40,7 @@ internal class MacOsPlatformAdapter(
             }
 
             addresses.forEach { address ->
+                deleteAddress(address = address, interfaceName = interfaceName)
                 val arguments = if (address.substringBefore("/").contains(":")) {
                     listOf(interfaceName, "inet6", address, "add")
                 } else {

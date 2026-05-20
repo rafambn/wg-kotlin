@@ -91,10 +91,60 @@ class PlatformAdapterFailureCleanupTest {
 
             verify(exactly = 1) { openedHandle.close() }
             assertEquals(
-                1,
+                2,
                 invocations.count { invocation ->
                     invocation.binary == CommandBinary.RESOLVECTL &&
                         invocation.arguments == listOf("revert", "linux-opened")
+                },
+            )
+        } finally {
+            unmockkConstructor(RealTunHandle::class)
+        }
+    }
+
+    @Test
+    fun linuxRevertsDnsBeforeApplyingDnsAndWhenDnsIsEmpty() = runBlocking {
+        val invocations = mutableListOf<ProcessInvocationModel>()
+
+        mockkConstructor(RealTunHandle::class)
+        try {
+            mockOpenedTunHandle("linux-opened")
+            val adapter = LinuxPlatformAdapter(
+                processLauncher = ProcessLauncher { invocation ->
+                    invocations += invocation
+                    ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
+                },
+            )
+
+            adapter.startSession(
+                TunSessionConfig(
+                    interfaceName = "utun0",
+                    addresses = listOf("10.10.10.2/24"),
+                ),
+            )
+            adapter.startSession(
+                TunSessionConfig(
+                    interfaceName = "utun0",
+                    addresses = listOf("10.10.10.2/24"),
+                    dns = DnsConfig(
+                        searchDomains = listOf(".corp.local", "corp.local"),
+                        servers = listOf("1.1.1.1"),
+                    ),
+                ),
+            )
+
+            assertEquals(
+                2,
+                invocations.count { invocation ->
+                    invocation.binary == CommandBinary.RESOLVECTL &&
+                        invocation.arguments == listOf("revert", "linux-opened")
+                },
+            )
+            assertEquals(
+                1,
+                invocations.count { invocation ->
+                    invocation.binary == CommandBinary.RESOLVECTL &&
+                        invocation.arguments == listOf("domain", "linux-opened", "~corp.local")
                 },
             )
         } finally {
@@ -250,6 +300,12 @@ class PlatformAdapterFailureCleanupTest {
                     arguments == listOf("utun7", "inet", "10.10.10.3/24", "alias")
                 },
             )
+            assertEquals(
+                1,
+                addressCommands.count { arguments ->
+                    arguments == listOf("utun7", "inet", "10.10.10.3", "-alias")
+                },
+            )
         } finally {
             unmockkConstructor(RealTunHandle::class)
         }
@@ -295,7 +351,7 @@ class PlatformAdapterFailureCleanupTest {
 
             verify(exactly = 1) { openedHandle.close() }
             assertEquals(
-                1,
+                2,
                 invocations.count { invocation ->
                     invocation.binary == CommandBinary.IFCONFIG &&
                         invocation.arguments == listOf("utun7", "inet", "10.10.10.3", "-alias")

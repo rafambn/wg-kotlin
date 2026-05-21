@@ -33,27 +33,13 @@ class DaemonBackedInterfaceCommandExecutor(
     private val host: String,
     private val port: Int,
 ) : InterfaceCommandExecutor {
-    private val client: DaemonProcessClient by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        val httpClient = HttpClient(CIO) {
-            install(WebSockets)
-            installKrpc {
-                serialization {
-                    protobuf()
-                }
-            }
-        }
-        val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = host, port = port))
-        DaemonProcessClient(
-            service = rpcClient.withService<DaemonApi>(),
-            resourceCloser = { httpClient.close() },
-        )
-    }
 
     override fun openSession(
         config: TunSessionConfig,
         pipe: DuplexChannelPipe<ByteArray>,
         onFailure: (Throwable) -> Unit,
     ): AutoCloseable {
+        val client = createClient()
         val outgoingPackets = Channel<ByteArray>(capacity = DuplexChannelPipe.DEFAULT_CAPACITY)
         val scope = CoroutineScope(
             SupervisorJob() + Dispatchers.IO + CoroutineName("kmpvpn-packet-rpc-bridge"),
@@ -124,6 +110,7 @@ class DaemonBackedInterfaceCommandExecutor(
         } catch (throwable: Throwable) {
             scope.cancel("DaemonBackedInterfaceCommandExecutor packet bridge failed to connect")
             outgoingPackets.close()
+            runCatching { client.close() }
             throw IllegalStateException(
                 "Failed to open session for `${config.interfaceName}`: ${throwable.message ?: "unknown"}",
                 throwable,
@@ -139,7 +126,24 @@ class DaemonBackedInterfaceCommandExecutor(
                     outgoingPumpJob.join()
                 }
             }
+            client.close()
         }
+    }
+
+    private fun createClient(): DaemonProcessClient {
+        val httpClient = HttpClient(CIO) {
+            install(WebSockets)
+            installKrpc {
+                serialization {
+                    protobuf()
+                }
+            }
+        }
+        val rpcClient = httpClient.rpc(DaemonTransport.rpcUrl(host = host, port = port))
+        return DaemonProcessClient(
+            service = rpcClient.withService<DaemonApi>(),
+            resourceCloser = { httpClient.close() },
+        )
     }
 
     private companion object {

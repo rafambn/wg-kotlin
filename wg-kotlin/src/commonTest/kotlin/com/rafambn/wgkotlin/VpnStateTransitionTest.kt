@@ -1,10 +1,5 @@
 package com.rafambn.wgkotlin
 
-import com.rafambn.wgkotlin.crypto.CryptoSessionManager
-import com.rafambn.wgkotlin.crypto.VpnPeerStats
-import com.rafambn.wgkotlin.iface.InterfaceManager
-import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
-import com.rafambn.wgkotlin.network.SocketManager
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -16,11 +11,11 @@ class VpnStateTransitionTest {
 
     @Test
     fun lifecycleTransitionsFollowContract() {
-        val vpn = testVpn(configuration = baseConfiguration(interfaceName = "utun130"))
+        val vpn = testVpn(interfaceName = "utun130")
 
         assertFalse(vpn.isRunning())
 
-        vpn.open()
+        vpn.open(baseConfiguration(interfaceName = "utun130"))
         assertTrue(vpn.isRunning())
 
         vpn.stop()
@@ -34,12 +29,12 @@ class VpnStateTransitionTest {
     @Test
     fun failedStartLeavesVpnStopped() {
         val vpn = testVpn(
-            configuration = baseConfiguration(interfaceName = "utun131"),
+            interfaceName = "utun131",
             interfaceManager = FailingStartInterfaceManager(),
         )
 
         assertFailsWith<IllegalStateException> {
-            vpn.open()
+            vpn.open(baseConfiguration(interfaceName = "utun131"))
         }
 
         assertFalse(vpn.isRunning())
@@ -51,7 +46,7 @@ class VpnStateTransitionTest {
         val socketManager = RecordingSocketManager()
         val cryptoSessionManager = RecordingCryptoSessionManager()
         val vpn = testVpn(
-            configuration = configuration,
+            interfaceName = "utun132",
             cryptoSessionManager = cryptoSessionManager,
             socketManager = socketManager,
             interfaceManager = StopFailingInterfaceManager(configuration),
@@ -73,72 +68,5 @@ class VpnStateTransitionTest {
             privateKey = privateKey,
             peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
         )
-    }
-
-    private class FailingStartInterfaceManager : InterfaceManager {
-        override fun isRunning(): Boolean = false
-
-        override fun start(config: VpnConfiguration, onFailure: (Throwable) -> Unit) {
-            error("boom")
-        }
-
-        override fun stop() {}
-
-        override fun reconfigure(config: VpnConfiguration) {}
-
-        override fun information(): VpnInterfaceInformation? = null
-    }
-
-    private class StopFailingInterfaceManager(
-        private val currentConfiguration: VpnConfiguration,
-    ) : InterfaceManager {
-        override fun isRunning(): Boolean = false
-
-        override fun start(config: VpnConfiguration, onFailure: (Throwable) -> Unit) {}
-
-        override fun stop() {
-            error("stop failed")
-        }
-
-        override fun reconfigure(config: VpnConfiguration) {}
-
-        override fun information(): VpnInterfaceInformation {
-            return VpnInterfaceInformation(
-                interfaceName = currentConfiguration.interfaceName,
-                isUp = false,
-                addresses = currentConfiguration.addresses,
-                dns = currentConfiguration.dns,
-                mtu = currentConfiguration.mtu,
-                listenPort = currentConfiguration.listenPort,
-            )
-        }
-    }
-
-    private class RecordingSocketManager : SocketManager {
-        var stopCalls: Int = 0
-
-        override fun start(listenPort: Int, onFailure: (Throwable) -> Unit) {}
-
-        override fun stop() {
-            stopCalls++
-        }
-
-        override fun isRunning(): Boolean = false
-    }
-
-    private class RecordingCryptoSessionManager : CryptoSessionManager {
-        var stopCalls: Int = 0
-
-        override fun reconcileSessions(config: VpnConfiguration) {}
-
-        override fun start(onFailure: (Throwable) -> Unit) {}
-
-        override fun stop() {
-            stopCalls++
-        }
-
-        override fun hasActiveSessions(): Boolean = false
-
-        override fun peerStats(): List<VpnPeerStats> = emptyList()
     }
 }

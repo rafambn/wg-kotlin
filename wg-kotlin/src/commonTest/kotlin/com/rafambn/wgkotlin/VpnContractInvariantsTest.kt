@@ -11,25 +11,22 @@ class VpnContractInvariantsTest {
     @Test
     fun rejectsBlankInterfaceName() {
         assertFailsWith<IllegalArgumentException> {
-            testVpn(
-                configuration = VpnConfiguration(
-                    interfaceName = " ",
-                    privateKey = privateKey,
-                ),
-            )
+            testVpn(interfaceName = " ")
         }
     }
 
     @Test
-    fun rejectsDuplicatePeerPublicKeysOnConstruction() {
+    fun rejectsDuplicatePeerPublicKeysOnOpen() {
         val duplicatedPeers = listOf(
             VpnPeer(publicKey = "peer-a", endpointAddress = "198.51.100.1", endpointPort = 51820),
             VpnPeer(publicKey = "peer-a", endpointAddress = "198.51.100.2", endpointPort = 51821),
         )
 
+        val vpn = testVpn(interfaceName = "utun110")
+
         assertFailsWith<IllegalArgumentException> {
-            testVpn(
-                configuration = VpnConfiguration(
+            vpn.open(
+                VpnConfiguration(
                     interfaceName = "utun110",
                     privateKey = privateKey,
                     peers = duplicatedPeers,
@@ -39,40 +36,11 @@ class VpnContractInvariantsTest {
     }
 
     @Test
-    fun reconfigureRejectsDuplicatedPeerPublicKeys() {
-        val vpn = testVpn(
-            configuration = VpnConfiguration(
-                interfaceName = "utun111",
-                privateKey = privateKey,
-                peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
-            ),
-        )
+    fun openRejectsMismatchedInterfaceName() {
+        val vpn = testVpn(interfaceName = "utun112")
 
         assertFailsWith<IllegalArgumentException> {
-            vpn.reconfigure(
-                VpnConfiguration(
-                    interfaceName = "utun111",
-                    privateKey = privateKey,
-                    peers = listOf(
-                        VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820),
-                        VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.2", endpointPort = 51821),
-                    ),
-                ),
-            )
-        }
-    }
-
-    @Test
-    fun reconfigureRejectsInterfaceNameChange() {
-        val vpn = testVpn(
-            configuration = VpnConfiguration(
-                interfaceName = "utun112",
-                privateKey = privateKey,
-            ),
-        )
-
-        assertFailsWith<IllegalArgumentException> {
-            vpn.reconfigure(
+            vpn.open(
                 VpnConfiguration(
                     interfaceName = "utun113",
                     privateKey = privateKey,

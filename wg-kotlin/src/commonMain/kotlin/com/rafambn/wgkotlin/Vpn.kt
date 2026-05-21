@@ -8,7 +8,7 @@ import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 
 class Vpn(
-    configuration: VpnConfiguration,
+    val interfaceName: String,
     engine: Engine = Engine.BORINGTUN
 ) {
 
@@ -18,7 +18,6 @@ class Vpn(
 
     private val tunPipePair = DuplexChannelPipe.create<ByteArray>()
     private val networkPipePair = DuplexChannelPipe.create<UdpDatagram>()
-    private var vpnConfiguration = configuration
     private val cryptoSessionManager = CryptoSessionManagerImpl(
         tunPipe = tunPipePair.second,
         networkPipe = networkPipePair.second,
@@ -26,21 +25,29 @@ class Vpn(
     )
     private val socketManager = SocketManagerImpl(networkPipe = networkPipePair.first)
     private val interfaceManager = PlatformInterfaceFactory.create(tunPipePair.first)
+    private var currentConfiguration: VpnConfiguration? = null
 
     init {
-        requireValidConfiguration(vpnConfiguration)
+        requireNonBlankInterfaceName(interfaceName)
+        requireValidRegex(interfaceName)
     }
 
     fun isRunning(): Boolean {
         return interfaceManager.isRunning() && cryptoSessionManager.hasActiveSessions()
     }
 
-    fun open() {
-        requireValidConfiguration(vpnConfiguration)
+    fun open(configuration: VpnConfiguration) {
+        requireValidConfiguration(configuration)
+        require(configuration.interfaceName == interfaceName) {
+            "Configuration interface name `${configuration.interfaceName}` does not match this Vpn's interface name `$interfaceName`"
+        }
+
         stop()
 
+        currentConfiguration = configuration
+
         operation("reconcileSessions") {
-            cryptoSessionManager.reconcileSessions(vpnConfiguration)
+            cryptoSessionManager.reconcileSessions(configuration)
         }
 
         operation("start") {
@@ -49,13 +56,13 @@ class Vpn(
 
         operation("socketStart") {
             socketManager.start(
-                listenPort = vpnConfiguration.listenPort ?: DEFAULT_PORT,
+                listenPort = configuration.listenPort ?: DEFAULT_PORT,
                 onFailure = { stop() },
             )
         }
 
         operation("start") {
-            interfaceManager.start(vpnConfiguration) { stop() }
+            interfaceManager.start(configuration) { stop() }
         }
     }
 
@@ -71,36 +78,7 @@ class Vpn(
             liveInformation.copy(peerStats = runtimePeerStats)
         }
 
-        return informationWithPeerStats.copy(vpnConfiguration = vpnConfiguration)
-    }
-
-    fun reconfigure(config: VpnConfiguration) {
-        requireValidConfiguration(config)
-        require(config.interfaceName == vpnConfiguration.interfaceName) {
-            "Cannot reconfigure interface `${vpnConfiguration.interfaceName}` using `${config.interfaceName}`"
-        }
-
-        val previousListenPort = vpnConfiguration.listenPort ?: DEFAULT_PORT
-        vpnConfiguration = config
-
-        operation("reconcileSessions") {
-            cryptoSessionManager.reconcileSessions(config)
-        }
-
-        if (interfaceManager.isRunning()) {
-            val newListenPort = config.listenPort ?: DEFAULT_PORT
-
-            operation("reconfigure") {
-                interfaceManager.reconfigure(config)
-            }
-
-            if (previousListenPort != newListenPort) {
-                operation("socketRestart") {
-                    socketManager.stop()
-                    socketManager.start(newListenPort) { stop() }
-                }
-            }
-        }
+        return informationWithPeerStats.copy(vpnConfiguration = currentConfiguration)
     }
 
     fun stop() {
@@ -120,6 +98,7 @@ class Vpn(
         } catch (error: Throwable) {
             if (firstError == null) firstError = error
         }
+        currentConfiguration = null
         if (firstError != null) throw firstError
     }
 

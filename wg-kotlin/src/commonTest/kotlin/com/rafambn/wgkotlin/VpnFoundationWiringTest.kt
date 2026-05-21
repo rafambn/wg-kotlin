@@ -14,17 +14,18 @@ class VpnFoundationWiringTest {
 
     @Test
     fun inMemoryLifecycleStillWorks() {
-        val vpn = testVpn(
-            configuration = VpnConfiguration(
+        val vpn = testVpn(interfaceName = "utun120")
+
+        assertFalse(vpn.isRunning())
+
+        vpn.open(
+            VpnConfiguration(
                 interfaceName = "utun120",
+                listenPort = 0,
                 privateKey = privateKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
             ),
         )
-
-        assertFalse(vpn.isRunning())
-
-        vpn.open()
         assertTrue(vpn.isRunning())
 
         vpn.stop()
@@ -34,36 +35,48 @@ class VpnFoundationWiringTest {
 
     @Test
     fun repeatedStartKeepsVpnRunning() {
-        val vpn = testVpn(
-            configuration = VpnConfiguration(
+        val vpn = testVpn(interfaceName = "utun121")
+
+        vpn.open(
+            VpnConfiguration(
                 interfaceName = "utun121",
+                listenPort = 0,
+                privateKey = privateKey,
+                peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
+            ),
+        )
+        vpn.open(
+            VpnConfiguration(
+                interfaceName = "utun121",
+                listenPort = 0,
                 privateKey = privateKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
             ),
         )
 
-        vpn.open()
-        vpn.open()
-
         assertTrue(vpn.isRunning())
     }
 
     @Test
-    fun reconfigureAllowsFullConfigurationUpdate() {
-        val vpn = testVpn(
-            configuration = VpnConfiguration(
+    fun stopThenOpenWithNewConfigUpdatesConfiguration() {
+        val vpn = testVpn(interfaceName = "utun122")
+
+        vpn.open(
+            VpnConfiguration(
                 interfaceName = "utun122",
+                listenPort = 0,
                 dns = DnsConfig(searchDomains = listOf("corp.local"), servers = listOf("1.1.1.1")),
                 privateKey = privateKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
             ),
         )
 
-        vpn.open()
+        vpn.stop()
 
-        vpn.reconfigure(
+        vpn.open(
             VpnConfiguration(
                 interfaceName = "utun122",
+                listenPort = 0,
                 dns = DnsConfig(searchDomains = listOf("corp.local"), servers = listOf("9.9.9.9")),
                 addresses = mutableListOf("10.20.30.2/32"),
                 privateKey = privateKey,

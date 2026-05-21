@@ -1,11 +1,11 @@
 package com.rafambn.wgkotlin
 
 internal fun testVpn(
-    configuration: VpnConfiguration,
+    interfaceName: String,
     engine: Engine = Engine.BORINGTUN,
 ): Vpn {
     return Vpn(
-        configuration = normalizedTestConfiguration(configuration),
+        interfaceName = interfaceName,
         engine = engine,
     )
 }
@@ -34,7 +34,7 @@ internal fun snapshotConfiguration(config: VpnConfiguration): VpnConfiguration {
     )
 }
 
-private fun normalizedTestConfiguration(config: VpnConfiguration): VpnConfiguration {
+internal fun normalizedTestConfiguration(config: VpnConfiguration): VpnConfiguration {
     return if (config.listenPort != null) {
         config
     } else {

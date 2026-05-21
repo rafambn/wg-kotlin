@@ -8,7 +8,7 @@ plugins {
 
 allprojects {
     group = "com.rafambn"
-    version = "0.2.2"
+    version = "0.3.1"
 }
 
 val ciWgKotlinCore = tasks.register("ciWgKotlinCore") {

@@ -12,14 +12,27 @@ class VpnConstructorWiringTest {
 
     @Test
     fun secondaryConstructorBuildsIndependentInstances() {
-        val first = Vpn(configuration(interfaceName = "utun101"))
-        val second = Vpn(configuration(interfaceName = "utun102"))
+        val first = Vpn(interfaceName = "utun101")
+        val second = Vpn(interfaceName = "utun102")
 
         assertNotSame(first, second)
         assertFalse(first.isRunning())
         assertFalse(second.isRunning())
 
-        first.open()
+        first.open(
+            VpnConfiguration(
+                interfaceName = "utun101",
+                listenPort = 52101,
+                privateKey = privateKey,
+                peers = listOf(
+                    VpnPeer(
+                        publicKey = peerKey,
+                        endpointAddress = "198.51.100.1",
+                        endpointPort = 51820,
+                    ),
+                ),
+            ),
+        )
 
         assertTrue(first.isRunning())
         assertFalse(second.isRunning())
@@ -28,34 +41,27 @@ class VpnConstructorWiringTest {
     @Test
     fun explicitEngineStillSupportsLifecycle() {
         val vpn = Vpn(
-            configuration = configuration(interfaceName = "utun103"),
+            interfaceName = "utun103",
             engine = Engine.BORINGTUN,
         )
 
-        vpn.open()
+        vpn.open(
+            VpnConfiguration(
+                interfaceName = "utun103",
+                listenPort = 52103,
+                privateKey = privateKey,
+                peers = listOf(
+                    VpnPeer(
+                        publicKey = peerKey,
+                        endpointAddress = "198.51.100.1",
+                        endpointPort = 51820,
+                    ),
+                ),
+            ),
+        )
         assertTrue(vpn.isRunning())
 
         vpn.stop()
         assertFalse(vpn.isRunning())
-    }
-
-    private fun configuration(interfaceName: String): VpnConfiguration {
-        return VpnConfiguration(
-            interfaceName = interfaceName,
-            listenPort = when (interfaceName) {
-                "utun101" -> 52101
-                "utun102" -> 52102
-                "utun103" -> 52103
-                else -> 52100
-            },
-            privateKey = privateKey,
-            peers = listOf(
-                VpnPeer(
-                    publicKey = peerKey,
-                    endpointAddress = "198.51.100.1",
-                    endpointPort = 51820,
-                ),
-            ),
-        )
     }
 }

@@ -54,5 +54,13 @@ private fun parsePrimaryTunAddress(cidr: String): PrimaryTunAddress {
 }
 
 internal fun normalizeCidrs(values: List<String>): List<String> {
-    return values.map { value -> value.trim() }
+    return values.map { value ->
+        val trimmed = value.trim()
+        val parts = trimmed.split("/", limit = 2)
+        if (parts.size == 2) {
+            "${parts[0].trim()}/${parts[1].trim()}"
+        } else {
+            trimmed
+        }
+    }
 }

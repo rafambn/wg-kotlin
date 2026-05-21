@@ -224,6 +224,50 @@ class WindowsPlatformAdapterTest {
     }
 
     @Test
+    fun startSessionNormalizesCidrsBeforeBuildingNetshArguments() = runBlocking {
+        val invocations = mutableListOf<ProcessInvocationModel>()
+        val openedHandle = mockk<RealTunHandle>()
+
+        mockkConstructor(RealTunHandle::class)
+        try {
+            every { openedHandle.interfaceName } returns "wintun-opened"
+            coEvery { anyConstructed<RealTunHandle>().openDevice() } returns openedHandle
+
+            val adapter = WindowsPlatformAdapter(
+                processLauncher = ProcessLauncher { invocation ->
+                    invocations += invocation
+                    ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
+                },
+            )
+
+            adapter.startSession(
+                TunSessionConfig(
+                    interfaceName = "requested-wg0",
+                    addresses = listOf(" 10.10.10.2 /24 "),
+                    routes = listOf(" 10.20.0.0 /16 "),
+                ),
+            )
+
+            assertTrue(
+                invocations.any { invocation ->
+                    invocation.binary == CommandBinary.NETSH &&
+                        invocation.arguments.take(4) == listOf("interface", "ipv4", "add", "address") &&
+                        invocation.arguments.contains("address=10.10.10.2")
+                },
+            )
+            assertTrue(
+                invocations.any { invocation ->
+                    invocation.binary == CommandBinary.NETSH &&
+                        invocation.arguments.take(4) == listOf("interface", "ipv4", "add", "route") &&
+                        invocation.arguments.contains("prefix=10.20.0.0/16")
+                },
+            )
+        } finally {
+            unmockkConstructor(RealTunHandle::class)
+        }
+    }
+
+    @Test
     fun closeDeletesWindowsAddressesAndClearsNrptRulesWhenRouteCleanupFails() = runBlocking {
         var failCleanupRouteDelete = false
         val cleanupInvocations = mutableListOf<ProcessInvocationModel>()

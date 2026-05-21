@@ -95,7 +95,7 @@ internal class LinuxPlatformAdapter(
                             runCommand(
                                 operationLabel = "delete-route",
                                 binary = CommandBinary.IP,
-                                arguments = listOf("route", "delete", route, "dev", interfaceName),
+                                arguments = routeArguments(command = "delete", route = route, interfaceName = interfaceName),
                                 ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
                             )
                         }.onFailure(::recordCleanupFailure)
@@ -122,7 +122,7 @@ internal class LinuxPlatformAdapter(
         runCommand(
             operationLabel = "add-route",
             binary = CommandBinary.IP,
-            arguments = listOf("route", "replace", route, "dev", interfaceName),
+            arguments = routeArguments(command = "replace", route = route, interfaceName = interfaceName),
         )
     }
 
@@ -130,9 +130,14 @@ internal class LinuxPlatformAdapter(
         runCommand(
             operationLabel = "delete-route",
             binary = CommandBinary.IP,
-            arguments = listOf("route", "delete", route, "dev", interfaceName),
+            arguments = routeArguments(command = "delete", route = route, interfaceName = interfaceName),
             ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
         )
+    }
+
+    private fun routeArguments(command: String, route: String, interfaceName: String): List<String> {
+        val family = if (route.substringBefore("/").contains(":")) listOf("-6") else emptyList()
+        return family + listOf("route", command, route, "dev", interfaceName)
     }
 
     private fun revertDns(interfaceName: String) {

@@ -160,6 +160,46 @@ class PlatformAdapterFailureCleanupTest {
     }
 
     @Test
+    fun linuxUsesIpv6AddressFamilyForIpv6Routes() = runBlocking {
+        val invocations = mutableListOf<ProcessInvocationModel>()
+
+        mockkConstructor(RealTunHandle::class)
+        try {
+            mockOpenedTunHandle("linux-opened")
+            val adapter = LinuxPlatformAdapter(
+                processLauncher = ProcessLauncher { invocation ->
+                    invocations += invocation
+                    ProcessOutputModel(exitCode = 0, stdout = "", stderr = "")
+                },
+            )
+
+            val handle = adapter.startSession(
+                TunSessionConfig(
+                    interfaceName = "utun0",
+                    addresses = listOf("fd00::2/64"),
+                    routes = listOf("::/0"),
+                ),
+            )
+            handle.close()
+
+            assertTrue(
+                invocations.any { invocation ->
+                    invocation.binary == CommandBinary.IP &&
+                        invocation.arguments == listOf("-6", "route", "replace", "::/0", "dev", "linux-opened")
+                },
+            )
+            assertTrue(
+                invocations.any { invocation ->
+                    invocation.binary == CommandBinary.IP &&
+                        invocation.arguments == listOf("-6", "route", "delete", "::/0", "dev", "linux-opened")
+                },
+            )
+        } finally {
+            unmockkConstructor(RealTunHandle::class)
+        }
+    }
+
+    @Test
     fun macOsClosesTunHandleAndClearsDnsEntriesWhenConfigurationFails() = runBlocking {
         val invocations = mutableListOf<ProcessInvocationModel>()
 

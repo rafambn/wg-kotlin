@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.gobley.cargo)
     alias(libs.plugins.gobley.uniffi)
     alias(libs.plugins.atomicfu)
+    alias(libs.plugins.maven.publish)
 }
 
 uniffi {
@@ -52,4 +53,13 @@ tasks.configureEach {
 kotlin {
     jvmToolchain(17)
     jvm()
+}
+
+mavenPublishing {
+    publishToMavenCentral(automaticRelease = false)
+    coordinates(
+        groupId = "com.rafambn",
+        artifactId = "wg-kotlin-uniffi-boringtun",
+        version = project.version.toString(),
+    )
 }

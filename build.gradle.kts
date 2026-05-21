@@ -6,6 +6,11 @@ plugins {
     alias(libs.plugins.graalvmNative).apply(false)
 }
 
+allprojects {
+    group = "com.rafambn"
+    version = "0.2.2"
+}
+
 val ciWgKotlinCore = tasks.register("ciWgKotlinCore") {
     group = "verification"
     description = "CI entry task for :wg-kotlin."

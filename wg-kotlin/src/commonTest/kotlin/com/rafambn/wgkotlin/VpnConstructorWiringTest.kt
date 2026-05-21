@@ -35,7 +35,7 @@ class VpnConstructorWiringTest {
         vpn.open()
         assertTrue(vpn.isRunning())
 
-        vpn.close()
+        vpn.stop()
         assertFalse(vpn.isRunning())
     }
 

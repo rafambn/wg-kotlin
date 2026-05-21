@@ -27,7 +27,7 @@ class VpnFoundationWiringTest {
         vpn.open()
         assertTrue(vpn.isRunning())
 
-        vpn.close()
+        vpn.stop()
         assertFalse(vpn.isRunning())
         assertNull(vpn.information())
     }

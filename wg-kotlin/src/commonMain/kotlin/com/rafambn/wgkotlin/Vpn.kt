@@ -10,7 +10,7 @@ import com.rafambn.wgkotlin.util.DuplexChannelPipe
 class Vpn(
     configuration: VpnConfiguration,
     engine: Engine = Engine.BORINGTUN
-) : AutoCloseable {
+) {
 
     companion object {
         const val DEFAULT_PORT: Int = 51820
@@ -37,25 +37,25 @@ class Vpn(
 
     fun open() {
         requireValidConfiguration(vpnConfiguration)
-        close()
+        stop()
 
         operation("reconcileSessions") {
             cryptoSessionManager.reconcileSessions(vpnConfiguration)
         }
 
         operation("start") {
-            cryptoSessionManager.start { close() }
+            cryptoSessionManager.start { stop() }
         }
 
         operation("socketStart") {
             socketManager.start(
                 listenPort = vpnConfiguration.listenPort ?: DEFAULT_PORT,
-                onFailure = { close() },
+                onFailure = { stop() },
             )
         }
 
         operation("start") {
-            interfaceManager.start(vpnConfiguration) { close() }
+            interfaceManager.start(vpnConfiguration) { stop() }
         }
     }
 
@@ -97,13 +97,13 @@ class Vpn(
             if (previousListenPort != newListenPort) {
                 operation("socketRestart") {
                     socketManager.stop()
-                    socketManager.start(newListenPort) { close() }
+                    socketManager.start(newListenPort) { stop() }
                 }
             }
         }
     }
 
-    override fun close() {
+    fun stop() {
         var firstError: Throwable? = null
         try {
             operation("stop") { interfaceManager.stop() }

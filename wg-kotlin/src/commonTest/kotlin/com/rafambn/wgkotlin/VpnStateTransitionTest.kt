@@ -23,7 +23,7 @@ class VpnStateTransitionTest {
         vpn.open()
         assertTrue(vpn.isRunning())
 
-        vpn.close()
+        vpn.stop()
         assertFalse(vpn.isRunning())
     }
 
@@ -58,7 +58,7 @@ class VpnStateTransitionTest {
         )
 
         assertFailsWith<IllegalStateException> {
-            vpn.close()
+            vpn.stop()
         }
 
         assertEquals(1, socketManager.stopCalls)

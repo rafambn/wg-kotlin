@@ -52,7 +52,7 @@ tasks.withType<Test>().configureEach {
 //https://www.jetbrains.com/help/kotlin-multiplatform-dev/multiplatform-publish-libraries.html
 mavenPublishing {
     publishToMavenCentral(automaticRelease = false)
-    coordinates(groupId = "com.rafambn", artifactId = "wg-kotlin", version = "0.2.0")
+    coordinates(groupId = "com.rafambn", artifactId = "wg-kotlin", version = "0.2.1")
 
     pom {
         name = "wg-kotlin"

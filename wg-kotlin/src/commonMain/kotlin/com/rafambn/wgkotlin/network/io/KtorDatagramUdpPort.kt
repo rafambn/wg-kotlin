@@ -1,9 +1,13 @@
 package com.rafambn.wgkotlin.network.io
 
+import com.rafambn.wgkotlin.network.resolveEndpointAddress
 import io.ktor.network.sockets.BoundDatagramSocket
 import io.ktor.network.sockets.Datagram
 import io.ktor.network.sockets.InetSocketAddress
 import io.ktor.network.sockets.SocketAddress
+import io.ktor.network.sockets.port
+import io.ktor.network.sockets.toJavaAddress
+import io.ktor.util.network.address
 import io.ktor.utils.io.core.buildPacket
 import io.ktor.utils.io.core.writeFully
 import kotlinx.coroutines.withTimeoutOrNull
@@ -49,7 +53,7 @@ private fun SocketAddress.toUdpEndpoint(): UdpEndpoint {
     val inetAddress = this as? InetSocketAddress
         ?: throw IllegalStateException("Unsupported Ktor socket address type `${this::class.simpleName}`")
     return UdpEndpoint(
-        address = inetAddress.hostname,
+        address = resolveEndpointAddress(inetAddress.hostname),
         port = inetAddress.port,
     )
 }

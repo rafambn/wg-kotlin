@@ -48,6 +48,12 @@ internal class LinuxPlatformAdapter(
             }
 
             runCommand(
+                operationLabel = "bring-interface-up",
+                binary = CommandBinary.IP,
+                arguments = listOf("link", "set", "dev", interfaceName, "up"),
+            )
+
+            runCommand(
                 operationLabel = "flush-addresses",
                 binary = CommandBinary.IP,
                 arguments = listOf("address", "flush", "dev", interfaceName),

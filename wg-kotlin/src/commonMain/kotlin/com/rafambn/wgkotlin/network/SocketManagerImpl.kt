@@ -145,9 +145,9 @@ internal class SocketManagerImpl(
             while (true) {
                 val datagram = networkPipe.receive()
                 if (isIpv6Literal(datagram.remoteEndpoint.address)) {
-                    (ipv4Port ?: defaultSocket).sendDatagram(datagram)
-                } else {
                     (ipv6Port ?: defaultSocket).sendDatagram(datagram)
+                } else {
+                    (ipv4Port ?: defaultSocket).sendDatagram(datagram)
                 }
             }
         } catch (_: CancellationException) {

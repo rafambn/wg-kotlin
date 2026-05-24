@@ -5,7 +5,9 @@ import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.crypto.factory.BoringTunPeerSessionFactory
 import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
 import com.rafambn.wgkotlin.crypto.factory.QuicPeerSessionFactory
+import com.rafambn.wgkotlin.VpnPeer
 import com.rafambn.wgkotlin.network.io.UdpDatagram
+import com.rafambn.wgkotlin.network.resolveEndpointAddress
 import com.rafambn.wgkotlin.requireDistinctAllowedIpOwnership
 import com.rafambn.wgkotlin.requireUniquePeerPublicKeys
 import com.rafambn.wgkotlin.requireUserspacePeerEndpoints
@@ -43,7 +45,14 @@ internal class CryptoSessionManagerImpl(
         requireUserspacePeerEndpoints(config.peers)
         requireDistinctAllowedIpOwnership(config.peers)
 
-        val desiredPeers = config.peers.associateBy { peer -> peer.publicKey }
+        val resolvedPeers = config.peers.map { peer ->
+            val rawAddress = checkNotNull(peer.endpointAddress) {
+                "Peer `${peer.publicKey}` is missing endpointAddress"
+            }
+            peer.copy(endpointAddress = resolveEndpointAddress(rawAddress))
+        }
+
+        val desiredPeers = resolvedPeers.associateBy { peer -> peer.publicKey }
         val desiredIndexes = desiredPeers.keys
             .toSortedSet()
             .mapIndexed { index, key -> key to (index + 1) }

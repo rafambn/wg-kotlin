@@ -38,6 +38,10 @@ internal class LinuxPlatformAdapter(
             .distinct()
         val hasDnsConfiguration = routingDomains.isNotEmpty() && dnsServers.isNotEmpty()
         val endpointRoutes = resolveEndpointRoutes(config.endpoints)
+        val endpointIps = endpointRoutes.map { (endpoint, _) -> endpoint }.toSet()
+        val filteredRoutes = routes.filter { route ->
+            route.substringBefore("/") !in endpointIps
+        }
         return try {
             val interfaceName = handle.interfaceName
 
@@ -72,7 +76,7 @@ internal class LinuxPlatformAdapter(
                 addEndpointRoute(endpoint = endpoint, route = route)
             }
 
-            routes.forEach { route ->
+            filteredRoutes.forEach { route ->
                 addRoute(route = route, interfaceName = interfaceName)
             }
 
@@ -102,7 +106,7 @@ internal class LinuxPlatformAdapter(
                         }
                     }
 
-                    routes.asReversed().forEach { route ->
+                    filteredRoutes.asReversed().forEach { route ->
                         runCatching {
                             runCommand(
                                 operationLabel = "delete-route",
@@ -123,7 +127,7 @@ internal class LinuxPlatformAdapter(
                 },
             )
         } catch (failure: Throwable) {
-            routes.asReversed().forEach { route ->
+            filteredRoutes.asReversed().forEach { route ->
                 runCatching { deleteRoute(route = route, interfaceName = handle.interfaceName) }
                     .onFailure(failure::addSuppressed)
             }

@@ -1,6 +1,7 @@
 package com.rafambn.wgkotlin.daemon.platformAdapter
 
 import com.rafambn.wgkotlin.daemon.command.CommandBinary
+import com.rafambn.wgkotlin.daemon.command.ProcessInvocationModel
 import com.rafambn.wgkotlin.daemon.command.ProcessLauncher
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.tun.CleanupTunHandle
@@ -36,6 +37,7 @@ internal class LinuxPlatformAdapter(
             .filter { server -> server.isNotBlank() }
             .distinct()
         val hasDnsConfiguration = routingDomains.isNotEmpty() && dnsServers.isNotEmpty()
+        val endpointRoutes = resolveEndpointRoutes(config.endpoints)
         return try {
             val interfaceName = handle.interfaceName
 
@@ -64,6 +66,10 @@ internal class LinuxPlatformAdapter(
                     binary = CommandBinary.IP,
                     arguments = listOf("address", "add", address, "dev", interfaceName),
                 )
+            }
+
+            endpointRoutes.forEach { (endpoint, route) ->
+                addEndpointRoute(endpoint = endpoint, route = route)
             }
 
             routes.forEach { route ->
@@ -106,6 +112,11 @@ internal class LinuxPlatformAdapter(
                             )
                         }.onFailure(::recordCleanupFailure)
                     }
+                    endpointRoutes.asReversed().forEach { (endpoint, route) ->
+                        runCatching {
+                            deleteEndpointRoute(endpoint = endpoint, route = route)
+                        }.onFailure(::recordCleanupFailure)
+                    }
                     runCatching { revertDns(interfaceName) }
                         .onFailure(::recordCleanupFailure)
                     cleanupFailure?.let { throw it }
@@ -114,6 +125,10 @@ internal class LinuxPlatformAdapter(
         } catch (failure: Throwable) {
             routes.asReversed().forEach { route ->
                 runCatching { deleteRoute(route = route, interfaceName = handle.interfaceName) }
+                    .onFailure(failure::addSuppressed)
+            }
+            endpointRoutes.asReversed().forEach { (endpoint, route) ->
+                runCatching { deleteEndpointRoute(endpoint = endpoint, route = route) }
                     .onFailure(failure::addSuppressed)
             }
             runCatching { revertDns(handle.interfaceName) }
@@ -154,11 +169,77 @@ internal class LinuxPlatformAdapter(
         )
     }
 
+    private fun resolveEndpointRoutes(endpoints: List<String>): List<Pair<String, EndpointRoute>> {
+        return endpoints.mapNotNull { endpoint ->
+            resolveEndpointRoute(endpoint)?.let { route -> endpoint to route }
+        }
+    }
+
+    private fun resolveEndpointRoute(endpoint: String): EndpointRoute? {
+        val output = processLauncher.run(
+            ProcessInvocationModel(
+                binary = CommandBinary.IP,
+                arguments = listOf("route", "get", endpoint),
+            ),
+        )
+        if (output.exitCode != 0) {
+            return null
+        }
+        val firstLine = output.stdout.trim().lines().firstOrNull() ?: return null
+        val viaMatch = VIA_REGEX.find(firstLine)
+        val devMatch = DEV_REGEX.find(firstLine)
+        val device = devMatch?.groupValues?.get(1) ?: return null
+        return EndpointRoute(
+            gateway = viaMatch?.groupValues?.get(1),
+            device = device,
+        )
+    }
+
+    private fun addEndpointRoute(endpoint: String, route: EndpointRoute) {
+        val family = if (endpoint.contains(":")) listOf("-6") else emptyList()
+        val arguments = mutableListOf<String>()
+        arguments.addAll(family)
+        arguments.addAll(listOf("route", "replace", "$endpoint/32"))
+        if (route.gateway != null) {
+            arguments.addAll(listOf("via", route.gateway))
+        }
+        arguments.addAll(listOf("dev", route.device))
+        runCommand(
+            operationLabel = "add-endpoint-route",
+            binary = CommandBinary.IP,
+            arguments = arguments,
+        )
+    }
+
+    private fun deleteEndpointRoute(endpoint: String, route: EndpointRoute) {
+        val family = if (endpoint.contains(":")) listOf("-6") else emptyList()
+        val arguments = mutableListOf<String>()
+        arguments.addAll(family)
+        arguments.addAll(listOf("route", "delete", "$endpoint/32"))
+        if (route.gateway != null) {
+            arguments.addAll(listOf("via", route.gateway))
+        }
+        arguments.addAll(listOf("dev", route.device))
+        runCommand(
+            operationLabel = "delete-endpoint-route",
+            binary = CommandBinary.IP,
+            arguments = arguments,
+            ignoredFailurePatterns = NOT_FOUND_FAILURE_PATTERNS,
+        )
+    }
+
+    private data class EndpointRoute(
+        val gateway: String?,
+        val device: String,
+    )
+
     private companion object {
         val NOT_FOUND_FAILURE_PATTERNS = listOf(
             Regex("not found", RegexOption.IGNORE_CASE),
             Regex("no such process", RegexOption.IGNORE_CASE),
             Regex("cannot find", RegexOption.IGNORE_CASE),
         )
+        val VIA_REGEX = Regex("""via\s+(\S+)""")
+        val DEV_REGEX = Regex("""dev\s+(\S+)""")
     }
 }

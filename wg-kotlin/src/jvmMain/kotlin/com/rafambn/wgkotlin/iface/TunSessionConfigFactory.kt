@@ -11,6 +11,11 @@ internal fun VpnConfiguration.toTunSessionConfig(): TunSessionConfig {
         .distinct()
         .sorted()
 
+    val endpoints = peers
+        .mapNotNull { peer -> peer.endpointAddress }
+        .distinct()
+        .sorted()
+
     return TunSessionConfig(
         interfaceName = interfaceName,
         mtu = mtu,
@@ -20,5 +25,6 @@ internal fun VpnConfiguration.toTunSessionConfig(): TunSessionConfig {
             searchDomains = dns.searchDomains,
             servers = dns.servers,
         ),
+        endpoints = endpoints,
     )
 }

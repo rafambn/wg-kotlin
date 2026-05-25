@@ -9,4 +9,5 @@ data class TunSessionConfig(
     val addresses: List<String> = emptyList(),
     val routes: List<String> = emptyList(),
     val dns: DnsConfig = DnsConfig(),
+    val endpoints: List<String> = emptyList(),
 )

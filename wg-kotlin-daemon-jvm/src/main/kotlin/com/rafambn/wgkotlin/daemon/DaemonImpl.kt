@@ -44,7 +44,7 @@ class DaemonImpl internal constructor(
 
         val readerJob = launch(Dispatchers.IO) {
             while (isActive) {
-                val packet = handle.readPacket() ?: continue
+                val packet = handle.readPacket() ?: break
                 if (packet.size > MAX_PACKET_FRAME_SIZE) {
                     continue
                 }

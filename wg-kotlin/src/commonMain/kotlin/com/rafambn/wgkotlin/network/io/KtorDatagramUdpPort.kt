@@ -52,8 +52,18 @@ class KtorDatagramUdpPort(
 private fun SocketAddress.toUdpEndpoint(): UdpEndpoint {
     val inetAddress = this as? InetSocketAddress
         ?: throw IllegalStateException("Unsupported Ktor socket address type `${this::class.simpleName}`")
+    val raw = inetAddress.hostname
+    val address = if (raw.isIpLiteral()) {
+        raw
+    } else {
+        resolveEndpointAddress(raw)
+    }
     return UdpEndpoint(
-        address = resolveEndpointAddress(inetAddress.hostname),
+        address = address,
         port = inetAddress.port,
     )
+}
+
+private fun String.isIpLiteral(): Boolean {
+    return contains(':') || all { it.isDigit() || it == '.' }
 }

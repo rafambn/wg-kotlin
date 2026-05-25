@@ -21,6 +21,7 @@ class JvmInterfaceManager(
             config = config.toTunSessionConfig(),
             pipe = tunPipe,
             onFailure = { throwable ->
+                runCatching { activeBridge?.close() }
                 activeBridge = null
                 currentConfig = null
                 onFailure(throwable)

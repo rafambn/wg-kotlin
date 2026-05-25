@@ -59,11 +59,12 @@ class DaemonBackedInterfaceCommandExecutor(
 
         val sessionCollectorJob = scope.launch {
             try {
-                bridgeReady.complete(Unit)
-                client.startSession(
+                val flow = client.startSession(
                     config = config,
                     outgoingPackets = outgoingPackets.receiveAsFlow(),
-                ).collect { packet ->
+                )
+                bridgeReady.complete(Unit)
+                flow.collect { packet ->
                     pipe.send(packet)
                 }
                 reportTermination(

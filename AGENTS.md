@@ -39,5 +39,8 @@ Tests use `kotlin("test")` with JUnit 5 (`useJUnitPlatform()` in all JVM modules
 
 Cover both happy path and failure behavior, especially around state transitions, daemon IPC, and platform-specific command planning.
 
+## Logging Policy
+- Daemon logging uses **only Scribe Scrolls** (`newScroll` / `seal`). Do not use Scribe `note(...)` anywhere in the daemon module. All events, including lifecycle and errors, are modeled as wide contextual scrolls.
+
 ## Communication
 Use your caveman skill. Default communication mode is `/caveman full` unless explicitly changed by the user.

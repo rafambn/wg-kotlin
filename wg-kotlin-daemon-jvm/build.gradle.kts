@@ -117,7 +117,7 @@ graalvmNative {
             buildArgs.addAll(
                 "-H:+ReportExceptionStackTraces",
                 "--enable-native-access=ALL-UNNAMED",
-                "--initialize-at-run-time=io.netty,org.slf4j,ch.qos.logback",
+                "--initialize-at-run-time=io.netty,org.slf4j",
             )
         }
     }
@@ -132,11 +132,11 @@ dependencies {
     implementation(libs.kotlinx.rpc.krpc.server)
     implementation(libs.kotlinx.rpc.krpc.serialization.protobuf)
     implementation(libs.kotlinx.rpc.krpc.ktor.server)
+    implementation(libs.kotlinx.serialization.json)
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.websockets)
     implementation(libs.koin.core.jvm)
-    implementation("org.slf4j:slf4j-api:2.0.9")
-    implementation("ch.qos.logback:logback-classic:1.4.14")
+    implementation(libs.scribe)
 
     testImplementation(kotlin("test-junit5"))
     testImplementation(libs.mockk)

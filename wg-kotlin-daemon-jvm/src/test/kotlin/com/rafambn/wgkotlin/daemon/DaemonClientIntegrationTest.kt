@@ -9,6 +9,8 @@ import com.rafambn.wgkotlin.daemon.tun.TunHandle
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.request.get
+import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -77,6 +79,24 @@ class DaemonClientIntegrationTest {
             assertEquals("7, 8, 9", packet.joinToString())
         } finally {
             httpClient.close()
+            server.stop(100, 1_000)
+        }
+    }
+
+    @Test
+    fun versionRequestReturnsDaemonVersion() = runBlocking {
+        val port = randomPort()
+        val server = createDaemonServer(
+            host = "127.0.0.1",
+            port = port,
+            service = DaemonImpl(adapter = singlePacketAdapter()),
+        ).start(wait = false)
+        val client = HttpClient(CIO)
+
+        try {
+            assertEquals(DAEMON_VERSION, client.get("http://127.0.0.1:$port/version").bodyAsText())
+        } finally {
+            client.close()
             server.stop(100, 1_000)
         }
     }

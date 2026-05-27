@@ -1,0 +1,3 @@
+[workspace]
+members = ["scribe-rs", "daemon-proto", "daemon"]
+resolver = "2"

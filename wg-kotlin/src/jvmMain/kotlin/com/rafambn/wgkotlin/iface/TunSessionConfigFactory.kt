@@ -1,8 +1,9 @@
 package com.rafambn.wgkotlin.iface
 
 import com.rafambn.wgkotlin.VpnConfiguration
-import com.rafambn.wgkotlin.daemon.protocol.DnsConfig
-import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
+import com.rafambn.wgkotlin.daemon.proto.DnsConfig
+import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
+import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.network.resolveEndpointAddress
 
 internal fun VpnConfiguration.toTunSessionConfig(): TunSessionConfig {
@@ -18,15 +19,15 @@ internal fun VpnConfiguration.toTunSessionConfig(): TunSessionConfig {
         .distinct()
         .sorted()
 
-    return TunSessionConfig(
-        interfaceName = interfaceName,
-        mtu = mtu,
-        addresses = addresses.toList(),
-        routes = routes,
-        dns = DnsConfig(
-            searchDomains = dns.searchDomains,
-            servers = dns.servers,
-        ),
-        endpoints = endpoints,
-    )
+    return TunSessionConfig {
+        interfaceName = this@toTunSessionConfig.interfaceName
+        mtu = this@toTunSessionConfig.mtu ?: 0
+        addresses = this@toTunSessionConfig.addresses.toList()
+        this.routes = routes
+        dns = DnsConfig {
+            searchDomains = this@toTunSessionConfig.dns.searchDomains
+            servers = this@toTunSessionConfig.dns.servers
+        }
+        this.endpoints = endpoints
+    }
 }

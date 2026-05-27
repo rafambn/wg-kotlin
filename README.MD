@@ -4,14 +4,13 @@ Kotlin Multiplatform WireGuard Implementation
 
 Current library targets: JVM/desktop.
 
-## WG-Kotlin Modules (Phase 01)
+## WG-Kotlin Modules
 
 - `:wg-kotlin`: core orchestration API and contract boundaries.
 - `:wg-kotlin-daemon-protocol`: typed daemon request/response models shared by JVM components.
 - `:wg-kotlin-daemon-jvm`: privileged daemon executable scaffold.
 
 Architecture checklist: `docs/new-vpn-rebuild/01-architecture-review-checklist.md`  
-CI entry task (phase 01): `./gradlew ciPhase01`
 
 ### Run Sample App
 

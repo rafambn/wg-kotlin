@@ -26,6 +26,7 @@ import kotlinx.rpc.krpc.ktor.server.rpc
 import kotlinx.rpc.krpc.serialization.protobuf.protobuf
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.JsonPrimitive
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal fun createDaemonServer(
     host: String,
@@ -78,21 +79,30 @@ internal fun Application.module(
 }
 
 internal fun Application.installDaemonLogger() {
-    DaemonLogger.hire(
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-        channel = Channel(Channel.UNLIMITED),
-        onSaver = { saver, entry, failure ->
-            val scroll = DaemonLogger.newScroll().apply {
-                this["event"] = JsonPrimitive("saver_failure")
-                this["saver"] = JsonPrimitive(saver::class.simpleName)
-                this["entry_type"] = JsonPrimitive(entry::class.simpleName)
-                this["error_type"] = JsonPrimitive(failure::class.simpleName)
-            }
-            scroll.seal(DaemonLogger, success = false)
-        },
-    )
+    if (LOGGER_HIRED.compareAndSet(false, true)) {
+        runCatching {
+            DaemonLogger.hire(
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+                channel = Channel(Channel.UNLIMITED),
+                onSaver = { saver, entry, failure ->
+                    val scroll = DaemonLogger.newScroll().apply {
+                        this["event"] = JsonPrimitive("saver_failure")
+                        this["saver"] = JsonPrimitive(saver::class.simpleName)
+                        this["entry_type"] = JsonPrimitive(entry::class.simpleName)
+                        this["error_type"] = JsonPrimitive(failure::class.simpleName)
+                    }
+                    scroll.seal(DaemonLogger, success = false)
+                },
+            )
+        }.onFailure {
+            LOGGER_HIRED.set(false)
+            throw it
+        }
+    }
     install(DaemonHttpLogger)
 }
+
+private val LOGGER_HIRED = AtomicBoolean(false)
 
 internal val DaemonHttpLogger = createApplicationPlugin("DaemonHttpLogger") {
     application.intercept(ApplicationCallPipeline.Monitoring) {

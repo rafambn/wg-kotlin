@@ -291,7 +291,6 @@ Validation:
 Validation:
 
 - `./gradlew build`
-- `./gradlew ciPhase01`
 
 ## Test Matrix
 
@@ -341,4 +340,3 @@ Do pragmatic first version:
 - Reject duplicate interface names and effective listen ports inside one `Vpn`.
 - Use `StateFlow<VpnInformation>` for status.
 - Deprecate old constructor/open/reconfigure first, remove later.
-

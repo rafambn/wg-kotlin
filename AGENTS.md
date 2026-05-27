@@ -17,7 +17,6 @@ Keep module boundaries intact: `:wg-kotlin` must not depend on `:wg-kotlin-daemo
 
 ## Build, Test, and Development Commands
 - `./gradlew build`: compile all modules and run their default verification tasks.
-- `./gradlew ciPhase01`: run the phase 01 CI entry task, including architecture boundary checks.
 - `./gradlew :wg-kotlin:check`: run core module compilation and tests.
 - `./gradlew :wg-kotlin-daemon-jvm:test`: run daemon JVM tests only.
 - `cargo test --manifest-path wg-kotlin/Cargo.toml`: run Rust tests when changing the embedded Rust library directly.

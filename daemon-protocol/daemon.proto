@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package wgdaemon;
+
+import "tun_session_config.proto";
+
+option java_multiple_files = true;
+option java_package = "com.rafambn.wgkotlin.daemon.proto";
+
+service Daemon {
+    rpc Session(stream ClientMessage) returns (stream ServerMessage);
+}
+
+message ClientMessage {
+    oneof payload {
+        TunSessionConfig config = 1;
+        Packet outgoing_packet = 2;
+    }
+}
+
+message ServerMessage {
+    oneof payload {
+        SessionStarted started = 1;
+        Packet incoming_packet = 2;
+        SessionError error = 3;
+    }
+}
+
+message Packet {
+    bytes data = 1;
+}
+
+message SessionStarted {
+    string interface_name = 1;
+}
+
+message SessionError {
+    string code = 1;
+    string message = 2;
+}

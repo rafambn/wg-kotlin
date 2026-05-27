@@ -1,6 +1,5 @@
 package com.rafambn.wgkotlin.iface
 
-import com.rafambn.wgkotlin.daemon.protocol.DaemonTransport
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import org.koin.core.module.Module
 import org.koin.core.parameter.parametersOf
@@ -20,8 +19,8 @@ internal object JvmInterfaceKoinBootstrap {
             ) {
                 JvmInterfaceProperties.INTERFACE_MODE_IN_MEMORY -> InMemoryInterfaceCommandExecutor()
                 else -> DaemonBackedInterfaceCommandExecutor(
-                    host = System.getProperty(JvmInterfaceProperties.DAEMON_HOST, DaemonTransport.DEFAULT_DAEMON_HOST),
-                    port = System.getProperty(JvmInterfaceProperties.DAEMON_PORT)?.toIntOrNull() ?: DaemonTransport.DEFAULT_DAEMON_PORT,
+                    host = System.getProperty(JvmInterfaceProperties.DAEMON_HOST, JvmInterfaceProperties.DEFAULT_DAEMON_HOST),
+                    port = System.getProperty(JvmInterfaceProperties.DAEMON_PORT)?.toIntOrNull() ?: JvmInterfaceProperties.DEFAULT_DAEMON_PORT,
                 )
             }
         }

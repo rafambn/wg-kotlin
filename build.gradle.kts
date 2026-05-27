@@ -4,27 +4,10 @@ plugins {
     alias(libs.plugins.maven.publish).apply(false)
     alias(libs.plugins.gobley.cargo).apply(false)
     alias(libs.plugins.graalvmNative).apply(false)
+    alias(libs.plugins.protobuf).apply(false)
 }
 
 allprojects {
     group = "com.rafambn"
     version = "0.3.12"
-}
-
-val ciWgKotlinCore = tasks.register("ciWgKotlinCore") {
-    group = "verification"
-    description = "CI entry task for :wg-kotlin."
-    dependsOn(":wg-kotlin:check")
-}
-
-val ciWgKotlinDaemonProtocol = tasks.register("ciWgKotlinDaemonProtocol") {
-    group = "verification"
-    description = "CI entry task for :wg-kotlin-daemon-protocol."
-    dependsOn(":wg-kotlin-daemon-protocol:check")
-}
-
-val ciWgKotlinDaemonJvm = tasks.register("ciWgKotlinDaemonJvm") {
-    group = "verification"
-    description = "CI entry task for :wg-kotlin-daemon-jvm."
-    dependsOn(":wg-kotlin-daemon-jvm:check")
 }

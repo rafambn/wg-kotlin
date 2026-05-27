@@ -24,17 +24,19 @@ class DaemonImpl internal constructor(
         outgoingPackets: Flow<ByteArray>,
     ): Flow<ByteArray> = channelFlow {
         val startedAtNanos = System.nanoTime()
-        val scroll = DaemonLogger.newScroll().apply {
-            this["event"] = JsonPrimitive("daemon_session")
-            this["requested_interface"] = JsonPrimitive(config.interfaceName)
-            this["platform"] = JsonPrimitive(adapter.platformId)
-            this["address_count"] = JsonPrimitive(config.addresses.size)
-            this["route_count"] = JsonPrimitive(config.routes.size)
-            this["endpoint_count"] = JsonPrimitive(config.endpoints.size)
-            this["dns_server_count"] = JsonPrimitive(config.dns.servers.size)
-            this["dns_domain_count"] = JsonPrimitive(config.dns.searchDomains.size)
-            this["mtu_configured"] = JsonPrimitive(config.mtu != null)
-        }
+        val scroll = runCatching {
+            DaemonLogger.newScroll().apply {
+                this["event"] = JsonPrimitive("daemon_session")
+                this["requested_interface"] = JsonPrimitive(config.interfaceName)
+                this["platform"] = JsonPrimitive(adapter.platformId)
+                this["address_count"] = JsonPrimitive(config.addresses.size)
+                this["route_count"] = JsonPrimitive(config.routes.size)
+                this["endpoint_count"] = JsonPrimitive(config.endpoints.size)
+                this["dns_server_count"] = JsonPrimitive(config.dns.servers.size)
+                this["dns_domain_count"] = JsonPrimitive(config.dns.searchDomains.size)
+                this["mtu_configured"] = JsonPrimitive(config.mtu != null)
+            }
+        }.getOrNull()
         try {
             DaemonPayloadValidator.validate(config)
             synchronized(activeSessionLock) {
@@ -47,10 +49,12 @@ class DaemonImpl internal constructor(
                 activeSessions.add(config.interfaceName)
             }
         } catch (failure: Throwable) {
-            scroll["outcome"] = JsonPrimitive("rejected")
-            scroll["error_type"] = JsonPrimitive(failure::class.simpleName ?: "Throwable")
-            scroll["duration_ms"] = JsonPrimitive((System.nanoTime() - startedAtNanos) / 1_000_000)
-            runCatching { scroll.seal(DaemonLogger, success = false) }
+            scroll?.apply {
+                this["outcome"] = JsonPrimitive("rejected")
+                this["error_type"] = JsonPrimitive(failure::class.simpleName ?: "Throwable")
+                this["duration_ms"] = JsonPrimitive((System.nanoTime() - startedAtNanos) / 1_000_000)
+                runCatching { seal(DaemonLogger, success = false) }
+            }
             throw failure
         }
         val handle = try {
@@ -59,17 +63,21 @@ class DaemonImpl internal constructor(
             synchronized(activeSessionLock) {
                 activeSessions.remove(config.interfaceName)
             }
-            scroll["outcome"] = JsonPrimitive("start_failed")
-            scroll["error_type"] = JsonPrimitive(failure::class.simpleName ?: "Throwable")
-            scroll["duration_ms"] = JsonPrimitive((System.nanoTime() - startedAtNanos) / 1_000_000)
-            runCatching { scroll.seal(DaemonLogger, success = false) }
+            scroll?.apply {
+                this["outcome"] = JsonPrimitive("start_failed")
+                this["error_type"] = JsonPrimitive(failure::class.simpleName ?: "Throwable")
+                this["duration_ms"] = JsonPrimitive((System.nanoTime() - startedAtNanos) / 1_000_000)
+                runCatching { seal(DaemonLogger, success = false) }
+            }
             throw failure
         }
-        scroll["interface"] = JsonPrimitive(handle.interfaceName)
-        DaemonLogger.newScroll().apply {
-            this["event"] = JsonPrimitive("daemon_session_started")
-            this["interface"] = JsonPrimitive(handle.interfaceName)
-        }.seal(DaemonLogger, success = true)
+        scroll?.set("interface", JsonPrimitive(handle.interfaceName))
+        runCatching {
+            DaemonLogger.newScroll().apply {
+                this["event"] = JsonPrimitive("daemon_session_started")
+                this["interface"] = JsonPrimitive(handle.interfaceName)
+            }.seal(DaemonLogger, success = true)
+        }
 
         val readerJob = launch(Dispatchers.IO) {
             while (isActive) {
@@ -101,10 +109,12 @@ class DaemonImpl internal constructor(
             synchronized(activeSessionLock) {
                 activeSessions.remove(config.interfaceName)
             }
-            scroll["duration_ms"] = JsonPrimitive((System.nanoTime() - startedAtNanos) / 1_000_000)
-            closeFailure?.let { scroll["error_type"] = JsonPrimitive(it::class.simpleName ?: "Throwable") }
-            scroll["outcome"] = JsonPrimitive(if (closeFailure == null) "closed" else "close_failed")
-            runCatching { scroll.seal(DaemonLogger, success = closeFailure == null) }
+            scroll?.apply {
+                this["duration_ms"] = JsonPrimitive((System.nanoTime() - startedAtNanos) / 1_000_000)
+                closeFailure?.let { this["error_type"] = JsonPrimitive(it::class.simpleName ?: "Throwable") }
+                this["outcome"] = JsonPrimitive(if (closeFailure == null) "closed" else "close_failed")
+                runCatching { seal(DaemonLogger, success = closeFailure == null) }
+            }
         }
     }.buffer(PACKET_FLOW_BUFFER_CAPACITY)
 }

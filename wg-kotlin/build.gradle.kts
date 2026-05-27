@@ -1,5 +1,7 @@
 plugins {
     alias(libs.plugins.multiplatform)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.kotlinx.rpc.grpc)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.atomicfu)
 }
@@ -15,6 +17,8 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.ktor.network)
             implementation(libs.ktor.io)
+            implementation(libs.kotlinx.rpc.grpc.core)
+            implementation(libs.kotlinx.rpc.protobuf.core)
         }
 
         commonTest.dependencies {
@@ -23,24 +27,30 @@ kotlin {
         }
 
         jvmMain.dependencies {
-            implementation(project(":wg-kotlin-daemon-protocol"))
-            implementation(libs.kotlinx.rpc.krpc.client)
-            implementation(libs.kotlinx.rpc.krpc.serialization.protobuf)
-            implementation(libs.kotlinx.rpc.krpc.ktor.client)
+            implementation(libs.kotlinx.rpc.grpc.client)
+            implementation(libs.kotlinx.rpc.grpc.krpc.client)
+            implementation(libs.kotlinx.rpc.grpc.krpc.serialization.protobuf)
+            implementation(libs.kotlinx.rpc.grpc.krpc.ktor.client)
             implementation(libs.ktor.client.cio)
             implementation(libs.ktor.client.websockets)
+            implementation(libs.grpc.netty.shaded)
             implementation(libs.koin.core)
         }
 
         jvmTest.dependencies {
             implementation(kotlin("test-junit5"))
-            implementation(libs.kotlinx.rpc.krpc.server)
-            implementation(libs.kotlinx.rpc.krpc.serialization.protobuf)
-            implementation(libs.kotlinx.rpc.krpc.ktor.server)
+            implementation(libs.kotlinx.rpc.grpc.krpc.server)
+            implementation(libs.kotlinx.rpc.grpc.krpc.serialization.protobuf)
+            implementation(libs.kotlinx.rpc.grpc.krpc.ktor.server)
             implementation(libs.ktor.server.netty)
             implementation(libs.ktor.server.websockets)
         }
     }
+
+}
+
+rpc {
+    protoc()
 }
 
 tasks.withType<Test>().configureEach {

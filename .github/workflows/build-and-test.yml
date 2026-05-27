@@ -8,8 +8,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-native-binaries:
-    name: Build Native ${{ matrix.name }}
+  rust-daemon-verify:
+    name: Rust Daemon Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cargo test
+        run: cargo test --manifest-path wg-kotlin-daemon-rust/Cargo.toml
+
+      - name: Cargo clippy
+        run: cargo clippy --manifest-path wg-kotlin-daemon-rust/Cargo.toml --all-targets -- -D warnings
+
+      - name: Cargo build release
+        run: cargo build --manifest-path wg-kotlin-daemon-rust/daemon/Cargo.toml --release
+
+  build-rust-daemon-binaries:
+    name: Build Rust Daemon ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -18,62 +40,50 @@ jobs:
         include:
           - os: windows-latest
             name: Windows x64
-            gradle-command: .\gradlew.bat :wg-kotlin-daemon-jvm:nativeCompile --no-daemon --no-configuration-cache
             artifact-name: vpn-daemon-windows-x64
+            target: x86_64-pc-windows-msvc
+            binary-suffix: .exe
 
           - os: macos-26
             name: macOS x64
-            gradle-command: ./gradlew :wg-kotlin-daemon-jvm:nativeCompile --no-daemon
             artifact-name: vpn-daemon-macos-x64
+            target: x86_64-apple-darwin
+            binary-suffix: ""
 
           - os: macos-latest
             name: macOS ARM64
-            gradle-command: ./gradlew :wg-kotlin-daemon-jvm:nativeCompile --no-daemon
             artifact-name: vpn-daemon-macos-arm64
+            target: aarch64-apple-darwin
+            binary-suffix: ""
 
           - os: ubuntu-latest
             name: Linux x64
-            gradle-command: ./gradlew :wg-kotlin-daemon-jvm:nativeCompile --no-daemon
             artifact-name: vpn-daemon-linux-x64
+            target: x86_64-unknown-linux-gnu
+            binary-suffix: ""
 
           - os: ubuntu-24.04-arm
             name: Linux ARM64
-            gradle-command: ./gradlew :wg-kotlin-daemon-jvm:nativeCompile --no-daemon
             artifact-name: vpn-daemon-linux-arm64
+            target: aarch64-unknown-linux-gnu
+            binary-suffix: ""
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Visual C++ Build Tools (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Set up GraalVM for JDK 25
-        uses: graalvm/setup-graalvm@v1
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          java-version: "25"
-          distribution: "graalvm-community"
-          components: "native-image"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          native-image-job-reports: "true"
+          targets: ${{ matrix.target }}
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          cache-cleanup: on-success
-
-      - name: Make gradlew executable
-        if: runner.os != 'Windows'
-        run: chmod +x ./gradlew
-
-      - name: Build native binary
-        run: ${{ matrix.gradle-command }}
+      - name: Build Rust daemon binary
+        run: cargo build --manifest-path wg-kotlin-daemon-rust/daemon/Cargo.toml --release --target ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact-name }}
-          path: wg-kotlin-daemon-jvm/build/native/nativeCompile/
+          path: wg-kotlin-daemon-rust/target/${{ matrix.target }}/release/wg-kotlin-daemon${{ matrix.binary-suffix }}
           if-no-files-found: error
           retention-days: 7

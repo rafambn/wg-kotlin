@@ -13,6 +13,7 @@ plugins {
     alias(libs.plugins.kotlinx.rpc)
     alias(libs.plugins.graalvmNative)
     application
+    id("com.gradleup.shadow") version "9.0.0-beta4"
 }
 
 kotlin {
@@ -116,8 +117,9 @@ graalvmNative {
             resources.autodetect()
             buildArgs.addAll(
                 "-H:+ReportExceptionStackTraces",
+                "-H:+SharedArenaSupport",
                 "--enable-native-access=ALL-UNNAMED",
-                "--initialize-at-run-time=io.netty,org.slf4j",
+                "--initialize-at-run-time=io.netty,org.slf4j,kotlinx.rpc",
             )
         }
     }
@@ -149,4 +151,12 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+tasks.shadowJar {
+    archiveFileName.set("vpn-daemon-fat.jar")
+    manifest {
+        attributes["Main-Class"] = daemonMainClass
+    }
+    mergeServiceFiles()
 }

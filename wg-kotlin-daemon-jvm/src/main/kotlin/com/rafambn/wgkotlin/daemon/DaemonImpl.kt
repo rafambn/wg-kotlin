@@ -66,6 +66,10 @@ class DaemonImpl internal constructor(
             throw failure
         }
         scroll["interface"] = JsonPrimitive(handle.interfaceName)
+        DaemonLogger.newScroll().apply {
+            this["event"] = JsonPrimitive("daemon_session_started")
+            this["interface"] = JsonPrimitive(handle.interfaceName)
+        }.seal(DaemonLogger, success = true)
 
         val readerJob = launch(Dispatchers.IO) {
             while (isActive) {

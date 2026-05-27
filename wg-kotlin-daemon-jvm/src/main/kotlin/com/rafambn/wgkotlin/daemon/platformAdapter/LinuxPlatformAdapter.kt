@@ -1,9 +1,12 @@
 package com.rafambn.wgkotlin.daemon.platformAdapter
 
+import com.rafambn.scribe.seal
+import com.rafambn.wgkotlin.daemon.DaemonLogger
 import com.rafambn.wgkotlin.daemon.command.CommandBinary
 import com.rafambn.wgkotlin.daemon.command.ProcessInvocationModel
 import com.rafambn.wgkotlin.daemon.command.ProcessLauncher
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
+import kotlinx.serialization.json.JsonPrimitive
 import com.rafambn.wgkotlin.daemon.tun.CleanupTunHandle
 import com.rafambn.wgkotlin.daemon.tun.RealTunHandle
 import com.rafambn.wgkotlin.daemon.tun.TunHandle
@@ -93,6 +96,14 @@ internal class LinuxPlatformAdapter(
                     arguments = listOf("domain", interfaceName) + routingDomains,
                 )
             }
+            DaemonLogger.newScroll().apply {
+                this["event"] = JsonPrimitive("linux_session_ready")
+                this["interface"] = JsonPrimitive(interfaceName)
+                this["address_count"] = JsonPrimitive(addresses.size)
+                this["route_count"] = JsonPrimitive(filteredRoutes.size)
+                this["endpoint_route_count"] = JsonPrimitive(endpointRoutes.size)
+                this["has_dns"] = JsonPrimitive(hasDnsConfiguration)
+            }.seal(DaemonLogger, success = true)
             CleanupTunHandle(
                 delegate = handle,
                 cleanup = {
@@ -127,6 +138,11 @@ internal class LinuxPlatformAdapter(
                 },
             )
         } catch (failure: Throwable) {
+            DaemonLogger.newScroll().apply {
+                this["event"] = JsonPrimitive("linux_session_failed")
+                this["error_type"] = JsonPrimitive(failure::class.simpleName ?: "Throwable")
+                this["error_message"] = JsonPrimitive(failure.message ?: "unknown")
+            }.seal(DaemonLogger, success = false)
             filteredRoutes.asReversed().forEach { route ->
                 runCatching { deleteRoute(route = route, interfaceName = handle.interfaceName) }
                     .onFailure(failure::addSuppressed)

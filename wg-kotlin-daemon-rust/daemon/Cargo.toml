@@ -1,6 +1,6 @@
 [package]
 name = "daemon"
-version = "0.1.12"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -15,8 +15,11 @@ tokio-stream = { version = "0.1.18", features = ["sync"] }
 tonic = { version = "0.14.6", features = ["transport"] }
 tower-layer = "0.3.3"
 tun-rs = { version = "2.8", features = ["interruptible"] }
-
+which = "7.0.2"
 scribe-rs = { path = "../scribe-rs" }
 daemon-proto = { path = "../daemon-proto" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }
 
 

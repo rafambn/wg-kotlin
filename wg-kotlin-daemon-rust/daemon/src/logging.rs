@@ -3,6 +3,7 @@ use scribe_rs::{Saver, Scribe, SealedScroll};
 use serde_json::Value;
 use std::fs::OpenOptions;
 use std::io::{self, BufWriter, Write};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -64,7 +65,7 @@ pub fn create_daemon_scribe(log_path: &Path) -> anyhow::Result<Scribe> {
         .build())
 }
 
-pub fn log_startup(scribe: &Scribe, host: &str, port: u16, pid: u32) {
+pub fn log_startup(scribe: &Scribe, host: IpAddr, port: u16, pid: u32) {
     let mut scroll = scribe.new_scroll(None);
     scroll.insert(
         "event".to_string(),

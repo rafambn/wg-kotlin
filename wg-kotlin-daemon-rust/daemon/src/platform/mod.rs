@@ -135,43 +135,11 @@ pub fn is_ipv6_literal(cidr_or_ip: &str) -> bool {
 
 pub fn ensure_required_binaries(binaries: &[&str]) -> Result<(), String> {
     for binary in binaries {
-        ensure_binary_exists(binary)?;
+        which::which(binary)
+            .map_err(|_| format!("required binary '{binary}' not found in PATH"))?;
     }
 
     Ok(())
-}
-
-pub fn ensure_binary_exists(binary: &str) -> Result<(), String> {
-    #[cfg(target_family = "windows")]
-    {
-        let status = Command::new("where")
-            .arg(binary)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|error| format!("failed to execute 'where' for {binary}: {error}"))?;
-
-        if status.success() {
-            return Ok(());
-        }
-
-        return Err(format!("required binary '{binary}' not found in PATH"));
-    }
-
-    #[cfg(not(target_family = "windows"))]
-    {
-        let status = Command::new("sh")
-            .arg("-lc")
-            .arg(format!("command -v {binary} >/dev/null 2>&1"))
-            .status()
-            .map_err(|error| format!("failed to execute shell lookup for {binary}: {error}"))?;
-
-        if status.success() {
-            return Ok(());
-        }
-
-        Err(format!("required binary '{binary}' not found in PATH"))
-    }
 }
 
 pub fn run_command(

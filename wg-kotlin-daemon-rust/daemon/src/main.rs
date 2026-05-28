@@ -4,7 +4,7 @@ mod server;
 mod session;
 mod validation;
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{bail, Context};
 use bytes::Bytes;
 use clap::Parser;
 use http_body_util::{BodyExt, Full};
@@ -12,7 +12,7 @@ use serde_json::Value;
 use server::DaemonGrpcService;
 use scribe_rs::Scribe;
 use std::future::Future;
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -34,32 +34,39 @@ struct Cli {
     #[arg(long, default_value_t = 8787, value_parser = clap::value_parser!(u16).range(1..=65535))]
     port: u16,
 
-    #[arg(long, default_value = "/var/log/vpn-daemon.jsonl")]
-    log_path: PathBuf,
-
-    #[arg(long, hide = true)]
-    allow_non_root: bool,
+    #[arg(long, help = "Path to the JSONL log file. Defaults to <exe_dir>/vpn-daemon.jsonl")]
+    log_path: Option<PathBuf>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    ensure_root_privileges(cli.allow_non_root)?;
-    ensure_loopback_host(&cli.host)?;
+    let bind_ip = resolve_host(&cli.host)?;
+    ensure_root()?;
     platform::ensure_required_binaries(platform::required_binaries())
         .map_err(anyhow::Error::msg)?;
 
-    let scribe = logging::create_daemon_scribe(&cli.log_path)?;
+    let log_path = cli.log_path.unwrap_or_else(|| {
+        let mut dir = std::env::current_exe()
+            .expect("failed to get executable path")
+            .parent()
+            .expect("executable has no parent directory")
+            .to_path_buf();
+        dir.push("vpn-daemon.jsonl");
+        dir
+    });
+
+    let scribe = logging::create_daemon_scribe(&log_path)?;
     let scribe = Arc::new(Mutex::new(scribe));
 
     {
         let mut guard = scribe.lock().await;
         guard.hire();
-        logging::log_startup(&guard, &cli.host, cli.port, std::process::id());
+        logging::log_startup(&guard, bind_ip, cli.port, std::process::id());
     }
 
     let service = DaemonGrpcService::new(Arc::clone(&scribe));
-    let addr = parse_bind_addr(&cli.host, cli.port)?;
+    let addr = SocketAddr::new(bind_ip, cli.port);
 
     let server_result = Server::builder()
         .layer(VersionEndpointLayer {
@@ -85,32 +92,21 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn parse_bind_addr(host: &str, port: u16) -> anyhow::Result<SocketAddr> {
-    let addr = format!("{host}:{port}");
-    addr.to_socket_addrs()
-        .with_context(|| format!("failed to resolve daemon bind address: {addr}"))?
-        .next()
-        .ok_or_else(|| anyhow!("no socket address resolved for {addr}"))
-}
-
-fn ensure_loopback_host(host: &str) -> anyhow::Result<()> {
+fn resolve_host(host: &str) -> anyhow::Result<IpAddr> {
     let normalized = host.trim().trim_start_matches('[').trim_end_matches(']');
     let ip = normalized
         .parse::<IpAddr>()
-        .with_context(|| format!("daemon host '{host}' is not a valid bind address"))?;
+        .with_context(|| format!("'{host}' is not a valid IP address"))?;
 
     if !ip.is_loopback() {
-        bail!("refusing to bind daemon to non-loopback host '{host}'");
+        bail!("daemon refuses to bind to non-loopback host '{host}'");
     }
 
-    Ok(())
+    Ok(ip)
 }
 
 #[cfg(target_family = "unix")]
-fn ensure_root_privileges(allow_non_root: bool) -> anyhow::Result<()> {
-    if allow_non_root {
-        return Ok(());
-    }
+fn ensure_root() -> anyhow::Result<()> {
     let effective_uid = unsafe { libc::geteuid() };
     if effective_uid != 0 {
         bail!(
@@ -121,31 +117,40 @@ fn ensure_root_privileges(allow_non_root: bool) -> anyhow::Result<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn ensure_root_privileges(allow_non_root: bool) -> anyhow::Result<()> {
-    if allow_non_root {
-        return Ok(());
-    }
+fn ensure_root() -> anyhow::Result<()> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Security::GetTokenInformation;
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken, TOKEN_QUERY};
 
-    let status = std::process::Command::new("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "$i=[Security.Principal.WindowsIdentity]::GetCurrent();$p=[Security.Principal.WindowsPrincipal]::new($i); if($i.IsSystem -or $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){exit 0}else{exit 1}",
-        ])
-        .status()
-        .context("failed to run Windows privilege check")?;
+    unsafe {
+        let token = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY)?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        bail!("wg-kotlin-daemon requires Administrator privileges on Windows")
+        let mut elevation = windows::Win32::Security::TOKEN_ELEVATION::default();
+        let mut return_length = 0u32;
+
+        let result = GetTokenInformation(
+            token,
+            windows::Win32::Security::TokenElevation,
+            Some(&mut elevation as *mut _ as *mut _),
+            std::mem::size_of::<windows::Win32::Security::TOKEN_ELEVATION>() as u32,
+            &mut return_length,
+        );
+
+        CloseHandle(token)?;
+
+        result?;
+
+        if elevation.TokenIsElevated != 0 {
+            Ok(())
+        } else {
+            bail!("wg-kotlin-daemon requires Administrator privileges on Windows")
+        }
     }
 }
 
 #[cfg(all(not(target_family = "unix"), not(target_os = "windows")))]
-fn ensure_root_privileges(_allow_non_root: bool) -> anyhow::Result<()> {
-    Ok(())
+fn ensure_root() -> anyhow::Result<()> {
+    bail!("wg-kotlin-daemon does not support this operating system")
 }
 
 async fn shutdown_signal() {

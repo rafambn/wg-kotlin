@@ -30,6 +30,135 @@ impl DaemonGrpcService {
             active_sessions: Arc::new(Mutex::new(HashSet::new())),
         }
     }
+
+    async fn run_session_loop(
+        self,
+        mut incoming: Streaming<ClientMessage>,
+        session: TunSession,
+        requested_interface_name: String,
+        interface_name: String,
+        started_at: Instant,
+        session_fields: Vec<(String, Value)>,
+        tx: mpsc::Sender<Result<ServerMessage, Status>>,
+    ) {
+        let read_session = session.clone();
+        let read_tx = tx.clone();
+        let (read_done_tx, mut read_done_rx) = oneshot::channel::<Option<String>>();
+        let read_task = tokio::task::spawn_blocking(move || {
+            let mut read_error_message: Option<String> = None;
+            loop {
+                match read_session.read_packet() {
+                    Ok(packet_bytes) => {
+                        if packet_bytes.len() > MAX_PACKET_FRAME_SIZE || packet_bytes.is_empty() {
+                            continue;
+                        }
+                        let message = incoming_packet_message(packet_bytes);
+                        if read_tx.blocking_send(Ok(message)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                        break;
+                    }
+                    Err(error) => {
+                        let read_error = format!("failed reading TUN packet: {error}");
+                        let status = Status::internal(read_error.clone());
+                        let _ = read_tx.blocking_send(Ok(error_message(&status)));
+                        read_error_message = Some(read_error);
+                        break;
+                    }
+                }
+            }
+
+            let _ = read_done_tx.send(read_error_message);
+        });
+
+        let write_result =
+            process_outgoing_packets(&mut incoming, &session, &mut read_done_rx).await;
+
+        let close_result = session.close();
+        let read_join_result = read_task.await;
+        let mut sessions = self.active_sessions.lock().await;
+        sessions.remove(&requested_interface_name);
+        sessions.remove(&interface_name);
+        drop(sessions);
+
+        let mut success = true;
+        let mut error_message_text: Option<String> = None;
+        let mut outcome = "closed";
+        let mut error_type: Option<String> = None;
+
+        if let Err(status) = write_result {
+            let _ = tx.send(Ok(error_message(&status))).await;
+            success = false;
+            error_message_text = Some(status.message().to_string());
+            error_type = Some(status.code().to_string());
+            outcome = "stream_failed";
+        }
+
+        if let Err(error) = close_result {
+            let status = Status::internal(format!("failed closing TUN session: {error}"));
+            let _ = tx.send(Ok(error_message(&status))).await;
+            success = false;
+            error_type = Some("close_failed".to_string());
+            outcome = "close_failed";
+            if error_message_text.is_none() {
+                error_message_text = Some(status.message().to_string());
+            }
+        }
+
+        if let Err(join_error) = read_join_result {
+            success = false;
+            error_type = Some("read_task_join_failed".to_string());
+            outcome = "read_task_failed";
+            if error_message_text.is_none() {
+                error_message_text = Some(format!("failed joining read task: {join_error}"));
+            }
+        }
+
+        let mut fields = session_fields;
+        fields.push((
+            "interface".to_string(),
+            Value::String(interface_name.clone()),
+        ));
+        fields.push(("outcome".to_string(), Value::String(outcome.to_string())));
+        fields.push((
+            "duration_ms".to_string(),
+            Value::Number((started_at.elapsed().as_millis() as u64).into()),
+        ));
+        if let Some(error_type) = &error_type {
+            fields.push(("error_type".to_string(), Value::String(error_type.clone())));
+        }
+        if let Some(error_message_text) = &error_message_text {
+            fields.push((
+                "error".to_string(),
+                Value::String(error_message_text.clone()),
+            ));
+        }
+
+        {
+            let scribe = self.scribe.lock().await;
+            let mut scroll = scribe.new_scroll(None);
+            scroll.insert("event".to_string(), Value::String("daemon_session".to_string()));
+            for (key, value) in fields.clone() {
+                scroll.insert(key, value);
+            }
+            scribe.seal(scroll, success);
+        }
+
+        {
+            let scribe = self.scribe.lock().await;
+            let mut scroll = scribe.new_scroll(None);
+            scroll.insert("event".to_string(), Value::String("daemon_session_stopped".to_string()));
+            for (key, value) in vec![
+                ("interface".to_string(), Value::String(interface_name)),
+                ("outcome".to_string(), Value::String(outcome.to_string())),
+            ] {
+                scroll.insert(key, value);
+            }
+            scribe.seal(scroll, success);
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -208,137 +337,6 @@ impl Daemon for DaemonGrpcService {
         });
 
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
-    }
-}
-
-impl DaemonGrpcService {
-    async fn run_session_loop(
-        self,
-        mut incoming: Streaming<ClientMessage>,
-        session: TunSession,
-        requested_interface_name: String,
-        interface_name: String,
-        started_at: Instant,
-        session_fields: Vec<(String, Value)>,
-        tx: mpsc::Sender<Result<ServerMessage, Status>>,
-    ) {
-        let read_session = session.clone();
-        let read_tx = tx.clone();
-        let (read_done_tx, mut read_done_rx) = oneshot::channel::<Option<String>>();
-        let read_task = tokio::task::spawn_blocking(move || {
-            let mut read_error_message: Option<String> = None;
-            loop {
-                match read_session.read_packet() {
-                    Ok(packet_bytes) => {
-                        if packet_bytes.len() > MAX_PACKET_FRAME_SIZE || packet_bytes.is_empty() {
-                            continue;
-                        }
-                        let message = incoming_packet_message(packet_bytes);
-                        if read_tx.blocking_send(Ok(message)).is_err() {
-                            break;
-                        }
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
-                        break;
-                    }
-                    Err(error) => {
-                        let read_error = format!("failed reading TUN packet: {error}");
-                        let status = Status::internal(read_error.clone());
-                        let _ = read_tx.blocking_send(Ok(error_message(&status)));
-                        read_error_message = Some(read_error);
-                        break;
-                    }
-                }
-            }
-
-            let _ = read_done_tx.send(read_error_message);
-        });
-
-        let write_result =
-            process_outgoing_packets(&mut incoming, &session, &mut read_done_rx).await;
-
-        let close_result = session.close();
-        let read_join_result = read_task.await;
-        let mut sessions = self.active_sessions.lock().await;
-        sessions.remove(&requested_interface_name);
-        sessions.remove(&interface_name);
-        drop(sessions);
-
-        let mut success = true;
-        let mut error_message_text: Option<String> = None;
-        let mut outcome = "closed";
-        let mut error_type: Option<String> = None;
-
-        if let Err(status) = write_result {
-            let _ = tx.send(Ok(error_message(&status))).await;
-            success = false;
-            error_message_text = Some(status.message().to_string());
-            error_type = Some(status.code().to_string());
-            outcome = "stream_failed";
-        }
-
-        if let Err(error) = close_result {
-            let status = Status::internal(format!("failed closing TUN session: {error}"));
-            let _ = tx.send(Ok(error_message(&status))).await;
-            success = false;
-            error_type = Some("close_failed".to_string());
-            outcome = "close_failed";
-            if error_message_text.is_none() {
-                error_message_text = Some(status.message().to_string());
-            }
-        }
-
-        if let Err(join_error) = read_join_result {
-            success = false;
-            error_type = Some("read_task_join_failed".to_string());
-            outcome = "read_task_failed";
-            if error_message_text.is_none() {
-                error_message_text = Some(format!("failed joining read task: {join_error}"));
-            }
-        }
-
-        let mut fields = session_fields;
-        fields.push((
-            "interface".to_string(),
-            Value::String(interface_name.clone()),
-        ));
-        fields.push(("outcome".to_string(), Value::String(outcome.to_string())));
-        fields.push((
-            "duration_ms".to_string(),
-            Value::Number((started_at.elapsed().as_millis() as u64).into()),
-        ));
-        if let Some(error_type) = &error_type {
-            fields.push(("error_type".to_string(), Value::String(error_type.clone())));
-        }
-        if let Some(error_message_text) = &error_message_text {
-            fields.push((
-                "error".to_string(),
-                Value::String(error_message_text.clone()),
-            ));
-        }
-
-        {
-            let scribe = self.scribe.lock().await;
-            let mut scroll = scribe.new_scroll(None);
-            scroll.insert("event".to_string(), Value::String("daemon_session".to_string()));
-            for (key, value) in fields.clone() {
-                scroll.insert(key, value);
-            }
-            scribe.seal(scroll, success);
-        }
-
-        {
-            let scribe = self.scribe.lock().await;
-            let mut scroll = scribe.new_scroll(None);
-            scroll.insert("event".to_string(), Value::String("daemon_session_stopped".to_string()));
-            for (key, value) in vec![
-                ("interface".to_string(), Value::String(interface_name)),
-                ("outcome".to_string(), Value::String(outcome.to_string())),
-            ] {
-                scroll.insert(key, value);
-            }
-            scribe.seal(scroll, success);
-        }
     }
 }
 

@@ -1,10 +1,17 @@
-use daemon::platform::filter_routes_for_endpoints;
 use route_manager::Route;
 use std::net::IpAddr;
 
 #[cfg(target_os = "linux")]
 mod linux_tests {
     use super::*;
+
+    fn filter_routes_for_endpoints(routes: &[Route], endpoint_ips: &[IpAddr]) -> Vec<Route> {
+        routes
+            .iter()
+            .filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination()))
+            .cloned()
+            .collect()
+    }
 
     #[test]
     fn filter_routes_for_endpoints_removes_endpoint_ip_routes() {

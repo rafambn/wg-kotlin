@@ -1,5 +1,5 @@
 use crate::ip_util::{parse_proto_ip, proto_ip_to_cidr};
-use daemon_proto::pb::IpAddr;
+use daemon_proto::pb::{IpAddr, TunSessionConfig};
 use route_manager::{Route, RouteManager};
 use std::io::{Read, Write};
 use std::net::IpAddr as StdIpAddr;
@@ -217,33 +217,98 @@ fn read_capped<R: Read>(mut reader: R, max_bytes: usize) -> std::io::Result<Vec<
     Ok(output)
 }
 
-pub fn build_routes(routes: &[IpAddr], interface_name: &str) -> Vec<Route> {
-    routes
+pub fn build_and_filter_routes(
+    config: &TunSessionConfig,
+    interface_name: &str,
+) -> Result<(RouteManager, Vec<Route>, Vec<Route>), String> {
+    let mut mgr = RouteManager::new().map_err(|e| format!("route manager: {e}"))?;
+
+    let routes: Vec<Route> = config
+        .routes
         .iter()
         .filter_map(|addr| {
             let (ip, _) = parse_proto_ip(addr)?;
             Some(Route::new(ip, u8::try_from(addr.prefix?).ok()?).with_if_name(interface_name.to_string()))
         })
-        .collect()
-}
+        .collect();
 
-pub fn build_endpoint_routes(mgr: &mut RouteManager, endpoints: &[IpAddr], interface_name: &str) -> Vec<Route> {
-    endpoints
+    let endpoint_routes: Vec<Route> = config
+        .endpoints
         .iter()
         .filter_map(|addr| {
             let (ip, _) = parse_proto_ip(addr)?;
             let found = mgr.find_route(&ip).ok()??;
             Some(found.with_if_name(interface_name.to_string()))
         })
-        .collect()
-}
+        .collect();
 
-pub fn filter_routes_for_endpoints(routes: &[Route], endpoint_ips: &[StdIpAddr]) -> Vec<Route> {
-    routes
+    let endpoint_ips: Vec<StdIpAddr> = config.endpoints.iter().filter_map(|addr| parse_proto_ip(addr).map(|(ip, _)| ip)).collect();
+    let filtered_routes: Vec<Route> = routes
         .iter()
         .filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination()))
         .cloned()
-        .collect()
+        .collect();
+
+    Ok((mgr, filtered_routes, endpoint_routes))
+}
+
+pub fn add_routes_with_predelete(mgr: &mut RouteManager, filtered_routes: &[Route], endpoint_routes: &[Route]) -> Result<(), String> {
+    for route in endpoint_routes.iter().chain(filtered_routes.iter()) {
+        let _ = mgr.delete(route);
+        mgr.add(route).map_err(|e| format!("failed to add route: {e}"))?;
+    }
+    Ok(())
+}
+
+fn cleanup_routes<F>(filtered_routes: &[Route], endpoint_routes: &[Route], dns_teardown: F) -> Result<(), String>
+where
+    F: FnOnce() -> Result<(), String>,
+{
+    let mut cleanup_error: Option<String> = None;
+    let mut capture_error = |result: Result<(), String>| {
+        if let Err(error) = result {
+            if let Some(existing) = &mut cleanup_error {
+                existing.push_str("; ");
+                existing.push_str(&error);
+            } else {
+                cleanup_error = Some(error);
+            }
+        }
+    };
+
+    match RouteManager::new() {
+        Ok(mut mgr) => {
+            for route in filtered_routes.iter().rev().chain(endpoint_routes.iter().rev()) {
+                capture_error(mgr.delete(route).map_err(|e| e.to_string()));
+            }
+        }
+        Err(e) => capture_error(Err(e.to_string())),
+    }
+    capture_error(dns_teardown());
+
+    match cleanup_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+pub fn into_cleanup_hook(
+    setup_result: Result<(), String>,
+    filtered_routes: Vec<Route>,
+    endpoint_routes: Vec<Route>,
+    interface_name: String,
+    dns_teardown: fn(&str) -> Result<(), String>,
+) -> Result<CleanupHook, String> {
+    let cleanup_interface = interface_name.clone();
+    match setup_result {
+        Ok(()) => Ok(Box::new(move || cleanup_routes(&filtered_routes, &endpoint_routes, || dns_teardown(&cleanup_interface)))),
+        Err(setup_error) => {
+            match cleanup_routes(&filtered_routes, &endpoint_routes, || dns_teardown(&interface_name)) {
+                Ok(()) => Err(setup_error),
+                Err(cleanup_error) => Err(format!("{setup_error}; cleanup failed: {cleanup_error}")),
+            }
+        }
+    }
 }
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(20);

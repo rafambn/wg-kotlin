@@ -1,6 +1,8 @@
-use crate::ip_util::proto_ip_to_cidr;
+use crate::ip_util::{parse_proto_ip, proto_ip_to_cidr};
 use daemon_proto::pb::IpAddr;
+use route_manager::{Route, RouteManager};
 use std::io::{Read, Write};
+use std::net::IpAddr as StdIpAddr;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -213,6 +215,35 @@ fn read_capped<R: Read>(mut reader: R, max_bytes: usize) -> std::io::Result<Vec<
     }
 
     Ok(output)
+}
+
+pub fn build_routes(routes: &[IpAddr], interface_name: &str) -> Vec<Route> {
+    routes
+        .iter()
+        .filter_map(|addr| {
+            let (ip, _) = parse_proto_ip(addr)?;
+            Some(Route::new(ip, u8::try_from(addr.prefix?).ok()?).with_if_name(interface_name.to_string()))
+        })
+        .collect()
+}
+
+pub fn build_endpoint_routes(mgr: &mut RouteManager, endpoints: &[IpAddr], interface_name: &str) -> Vec<Route> {
+    endpoints
+        .iter()
+        .filter_map(|addr| {
+            let (ip, _) = parse_proto_ip(addr)?;
+            let found = mgr.find_route(&ip).ok()??;
+            Some(found.with_if_name(interface_name.to_string()))
+        })
+        .collect()
+}
+
+pub fn filter_routes_for_endpoints(routes: &[Route], endpoint_ips: &[StdIpAddr]) -> Vec<Route> {
+    routes
+        .iter()
+        .filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination()))
+        .cloned()
+        .collect()
 }
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(20);

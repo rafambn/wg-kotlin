@@ -1,8 +1,9 @@
 use crate::ip_util::parse_proto_ip;
 use crate::platform::{
-    CleanupHook, ensure_required_binaries, ips_to_args, normalize_domains, run_command,
+    build_endpoint_routes, build_routes, filter_routes_for_endpoints, CleanupHook,
+    ensure_required_binaries, ips_to_args, normalize_domains, run_command,
 };
-use daemon_proto::pb::{IpAddr, TunSessionConfig};
+use daemon_proto::pb::TunSessionConfig;
 use route_manager::{Route, RouteManager};
 use std::net::IpAddr as StdIpAddr;
 
@@ -24,6 +25,7 @@ pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Res
 
     let setup_result = (|| -> Result<(), String> {
         for route in endpoint_routes.iter().chain(filtered_routes.iter()) {
+            let _ = mgr.delete(route);
             mgr.add(route).map_err(|e| format!("failed to add route: {e}"))?;
         }
 
@@ -51,35 +53,6 @@ pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Res
     let cleanup_filtered = filtered_routes.clone();
     let cleanup_endpoint = endpoint_routes.clone();
     Ok(Box::new(move || cleanup_linux_session(&cleanup_filtered, &cleanup_endpoint, &cleanup_interface)))
-}
-
-fn build_routes(routes: &[IpAddr], interface_name: &str) -> Vec<Route> {
-    routes
-        .iter()
-        .filter_map(|addr| {
-            let (ip, _) = parse_proto_ip(addr)?;
-            Some(Route::new(ip, u8::try_from(addr.prefix?).ok()?).with_if_name(interface_name.to_string()))
-        })
-        .collect()
-}
-
-fn build_endpoint_routes(mgr: &mut RouteManager, endpoints: &[IpAddr], interface_name: &str) -> Vec<Route> {
-    endpoints
-        .iter()
-        .filter_map(|addr| {
-            let (ip, _) = parse_proto_ip(addr)?;
-            let found = mgr.find_route(&ip).ok()??;
-            Some(found.with_if_name(interface_name.to_string()))
-        })
-        .collect()
-}
-
-pub fn filter_routes_for_endpoints(routes: &[Route], endpoint_ips: &[StdIpAddr]) -> Vec<Route> {
-    routes
-        .iter()
-        .filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination()))
-        .cloned()
-        .collect()
 }
 
 fn cleanup_linux_session(filtered_routes: &[Route], endpoint_routes: &[Route], interface_name: &str) -> Result<(), String> {

@@ -1,31 +1,27 @@
 use crate::ip_util::parse_proto_ip;
 use crate::platform::{
-    CleanupHook, ensure_required_binaries, ips_to_args, normalize_domains, run_command,
+    build_endpoint_routes, build_routes, filter_routes_for_endpoints, CleanupHook,
+    ensure_required_binaries, ips_to_args, normalize_domains, run_command,
 };
 use daemon_proto::pb::TunSessionConfig;
 use route_manager::{Route, RouteManager};
-
-const NOT_FOUND_PATTERNS: &[&str] = &["not in table", "not found", "no such process", "can't assign requested address"];
+use std::net::IpAddr as StdIpAddr;
 
 pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
     ensure_required_binaries(&["scutil"])?;
-    validate_interface_name_for_scutil(interface_name)?;
 
     let mut mgr = RouteManager::new().map_err(|e| format!("route manager: {e}"))?;
-    let routes: Vec<Route> = config
-        .routes
-        .iter()
-        .filter_map(|addr| {
-            let (ip, prefix) = parse_proto_ip(addr)?;
-            Some(Route::new(ip, u8::try_from(addr.prefix?).ok()?).with_if_name(interface_name.to_string()))
-        })
-        .collect();
+
+    let routes = build_routes(&config.routes, interface_name);
+    let endpoint_routes = build_endpoint_routes(&mut mgr, &config.endpoints, interface_name);
+    let endpoint_ips: Vec<StdIpAddr> = config.endpoints.iter().filter_map(|addr| parse_proto_ip(addr).map(|(ip, _)| ip)).collect();
+    let filtered_routes = filter_routes_for_endpoints(&routes, &endpoint_ips);
 
     let dns_servers = ips_to_args(config.dns.as_ref().map(|dns| &dns.servers[..]).unwrap_or(&[]));
     let dns_domains = normalize_domains(&config.dns.as_ref().map(|dns| dns.search_domains.clone()).unwrap_or_default());
 
     let setup_result = (|| -> Result<(), String> {
-        for route in &routes {
+        for route in endpoint_routes.iter().chain(filtered_routes.iter()) {
             let _ = mgr.delete(route);
             mgr.add(route).map_err(|e| format!("failed to add route: {e}"))?;
         }
@@ -65,17 +61,19 @@ pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Res
     })();
 
     if let Err(setup_error) = setup_result {
-        return match cleanup_macos_session(&routes, interface_name) {
+        return match cleanup_macos_session(&filtered_routes, &endpoint_routes, interface_name) {
             Ok(()) => Err(setup_error),
             Err(cleanup_error) => Err(format!("{setup_error}; cleanup failed: {cleanup_error}")),
         };
     }
 
     let cleanup_interface = interface_name.to_string();
-    Ok(Box::new(move || cleanup_macos_session(&routes, &cleanup_interface)))
+    let cleanup_filtered = filtered_routes.clone();
+    let cleanup_endpoint = endpoint_routes.clone();
+    Ok(Box::new(move || cleanup_macos_session(&cleanup_filtered, &cleanup_endpoint, &cleanup_interface)))
 }
 
-fn cleanup_macos_session(routes: &[Route], interface_name: &str) -> Result<(), String> {
+fn cleanup_macos_session(filtered_routes: &[Route], endpoint_routes: &[Route], interface_name: &str) -> Result<(), String> {
     let mut cleanup_error: Option<String> = None;
     let mut capture_error = |result: Result<(), String>| {
         if let Err(error) = result {
@@ -90,7 +88,7 @@ fn cleanup_macos_session(routes: &[Route], interface_name: &str) -> Result<(), S
 
     match RouteManager::new() {
         Ok(mut mgr) => {
-            for route in routes.iter().rev() {
+            for route in filtered_routes.iter().rev().chain(endpoint_routes.iter().rev()) {
                 capture_error(mgr.delete(route).map_err(|e| e.to_string()));
             }
         }
@@ -118,12 +116,4 @@ fn resolver_root_path(interface_name: &str) -> String {
     format!("State:/Network/Interface/{interface_name}")
 }
 
-fn validate_interface_name_for_scutil(interface_name: &str) -> Result<(), String> {
-    let valid = interface_name
-        .chars()
-        .enumerate()
-        .all(|(idx, ch)| if idx == 0 { ch.is_ascii_alphabetic() } else { ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' })
-        && interface_name.len() <= 32;
 
-    if valid { Ok(()) } else { Err(format!("interface name contains unsafe characters for scutil: {interface_name}")) }
-}

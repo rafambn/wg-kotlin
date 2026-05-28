@@ -1,4 +1,4 @@
-use daemon::platform::linux::filter_routes_for_endpoints;
+use daemon::platform::filter_routes_for_endpoints;
 use route_manager::Route;
 use std::net::IpAddr;
 

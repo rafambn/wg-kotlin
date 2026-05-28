@@ -56,7 +56,7 @@ impl DaemonGrpcService {
                         if packet_bytes.len() > MAX_PACKET_FRAME_SIZE || packet_bytes.is_empty() {
                             continue;
                         }
-                        let message = incoming_packet_message(packet_bytes);
+                        let message = ServerMessage { payload: Some(ServerPayload::IncomingPacket(Packet { data: packet_bytes })) };
                         if read_tx.blocking_send(Ok(message)).is_err() {
                             break;
                         }
@@ -77,7 +77,37 @@ impl DaemonGrpcService {
             let _ = read_done_tx.send(read_error_message);
         });
 
-        let write_result = process_outgoing_packets(&mut incoming, &session, &mut read_done_rx).await;
+        let write_result = async {
+            loop {
+                let next_message = tokio::select! {
+                    read_done = &mut read_done_rx => {
+                        return match read_done {
+                            Ok(Some(error_message)) => Err(Status::internal(error_message)),
+                            Ok(None) => Ok(()),
+                            Err(_) => Ok(()),
+                        };
+                    }
+                    incoming = incoming.message() => incoming?,
+                };
+
+                let Some(message) = next_message else {
+                    return Ok(());
+                };
+
+                match message.payload {
+                    Some(ClientPayload::OutgoingPacket(packet)) => {
+                        if packet.data.len() > MAX_PACKET_FRAME_SIZE || packet.data.is_empty() {
+                            continue;
+                        }
+                        session.write_packet(&packet.data).map_err(|error| Status::internal(format!("failed writing TUN packet: {error}")))?;
+                    }
+                    Some(ClientPayload::Config(_)) => {
+                        return Err(Status::invalid_argument("config must be sent only as the first session message"));
+                    }
+                    None => {}
+                }
+            }
+        }.await;
 
         let close_result = session.close();
         let read_join_result = read_task.await;
@@ -214,7 +244,7 @@ impl Daemon for DaemonGrpcService {
         let interface_name = session.interface_name().to_string();
 
         let (tx, rx) = mpsc::channel::<Result<ServerMessage, Status>>(PACKET_CHANNEL_CAPACITY);
-        let _ = tx.send(Ok(started_message(session.interface_name()))).await;
+        let _ = tx.send(Ok(ServerMessage { payload: Some(ServerPayload::Started(SessionStarted { interface_name: session.interface_name().to_string() })) })).await;
         let mut started_fields = session_fields.clone();
         started_fields.push(("interface".to_string(), Value::String(session.interface_name().to_string())));
         self.seal_scroll("daemon_session_started", started_fields, true).await;
@@ -228,42 +258,6 @@ impl Daemon for DaemonGrpcService {
     }
 }
 
-async fn process_outgoing_packets(
-    incoming: &mut Streaming<ClientMessage>,
-    session: &TunSession,
-    read_done_rx: &mut oneshot::Receiver<Option<String>>,
-) -> Result<(), Status> {
-    loop {
-        let next_message = tokio::select! {
-            read_done = &mut *read_done_rx => {
-                return match read_done {
-                    Ok(Some(error_message)) => Err(Status::internal(error_message)),
-                    Ok(None) => Ok(()),
-                    Err(_) => Ok(()),
-                };
-            }
-            incoming = incoming.message() => incoming?,
-        };
-
-        let Some(message) = next_message else {
-            return Ok(());
-        };
-
-        match message.payload {
-            Some(ClientPayload::OutgoingPacket(packet)) => {
-                if packet.data.len() > MAX_PACKET_FRAME_SIZE || packet.data.is_empty() {
-                    continue;
-                }
-                session.write_packet(&packet.data).map_err(|error| Status::internal(format!("failed writing TUN packet: {error}")))?;
-            }
-            Some(ClientPayload::Config(_)) => {
-                return Err(Status::invalid_argument("config must be sent only as the first session message"));
-            }
-            None => {}
-        }
-    }
-}
-
 #[allow(clippy::result_large_err)]
 fn extract_config(message: ClientMessage) -> Result<TunSessionConfig, Status> {
     match message.payload {
@@ -271,14 +265,6 @@ fn extract_config(message: ClientMessage) -> Result<TunSessionConfig, Status> {
         Some(ClientPayload::OutgoingPacket(_)) => Err(Status::invalid_argument("first session message must contain config")),
         None => Err(Status::invalid_argument("first session message payload is missing")),
     }
-}
-
-fn started_message(interface_name: &str) -> ServerMessage {
-    ServerMessage { payload: Some(ServerPayload::Started(SessionStarted { interface_name: interface_name.to_string() })) }
-}
-
-fn incoming_packet_message(data: Vec<u8>) -> ServerMessage {
-    ServerMessage { payload: Some(ServerPayload::IncomingPacket(Packet { data })) }
 }
 
 fn error_message(status: &Status) -> ServerMessage {
@@ -297,7 +283,7 @@ fn session_config_fields(config: &TunSessionConfig) -> Vec<(String, Value)> {
 
     vec![
         ("requested_interface".to_string(), Value::String(config.interface_name.clone())),
-        ("platform".to_string(), Value::String(platform_id().to_string())),
+        ("platform".to_string(), Value::String(std::env::consts::OS.to_string())),
         ("address_count".to_string(), Value::Number((config.addresses.len() as u64).into())),
         ("route_count".to_string(), Value::Number((config.routes.len() as u64).into())),
         ("endpoint_count".to_string(), Value::Number((config.endpoints.len() as u64).into())),
@@ -307,19 +293,3 @@ fn session_config_fields(config: &TunSessionConfig) -> Vec<(String, Value)> {
     ]
 }
 
-fn platform_id() -> &'static str {
-    #[cfg(target_os = "linux")]
-    {
-        return "linux";
-    }
-    #[cfg(target_os = "macos")]
-    {
-        return "macos";
-    }
-    #[cfg(target_os = "windows")]
-    {
-        return "windows";
-    }
-    #[allow(unreachable_code)]
-    "unknown"
-}

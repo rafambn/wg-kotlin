@@ -1,11 +1,5 @@
-mod ip_util;
-mod logging;
-mod platform;
-mod server;
-mod session;
-mod validation;
-
 use anyhow::{bail, Context};
+use daemon::{logging, platform, server};
 use axum::{response::IntoResponse, routing::get, Router};
 use clap::Parser;
 use serde_json::Value;

@@ -62,7 +62,12 @@ async fn main() -> anyhow::Result<()> {
     {
         let mut guard = scribe.lock().await;
         guard.hire();
-        logging::log_startup(&guard, bind_ip, cli.port, std::process::id());
+        let mut scroll = guard.new_scroll(None);
+        scroll.insert("event".to_string(), Value::String("daemon_startup".to_string()));
+        scroll.insert("host".to_string(), Value::String(bind_ip.to_string()));
+        scroll.insert("port".to_string(), Value::Number((cli.port as u64).into()));
+        scroll.insert("pid".to_string(), Value::Number((std::process::id() as u64).into()));
+        guard.seal(scroll, true);
     }
 
     let service = DaemonGrpcService::new(Arc::clone(&scribe));
@@ -79,12 +84,17 @@ async fn main() -> anyhow::Result<()> {
 
     if let Err(error) = &server_result {
         let guard = scribe.lock().await;
-        logging::log_error(&guard, &error.to_string());
+        let mut scroll = guard.new_scroll(None);
+        scroll.insert("event".to_string(), Value::String("daemon_error".to_string()));
+        scroll.insert("error".to_string(), Value::String(error.to_string()));
+        guard.seal(scroll, false);
     }
 
     {
         let mut guard = scribe.lock().await;
-        logging::log_shutdown(&guard, server_result.is_ok());
+        let mut scroll = guard.new_scroll(None);
+        scroll.insert("event".to_string(), Value::String("daemon_shutdown".to_string()));
+        guard.seal(scroll, server_result.is_ok());
         guard.retire().await;
     }
 

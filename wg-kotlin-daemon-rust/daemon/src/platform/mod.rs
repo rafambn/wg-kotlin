@@ -1,9 +1,9 @@
 use crate::ip_util::proto_ip_to_cidr;
+use daemon_proto::pb::{IpAddr, TunSessionConfig};
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
-use daemon_proto::pb::{IpAddr, TunSessionConfig};
 
 #[cfg(target_os = "linux")]
 pub mod linux;
@@ -40,10 +40,7 @@ pub fn required_binaries() -> &'static [&'static str] {
     &[]
 }
 
-pub fn configure_session(
-    config: &TunSessionConfig,
-    interface_name: &str,
-) -> Result<CleanupHook, String> {
+pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
     #[cfg(target_os = "linux")]
     {
         return linux::configure_session(config, interface_name);
@@ -127,8 +124,7 @@ pub fn is_ipv6_literal(cidr_or_ip: &str) -> bool {
 
 pub fn ensure_required_binaries(binaries: &[&str]) -> Result<(), String> {
     for binary in binaries {
-        which::which(binary)
-            .map_err(|_| format!("required binary '{binary}' not found in PATH"))?;
+        which::which(binary).map_err(|_| format!("required binary '{binary}' not found in PATH"))?;
     }
 
     Ok(())
@@ -157,28 +153,18 @@ pub fn run_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| {
-            format!("{operation_label}: failed to start command '{program}': {error}")
-        })?;
+        .map_err(|error| format!("{operation_label}: failed to start command '{program}': {error}"))?;
 
     if let Some(stdin_payload) = stdin {
-        let mut stdin_handle = child.stdin.take().ok_or_else(|| {
-            format!("{operation_label}: command '{program}' did not expose stdin pipe")
-        })?;
+        let mut stdin_handle = child.stdin.take().ok_or_else(|| format!("{operation_label}: command '{program}' did not expose stdin pipe"))?;
 
         stdin_handle
             .write_all(stdin_payload.as_bytes())
-            .map_err(|error| {
-                format!("{operation_label}: failed writing stdin to '{program}': {error}")
-            })?;
+            .map_err(|error| format!("{operation_label}: failed writing stdin to '{program}': {error}"))?;
     }
 
-    let stdout_handle = child.stdout.take().ok_or_else(|| {
-        format!("{operation_label}: command '{program}' did not expose stdout pipe")
-    })?;
-    let stderr_handle = child.stderr.take().ok_or_else(|| {
-        format!("{operation_label}: command '{program}' did not expose stderr pipe")
-    })?;
+    let stdout_handle = child.stdout.take().ok_or_else(|| format!("{operation_label}: command '{program}' did not expose stdout pipe"))?;
+    let stderr_handle = child.stderr.take().ok_or_else(|| format!("{operation_label}: command '{program}' did not expose stderr pipe"))?;
 
     let stdout_reader = thread::spawn(move || read_capped(stdout_handle, MAX_COMMAND_OUTPUT_BYTES));
     let stderr_reader = thread::spawn(move || read_capped(stderr_handle, MAX_COMMAND_OUTPUT_BYTES));
@@ -186,20 +172,17 @@ pub fn run_command(
     let started_at = Instant::now();
     let mut timed_out = false;
     let status = loop {
-        let status = child.try_wait().map_err(|error| {
-            format!("{operation_label}: failed waiting for command '{program}': {error}")
-        })?;
+        let status = child.try_wait().map_err(|error| format!("{operation_label}: failed waiting for command '{program}': {error}"))?;
         if let Some(status) = status {
             break status;
         }
 
         if started_at.elapsed() >= COMMAND_TIMEOUT {
             timed_out = true;
-            break child.kill().and_then(|_| child.wait()).map_err(|error| {
-                format!(
-                    "{operation_label}: failed to terminate timed out command '{program}': {error}"
-                )
-            })?;
+            break child
+                .kill()
+                .and_then(|_| child.wait())
+                .map_err(|error| format!("{operation_label}: failed to terminate timed out command '{program}': {error}"))?;
         }
 
         thread::sleep(COMMAND_POLL_INTERVAL);
@@ -207,21 +190,13 @@ pub fn run_command(
 
     let stdout = stdout_reader
         .join()
-        .map_err(|_| {
-            format!("{operation_label}: failed joining stdout reader for command '{program}'")
-        })?
-        .map_err(|error| {
-            format!("{operation_label}: failed reading stdout for command '{program}': {error}")
-        })
+        .map_err(|_| format!("{operation_label}: failed joining stdout reader for command '{program}'"))?
+        .map_err(|error| format!("{operation_label}: failed reading stdout for command '{program}': {error}"))
         .map(|bytes| String::from_utf8_lossy(&bytes).to_string())?;
     let stderr = stderr_reader
         .join()
-        .map_err(|_| {
-            format!("{operation_label}: failed joining stderr reader for command '{program}'")
-        })?
-        .map_err(|error| {
-            format!("{operation_label}: failed reading stderr for command '{program}': {error}")
-        })
+        .map_err(|_| format!("{operation_label}: failed joining stderr reader for command '{program}'"))?
+        .map_err(|error| format!("{operation_label}: failed reading stderr for command '{program}': {error}"))
         .map(|bytes| String::from_utf8_lossy(&bytes).to_string())?;
 
     if timed_out {
@@ -238,19 +213,11 @@ pub fn run_command(
     }
 
     let output_detail = format!("{}\n{}", stdout.to_lowercase(), stderr.to_lowercase());
-    if ignored_failure_patterns
-        .iter()
-        .any(|pattern| output_detail.contains(pattern))
-    {
+    if ignored_failure_patterns.iter().any(|pattern| output_detail.contains(pattern)) {
         return Ok(stdout);
     }
 
-    Err(format!(
-        "{operation_label}: command '{program}' failed (code {:?})\nstdout: {}\nstderr: {}",
-        status.code(),
-        stdout.trim(),
-        stderr.trim(),
-    ))
+    Err(format!("{operation_label}: command '{program}' failed (code {:?})\nstdout: {}\nstderr: {}", status.code(), stdout.trim(), stderr.trim(),))
 }
 
 fn read_capped<R: Read>(mut reader: R, max_bytes: usize) -> std::io::Result<Vec<u8>> {

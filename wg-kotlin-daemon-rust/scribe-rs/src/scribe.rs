@@ -1,6 +1,6 @@
 use crate::margin::Margin;
 use crate::saver::Saver;
-use crate::scroll::{new_scroll_id, Scroll, SealedScroll};
+use crate::scroll::{Scroll, SealedScroll, new_scroll_id};
 use serde_json::{Map, Value};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -20,10 +20,7 @@ impl Scribe {
     }
 
     pub fn hire(&mut self) {
-        assert!(
-            self.sender.is_none(),
-            "Scribe already hired. Call retire() first."
-        );
+        assert!(self.sender.is_none(), "Scribe already hired. Call retire() first.");
 
         let (sender, mut receiver) = mpsc::unbounded_channel::<SealedScroll>();
         let savers = self.savers.clone();
@@ -42,10 +39,7 @@ impl Scribe {
 
     pub fn new_scroll(&self, id: Option<String>) -> Scroll {
         let mut scroll = Map::new();
-        scroll.insert(
-            "scroll_id".to_string(),
-            Value::String(id.unwrap_or_else(new_scroll_id)),
-        );
+        scroll.insert("scroll_id".to_string(), Value::String(id.unwrap_or_else(new_scroll_id)));
 
         for (key, value) in &self.imprint {
             scroll.insert(key.clone(), value.clone());
@@ -63,10 +57,7 @@ impl Scribe {
             margin.footer(&mut scroll);
         }
 
-        let sealed = SealedScroll {
-            success,
-            data: scroll,
-        };
+        let sealed = SealedScroll { success, data: scroll };
         self.enqueue(sealed.clone());
         sealed
     }
@@ -115,12 +106,6 @@ impl ScribeBuilder {
     }
 
     pub fn build(self) -> Scribe {
-        Scribe {
-            imprint: self.imprint,
-            margin: self.margin,
-            savers: self.savers,
-            sender: None,
-            handle: None,
-        }
+        Scribe { imprint: self.imprint, margin: self.margin, savers: self.savers, sender: None, handle: None }
     }
 }

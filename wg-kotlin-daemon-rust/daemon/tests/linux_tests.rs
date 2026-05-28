@@ -1,7 +1,5 @@
-use daemon::platform::linux::{
-    endpoint_route_args, filter_routes_for_endpoints, parse_ip_route_get_output, route_args,
-};
 use daemon::platform::EndpointRoute;
+use daemon::platform::linux::{endpoint_route_args, filter_routes_for_endpoints, parse_ip_route_get_output, route_args};
 
 #[cfg(target_os = "linux")]
 mod linux_tests {
@@ -12,23 +10,13 @@ mod linux_tests {
         let args = route_args("replace", "2001:db8::/64", "utun0");
         assert_eq!(
             args,
-            vec![
-                "-6".to_string(),
-                "route".to_string(),
-                "replace".to_string(),
-                "2001:db8::/64".to_string(),
-                "dev".to_string(),
-                "utun0".to_string(),
-            ],
+            vec!["-6".to_string(), "route".to_string(), "replace".to_string(), "2001:db8::/64".to_string(), "dev".to_string(), "utun0".to_string(),],
         );
     }
 
     #[test]
     fn endpoint_route_args_adds_ipv4_cidr_and_gateway() {
-        let route = EndpointRoute {
-            gateway: Some("192.168.1.1".to_string()),
-            device: "eth0".to_string(),
-        };
+        let route = EndpointRoute { gateway: Some("192.168.1.1".to_string()), device: "eth0".to_string() };
 
         let args = endpoint_route_args("replace", "203.0.113.10", &route);
         assert_eq!(
@@ -47,22 +35,12 @@ mod linux_tests {
 
     #[test]
     fn endpoint_route_args_adds_ipv6_flag_and_32_prefix() {
-        let route = EndpointRoute {
-            gateway: None,
-            device: "en0".to_string(),
-        };
+        let route = EndpointRoute { gateway: None, device: "en0".to_string() };
 
         let args = endpoint_route_args("delete", "2001:db8::1234", &route);
         assert_eq!(
             args,
-            vec![
-                "-6".to_string(),
-                "route".to_string(),
-                "delete".to_string(),
-                "2001:db8::1234/32".to_string(),
-                "dev".to_string(),
-                "en0".to_string(),
-            ],
+            vec!["-6".to_string(), "route".to_string(), "delete".to_string(), "2001:db8::1234/32".to_string(), "dev".to_string(), "en0".to_string(),],
         );
     }
 
@@ -83,18 +61,10 @@ mod linux_tests {
     #[test]
     fn filter_routes_for_endpoints_removes_endpoint_ip_routes() {
         let filtered = filter_routes_for_endpoints(
-            vec![
-                "10.0.0.0/24".to_string(),
-                "203.0.113.10/32".to_string(),
-                "2001:db8::/64".to_string(),
-                "2001:db8::10/128".to_string(),
-            ],
+            vec!["10.0.0.0/24".to_string(), "203.0.113.10/32".to_string(), "2001:db8::/64".to_string(), "2001:db8::10/128".to_string()],
             &["203.0.113.10".to_string(), "2001:db8::10".to_string()],
         );
 
-        assert_eq!(
-            filtered,
-            vec!["10.0.0.0/24".to_string(), "2001:db8::/64".to_string()],
-        );
+        assert_eq!(filtered, vec!["10.0.0.0/24".to_string(), "2001:db8::/64".to_string()],);
     }
 }

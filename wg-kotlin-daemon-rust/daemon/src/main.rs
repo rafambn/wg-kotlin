@@ -1,7 +1,8 @@
-use anyhow::{bail, Context};
-use daemon::{logging, platform, server};
-use axum::{response::IntoResponse, routing::get, Router};
+use anyhow::{Context, bail};
+use axum::{Router, response::IntoResponse, routing::get};
 use clap::Parser;
+use daemon::{logging, platform, server};
+use daemon_proto::pb::daemon_server::DaemonServer;
 use serde_json::Value;
 use server::DaemonGrpcService;
 use std::net::{IpAddr, SocketAddr};
@@ -9,7 +10,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower::ServiceExt;
-use daemon_proto::pb::daemon_server::DaemonServer;
 
 #[derive(Parser, Debug)]
 #[command(name = "wg-kotlin-daemon", version)]
@@ -29,15 +29,11 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let bind_ip = resolve_host(&cli.host)?;
     ensure_root()?;
-    platform::ensure_required_binaries(platform::required_binaries())
-        .map_err(anyhow::Error::msg)?;
+    platform::ensure_required_binaries(platform::required_binaries()).map_err(anyhow::Error::msg)?;
 
     let log_path = cli.log_path.unwrap_or_else(|| {
-        let mut dir = std::env::current_exe()
-            .expect("failed to get executable path")
-            .parent()
-            .expect("executable has no parent directory")
-            .to_path_buf();
+        let mut dir =
+            std::env::current_exe().expect("failed to get executable path").parent().expect("executable has no parent directory").to_path_buf();
         dir.push("vpn-daemon.jsonl");
         dir
     });
@@ -60,18 +56,12 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::new(bind_ip, cli.port);
 
     let grpc_svc = DaemonServer::new(grpc_service);
-    let fallback = grpc_svc.map_request(|req: axum::extract::Request| {
-        req.map(|b| tonic::body::Body::new(b))
-    });
+    let fallback = grpc_svc.map_request(|req: axum::extract::Request| req.map(|b| tonic::body::Body::new(b)));
 
-    let app = Router::new()
-        .route("/version", get(version_handler))
-        .fallback_service(fallback);
+    let app = Router::new().route("/version", get(version_handler)).fallback_service(fallback);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    let server_result = axum::serve(listener, app.into_make_service())
-        .with_graceful_shutdown(shutdown_signal())
-        .await;
+    let server_result = axum::serve(listener, app.into_make_service()).with_graceful_shutdown(shutdown_signal()).await;
 
     if let Err(error) = &server_result {
         let guard = scribe.lock().await;
@@ -95,9 +85,7 @@ async fn main() -> anyhow::Result<()> {
 
 fn resolve_host(host: &str) -> anyhow::Result<IpAddr> {
     let normalized = host.trim().trim_start_matches('[').trim_end_matches(']');
-    let ip = normalized
-        .parse::<IpAddr>()
-        .with_context(|| format!("'{host}' is not a valid IP address"))?;
+    let ip = normalized.parse::<IpAddr>().with_context(|| format!("'{host}' is not a valid IP address"))?;
 
     if !ip.is_loopback() {
         bail!("daemon refuses to bind to non-loopback host '{host}'");
@@ -114,9 +102,7 @@ async fn version_handler() -> impl IntoResponse {
 fn ensure_root() -> anyhow::Result<()> {
     let effective_uid = unsafe { libc::geteuid() };
     if effective_uid != 0 {
-        bail!(
-            "wg-kotlin-daemon requires root privileges on Unix (effective uid = {effective_uid})"
-        );
+        bail!("wg-kotlin-daemon requires root privileges on Unix (effective uid = {effective_uid})");
     }
     Ok(())
 }
@@ -145,11 +131,7 @@ fn ensure_root() -> anyhow::Result<()> {
 
         result?;
 
-        if elevation.TokenIsElevated != 0 {
-            Ok(())
-        } else {
-            bail!("wg-kotlin-daemon requires Administrator privileges on Windows")
-        }
+        if elevation.TokenIsElevated != 0 { Ok(()) } else { bail!("wg-kotlin-daemon requires Administrator privileges on Windows") }
     }
 }
 

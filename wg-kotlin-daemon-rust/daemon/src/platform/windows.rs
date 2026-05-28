@@ -1,40 +1,23 @@
 use crate::platform::{
-    cidrs_to_args, ensure_required_binaries, ip_literal, ips_to_args, is_ipv6_literal,
-    normalize_domains, run_command, CleanupHook,
+    CleanupHook, cidrs_to_args, ensure_required_binaries, ip_literal, ips_to_args, is_ipv6_literal, normalize_domains, run_command,
 };
-use std::sync::{Mutex, OnceLock};
 use daemon_proto::pb::TunSessionConfig;
+use std::sync::{Mutex, OnceLock};
 
-const NOT_FOUND_PATTERNS: &[&str] = &[
-    "not found",
-    "cannot find",
-    "does not exist",
-    "element not found",
-    "object was not found",
-];
+const NOT_FOUND_PATTERNS: &[&str] = &["not found", "cannot find", "does not exist", "element not found", "object was not found"];
 
 const NRPT_COMMENT_PREFIX: &str = "kmpvpn-daemon:";
 
-pub fn configure_session(
-    config: &TunSessionConfig,
-    interface_name: &str,
-) -> Result<CleanupHook, String> {
+pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
     ensure_required_binaries(&["netsh", "powershell"])?;
 
     let addresses = cidrs_to_args(&config.addresses);
     let routes = cidrs_to_args(&config.routes);
-    let dns_servers =
-        ips_to_args(config.dns.as_ref().map(|dns| &dns.servers[..]).unwrap_or(&[]));
-    let dns_domains = normalize_domains(
-        &config
-            .dns
-            .as_ref()
-            .map(|dns| dns.search_domains.clone())
-            .unwrap_or_default(),
-    )
-    .into_iter()
-    .map(|domain| format!(".{domain}"))
-    .collect::<Vec<String>>();
+    let dns_servers = ips_to_args(config.dns.as_ref().map(|dns| &dns.servers[..]).unwrap_or(&[]));
+    let dns_domains = normalize_domains(&config.dns.as_ref().map(|dns| dns.search_domains.clone()).unwrap_or_default())
+        .into_iter()
+        .map(|domain| format!(".{domain}"))
+        .collect::<Vec<String>>();
 
     let has_ipv4 = addresses.iter().any(|address| !is_ipv6_literal(address));
     let has_ipv6 = addresses.iter().any(|address| is_ipv6_literal(address));
@@ -134,20 +117,12 @@ pub fn configure_session(
                 run_command(
                     "set-nrpt-rule",
                     "powershell",
-                    &vec![
-                        "-NoProfile".to_string(),
-                        "-NonInteractive".to_string(),
-                        "-Command".to_string(),
-                        SET_NRPT_RULE_SCRIPT.to_string(),
-                    ],
+                    &vec!["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), SET_NRPT_RULE_SCRIPT.to_string()],
                     None,
                     &vec![
                         ("WG_KOTLIN_DNS_NAMESPACE".to_string(), domain.to_string()),
                         ("WG_KOTLIN_DNS_SERVERS".to_string(), dns_servers.join("\n")),
-                        (
-                            "WG_KOTLIN_NRPT_COMMENT".to_string(),
-                            rule_comment(interface_name),
-                        ),
+                        ("WG_KOTLIN_NRPT_COMMENT".to_string(), rule_comment(interface_name)),
                     ],
                     &[],
                 )?;
@@ -164,16 +139,10 @@ pub fn configure_session(
     }
 
     let cleanup_interface = interface_name.to_string();
-    Ok(Box::new(move || {
-        cleanup_windows_session(&routes, &addresses, &cleanup_interface)
-    }))
+    Ok(Box::new(move || cleanup_windows_session(&routes, &addresses, &cleanup_interface)))
 }
 
-fn cleanup_windows_session(
-    routes: &[String],
-    addresses: &[String],
-    interface_name: &str,
-) -> Result<(), String> {
+fn cleanup_windows_session(routes: &[String], addresses: &[String], interface_name: &str) -> Result<(), String> {
     let mut cleanup_error: Option<String> = None;
     let mut capture_error = |result: Result<(), String>| {
         if let Err(error) = result {
@@ -201,37 +170,17 @@ fn cleanup_windows_session(
 }
 
 fn add_route(interface_name: &str, route: &str) -> Result<(), String> {
-    run_command(
-        "add-route",
-        "netsh",
-        &route_args("add", interface_name, route),
-        None,
-        &[],
-        &[],
-    )
-    .map(|_| ())
+    run_command("add-route", "netsh", &route_args("add", interface_name, route), None, &[], &[]).map(|_| ())
 }
 
 fn delete_route(interface_name: &str, route: &str) -> Result<(), String> {
-    run_command(
-        "delete-route",
-        "netsh",
-        &route_args("delete", interface_name, route),
-        None,
-        &[],
-        NOT_FOUND_PATTERNS,
-    )
-    .map(|_| ())
+    run_command("delete-route", "netsh", &route_args("delete", interface_name, route), None, &[], NOT_FOUND_PATTERNS).map(|_| ())
 }
 
 fn route_args(command: &str, interface_name: &str, route: &str) -> Vec<String> {
     let mut args = vec![
         "interface".to_string(),
-        if is_ipv6_literal(route) {
-            "ipv6".to_string()
-        } else {
-            "ipv4".to_string()
-        },
+        if is_ipv6_literal(route) { "ipv6".to_string() } else { "ipv4".to_string() },
         command.to_string(),
         "route".to_string(),
         format!("prefix={route}"),
@@ -294,14 +243,7 @@ fn delete_address(interface_name: &str, address: &str) -> Result<(), String> {
 
     let mut last_error: Option<String> = None;
     for args in delete_args {
-        if let Err(error) = run_command(
-            "delete-address",
-            "netsh",
-            &args,
-            None,
-            &[],
-            NOT_FOUND_PATTERNS,
-        ) {
+        if let Err(error) = run_command("delete-address", "netsh", &args, None, &[], NOT_FOUND_PATTERNS) {
             last_error = Some(error);
         }
     }
@@ -317,17 +259,9 @@ fn clear_nrpt_rules(interface_name: &str) -> Result<(), String> {
     run_command(
         "clear-nrpt-rules",
         "powershell",
-        &vec![
-            "-NoProfile".to_string(),
-            "-NonInteractive".to_string(),
-            "-Command".to_string(),
-            CLEAR_NRPT_RULES_SCRIPT.to_string(),
-        ],
+        &vec!["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), CLEAR_NRPT_RULES_SCRIPT.to_string()],
         None,
-        &vec![(
-            "WG_KOTLIN_NRPT_COMMENT".to_string(),
-            rule_comment(interface_name),
-        )],
+        &vec![("WG_KOTLIN_NRPT_COMMENT".to_string(), rule_comment(interface_name))],
         &[],
     )
     .map(|_| ())
@@ -348,17 +282,9 @@ pub(crate) fn clear_stale_nrpt_rules_once() -> Result<(), String> {
     run_command(
         "clear-stale-nrpt-rules",
         "powershell",
-        &vec![
-            "-NoProfile".to_string(),
-            "-NonInteractive".to_string(),
-            "-Command".to_string(),
-            CLEAR_ALL_NRPT_RULES_SCRIPT.to_string(),
-        ],
+        &vec!["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), CLEAR_ALL_NRPT_RULES_SCRIPT.to_string()],
         None,
-        &vec![(
-            "WG_KOTLIN_NRPT_COMMENT_PREFIX".to_string(),
-            NRPT_COMMENT_PREFIX.to_string(),
-        )],
+        &vec![("WG_KOTLIN_NRPT_COMMENT_PREFIX".to_string(), NRPT_COMMENT_PREFIX.to_string())],
         &[],
     )?;
 
@@ -376,9 +302,7 @@ fn split_cidr(cidr: &str) -> Result<(String, i32), String> {
         return Err(format!("invalid CIDR: {cidr}"));
     }
 
-    let prefix = parts[1]
-        .parse::<i32>()
-        .map_err(|_| format!("invalid CIDR prefix: {cidr}"))?;
+    let prefix = parts[1].parse::<i32>().map_err(|_| format!("invalid CIDR prefix: {cidr}"))?;
     Ok((parts[0].to_string(), prefix))
 }
 
@@ -388,11 +312,7 @@ fn prefix_to_mask(prefix: i32) -> String {
     }
 
     let mask = (0xffff_ffffu64 << (32 - prefix)) & 0xffff_ffffu64;
-    [24, 16, 8, 0]
-        .iter()
-        .map(|shift| ((mask >> shift) & 0xff).to_string())
-        .collect::<Vec<String>>()
-        .join(".")
+    [24, 16, 8, 0].iter().map(|shift| ((mask >> shift) & 0xff).to_string()).collect::<Vec<String>>().join(".")
 }
 
 const SET_NRPT_RULE_SCRIPT: &str = r#"

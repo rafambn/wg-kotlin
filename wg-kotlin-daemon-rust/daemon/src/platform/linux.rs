@@ -1,42 +1,23 @@
 use crate::ip_util::proto_ip_to_cidr;
 use crate::platform::{
-    cidrs_to_args, ensure_required_binaries, ip_literal, ips_to_args, is_ipv6_literal,
-    normalize_domains, run_command, CleanupHook, EndpointRoute,
+    CleanupHook, EndpointRoute, cidrs_to_args, ensure_required_binaries, ip_literal, ips_to_args, is_ipv6_literal, normalize_domains, run_command,
 };
 use daemon_proto::pb::{IpAddr, TunSessionConfig};
 
-const NOT_FOUND_PATTERNS: &[&str] = &[
-    "not found",
-    "no such process",
-    "cannot find",
-    "cannot assign requested address",
-];
+const NOT_FOUND_PATTERNS: &[&str] = &["not found", "no such process", "cannot find", "cannot assign requested address"];
 
-pub fn configure_session(
-    config: &TunSessionConfig,
-    interface_name: &str,
-) -> Result<CleanupHook, String> {
+pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
     ensure_required_binaries(&["ip", "resolvectl"])?;
 
     let addresses = cidrs_to_args(&config.addresses);
     let routes = cidrs_to_args(&config.routes);
     let endpoint_routes = resolve_endpoint_routes(&config.endpoints);
-    let endpoint_ips: Vec<String> = endpoint_routes
-        .iter()
-        .map(|(endpoint, _)| endpoint.to_string())
+    let endpoint_ips: Vec<String> = endpoint_routes.iter().map(|(endpoint, _)| endpoint.to_string()).collect();
+    let dns_servers = ips_to_args(config.dns.as_ref().map(|dns| &dns.servers[..]).unwrap_or(&[]));
+    let dns_domains: Vec<String> = normalize_domains(&config.dns.as_ref().map(|dns| dns.search_domains.clone()).unwrap_or_default())
+        .into_iter()
+        .map(|domain| format!("~{domain}"))
         .collect();
-    let dns_servers =
-        ips_to_args(config.dns.as_ref().map(|dns| &dns.servers[..]).unwrap_or(&[]));
-    let dns_domains: Vec<String> = normalize_domains(
-        &config
-            .dns
-            .as_ref()
-            .map(|dns| dns.search_domains.clone())
-            .unwrap_or_default(),
-    )
-    .into_iter()
-    .map(|domain| format!("~{domain}"))
-    .collect();
 
     let filtered_routes = filter_routes_for_endpoints(routes, &endpoint_ips);
 
@@ -46,14 +27,7 @@ pub fn configure_session(
             run_command(
                 "apply-mtu",
                 "ip",
-                &[
-                    "link".to_string(),
-                    "set".to_string(),
-                    "dev".to_string(),
-                    interface_name.to_string(),
-                    "mtu".to_string(),
-                    mtu.to_string(),
-                ],
+                &["link".to_string(), "set".to_string(), "dev".to_string(), interface_name.to_string(), "mtu".to_string(), mtu.to_string()],
                 None,
                 &[],
                 &[],
@@ -63,13 +37,7 @@ pub fn configure_session(
         run_command(
             "bring-interface-up",
             "ip",
-            &[
-                "link".to_string(),
-                "set".to_string(),
-                "dev".to_string(),
-                interface_name.to_string(),
-                "up".to_string(),
-            ],
+            &["link".to_string(), "set".to_string(), "dev".to_string(), interface_name.to_string(), "up".to_string()],
             None,
             &[],
             &[],
@@ -78,12 +46,7 @@ pub fn configure_session(
         run_command(
             "flush-addresses",
             "ip",
-            &[
-                "address".to_string(),
-                "flush".to_string(),
-                "dev".to_string(),
-                interface_name.to_string(),
-            ],
+            &["address".to_string(), "flush".to_string(), "dev".to_string(), interface_name.to_string()],
             None,
             &[],
             &[],
@@ -93,13 +56,7 @@ pub fn configure_session(
             run_command(
                 "add-address",
                 "ip",
-                &[
-                    "address".to_string(),
-                    "add".to_string(),
-                    address.to_string(),
-                    "dev".to_string(),
-                    interface_name.to_string(),
-                ],
+                &["address".to_string(), "add".to_string(), address.to_string(), "dev".to_string(), interface_name.to_string()],
                 None,
                 &[],
                 &[],
@@ -135,16 +92,10 @@ pub fn configure_session(
     }
 
     let cleanup_interface = interface_name.to_string();
-    Ok(Box::new(move || {
-        cleanup_linux_session(&filtered_routes, &endpoint_routes, &cleanup_interface)
-    }))
+    Ok(Box::new(move || cleanup_linux_session(&filtered_routes, &endpoint_routes, &cleanup_interface)))
 }
 
-fn cleanup_linux_session(
-    filtered_routes: &[String],
-    endpoint_routes: &[(String, EndpointRoute)],
-    interface_name: &str,
-) -> Result<(), String> {
+fn cleanup_linux_session(filtered_routes: &[String], endpoint_routes: &[(String, EndpointRoute)], interface_name: &str) -> Result<(), String> {
     let mut cleanup_error: Option<String> = None;
     let mut capture_error = |result: Result<(), String>| {
         if let Err(error) = result {
@@ -190,14 +141,7 @@ fn resolve_endpoint_routes(endpoints: &[IpAddr]) -> Vec<(String, EndpointRoute)>
 }
 
 fn resolve_endpoint_route(endpoint: &str) -> Option<EndpointRoute> {
-    let stdout = match run_command(
-        "resolve-endpoint-route",
-        "ip",
-        &["route".to_string(), "get".to_string(), endpoint.to_string()],
-        None,
-        &[],
-        &[],
-    ) {
+    let stdout = match run_command("resolve-endpoint-route", "ip", &["route".to_string(), "get".to_string(), endpoint.to_string()], None, &[], &[]) {
         Ok(stdout) => stdout,
         Err(_) => return None,
     };
@@ -206,27 +150,11 @@ fn resolve_endpoint_route(endpoint: &str) -> Option<EndpointRoute> {
 }
 
 fn add_route(route: &str, interface_name: &str) -> Result<(), String> {
-    run_command(
-        "add-route",
-        "ip",
-        &route_args("replace", route, interface_name),
-        None,
-        &[],
-        &[],
-    )
-    .map(|_| ())
+    run_command("add-route", "ip", &route_args("replace", route, interface_name), None, &[], &[]).map(|_| ())
 }
 
 fn delete_route(route: &str, interface_name: &str) -> Result<(), String> {
-    run_command(
-        "delete-route",
-        "ip",
-        &route_args("delete", route, interface_name),
-        None,
-        &[],
-        NOT_FOUND_PATTERNS,
-    )
-    .map(|_| ())
+    run_command("delete-route", "ip", &route_args("delete", route, interface_name), None, &[], NOT_FOUND_PATTERNS).map(|_| ())
 }
 
 pub fn route_args(command: &str, route: &str, interface_name: &str) -> Vec<String> {
@@ -236,39 +164,17 @@ pub fn route_args(command: &str, route: &str, interface_name: &str) -> Vec<Strin
         args.push("-6".to_string());
     }
 
-    args.extend([
-        "route".to_string(),
-        command.to_string(),
-        route.to_string(),
-        "dev".to_string(),
-        interface_name.to_string(),
-    ]);
+    args.extend(["route".to_string(), command.to_string(), route.to_string(), "dev".to_string(), interface_name.to_string()]);
 
     args
 }
 
 fn add_endpoint_route(endpoint: &str, route: &EndpointRoute) -> Result<(), String> {
-    run_command(
-        "add-endpoint-route",
-        "ip",
-        &endpoint_route_args("replace", endpoint, route),
-        None,
-        &[],
-        &[],
-    )
-    .map(|_| ())
+    run_command("add-endpoint-route", "ip", &endpoint_route_args("replace", endpoint, route), None, &[], &[]).map(|_| ())
 }
 
 fn delete_endpoint_route(endpoint: &str, route: &EndpointRoute) -> Result<(), String> {
-    run_command(
-        "delete-endpoint-route",
-        "ip",
-        &endpoint_route_args("delete", endpoint, route),
-        None,
-        &[],
-        NOT_FOUND_PATTERNS,
-    )
-    .map(|_| ())
+    run_command("delete-endpoint-route", "ip", &endpoint_route_args("delete", endpoint, route), None, &[], NOT_FOUND_PATTERNS).map(|_| ())
 }
 
 pub fn endpoint_route_args(command: &str, endpoint: &str, route: &EndpointRoute) -> Vec<String> {
@@ -294,15 +200,7 @@ pub fn endpoint_route_args(command: &str, endpoint: &str, route: &EndpointRoute)
 }
 
 fn revert_dns(interface_name: &str) -> Result<(), String> {
-    run_command(
-        "revert-dns",
-        "resolvectl",
-        &["revert".to_string(), interface_name.to_string()],
-        None,
-        &[],
-        &[],
-    )
-    .map(|_| ())
+    run_command("revert-dns", "resolvectl", &["revert".to_string(), interface_name.to_string()], None, &[], &[]).map(|_| ())
 }
 
 fn endpoint_host(endpoint: &str) -> String {
@@ -310,14 +208,7 @@ fn endpoint_host(endpoint: &str) -> String {
 }
 
 pub fn filter_routes_for_endpoints(routes: Vec<String>, endpoint_ips: &[String]) -> Vec<String> {
-    routes
-        .into_iter()
-        .filter(|route| {
-            !endpoint_ips
-                .iter()
-                .any(|endpoint| endpoint == ip_literal(route))
-        })
-        .collect()
+    routes.into_iter().filter(|route| !endpoint_ips.iter().any(|endpoint| endpoint == ip_literal(route))).collect()
 }
 
 pub fn parse_ip_route_get_output(stdout: &str) -> Option<EndpointRoute> {
@@ -327,15 +218,8 @@ pub fn parse_ip_route_get_output(stdout: &str) -> Option<EndpointRoute> {
     }
 
     let tokens: Vec<&str> = first_line.split_whitespace().collect();
-    let gateway = tokens
-        .windows(2)
-        .find(|window| window[0] == "via")
-        .map(|window| window[1].to_string());
-    let device = tokens
-        .windows(2)
-        .find(|window| window[0] == "dev")
-        .map(|window| window[1].to_string());
+    let gateway = tokens.windows(2).find(|window| window[0] == "via").map(|window| window[1].to_string());
+    let device = tokens.windows(2).find(|window| window[0] == "dev").map(|window| window[1].to_string());
 
     device.map(|device| EndpointRoute { gateway, device })
 }
-

@@ -1,4 +1,4 @@
-use daemon_proto::pb::{ip_addr, IpAddr};
+use daemon_proto::pb::{IpAddr, ip_addr};
 use std::net::IpAddr as StdIpAddr;
 
 pub fn parse_proto_ip(addr: &IpAddr) -> Option<(StdIpAddr, Option<u32>)> {

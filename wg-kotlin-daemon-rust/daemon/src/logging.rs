@@ -14,10 +14,7 @@ impl FileSaver {
     pub fn new(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref().to_path_buf();
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
-        Ok(Self {
-            path,
-            writer: Mutex::new(BufWriter::new(file)),
-        })
+        Ok(Self { path, writer: Mutex::new(BufWriter::new(file)) })
     }
 }
 
@@ -34,25 +31,18 @@ impl Saver for FileSaver {
         let mut guard = self.writer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
         if let Err(error) = writeln!(guard, "{json}") {
-            eprintln!(
-                "scribe-rs: failed to write to {}: {error}",
-                self.path.display()
-            );
+            eprintln!("scribe-rs: failed to write to {}: {error}", self.path.display());
             return;
         }
 
         if let Err(error) = guard.flush() {
-            eprintln!(
-                "scribe-rs: failed to flush writer {}: {error}",
-                self.path.display()
-            );
+            eprintln!("scribe-rs: failed to flush writer {}: {error}", self.path.display());
         }
     }
 }
 
 pub fn create_daemon_scribe(log_path: &Path) -> anyhow::Result<Scribe> {
-    let file_saver = FileSaver::new(log_path)
-        .with_context(|| format!("failed to open daemon log file: {}", log_path.display()))?;
+    let file_saver = FileSaver::new(log_path).with_context(|| format!("failed to open daemon log file: {}", log_path.display()))?;
 
     Ok(Scribe::builder()
         .imprint("service", "wg-daemon")

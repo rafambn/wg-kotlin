@@ -1,12 +1,10 @@
 use crate::platform::{
     add_routes_with_predelete, build_and_filter_routes, into_cleanup_hook, CleanupHook,
-    ensure_required_binaries, ips_to_args, normalize_domains, run_command,
+    ips_to_args, normalize_domains, run_command,
 };
 use daemon_proto::pb::TunSessionConfig;
 
 pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
-    ensure_required_binaries(&["scutil"])?;
-
     let (mut mgr, filtered_routes, endpoint_routes) = build_and_filter_routes(config, interface_name)?;
 
     let dns_servers = ips_to_args(config.dns.as_ref().map(|dns| &dns.servers[..]).unwrap_or(&[]));

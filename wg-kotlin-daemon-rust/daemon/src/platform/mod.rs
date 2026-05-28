@@ -36,7 +36,7 @@ pub fn required_binaries() -> &'static [&'static str] {
     &[]
 }
 
-pub fn configure_session(config: &daemon_proto::pb::TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
+pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
     #[cfg(target_os = "linux")]
     {
         return linux::configure_session(config, interface_name);

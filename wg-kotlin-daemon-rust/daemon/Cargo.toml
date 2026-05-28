@@ -17,6 +17,7 @@ tun-rs = { version = "2.8", features = ["interruptible"] }
 which = "7.0.2"
 scribe-rs = { path = "../scribe-rs" }
 daemon-proto = { path = "../daemon-proto" }
+route_manager = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }

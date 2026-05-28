@@ -1,5 +1,5 @@
 use crate::ip_util::proto_ip_to_cidr;
-use daemon_proto::pb::{IpAddr, TunSessionConfig};
+use daemon_proto::pb::IpAddr;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -14,33 +14,27 @@ pub mod windows;
 
 pub type CleanupHook = Box<dyn FnOnce() -> Result<(), String> + Send + 'static>;
 
-#[derive(Clone, Debug)]
-pub struct EndpointRoute {
-    pub gateway: Option<String>,
-    pub device: String,
-}
-
 pub fn required_binaries() -> &'static [&'static str] {
     #[cfg(target_os = "linux")]
     {
-        return &["ip", "resolvectl"];
+        return &["resolvectl"];
     }
 
     #[cfg(target_os = "macos")]
     {
-        return &["ifconfig", "route", "scutil"];
+        return &["scutil"];
     }
 
     #[cfg(target_os = "windows")]
     {
-        return &["netsh", "powershell"];
+        return &["powershell"];
     }
 
     #[allow(unreachable_code)]
     &[]
 }
 
-pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
+pub fn configure_session(config: &daemon_proto::pb::TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
     #[cfg(target_os = "linux")]
     {
         return linux::configure_session(config, interface_name);
@@ -68,17 +62,6 @@ pub fn prepare_session_start() -> Result<(), String> {
 
     #[allow(unreachable_code)]
     Ok(())
-}
-
-pub fn cidrs_to_args(values: &[IpAddr]) -> Vec<String> {
-    let mut seen = Vec::new();
-    for addr in values {
-        let cidr = proto_ip_to_cidr(addr);
-        if !seen.contains(&cidr) {
-            seen.push(cidr);
-        }
-    }
-    seen
 }
 
 pub fn ips_to_args(values: &[IpAddr]) -> Vec<String> {
@@ -112,14 +95,6 @@ pub fn normalize_domains(values: &[String]) -> Vec<String> {
     }
 
     normalized
-}
-
-pub fn ip_literal(cidr_or_ip: &str) -> &str {
-    cidr_or_ip.split('/').next().unwrap_or(cidr_or_ip)
-}
-
-pub fn is_ipv6_literal(cidr_or_ip: &str) -> bool {
-    ip_literal(cidr_or_ip).contains(':')
 }
 
 pub fn ensure_required_binaries(binaries: &[&str]) -> Result<(), String> {

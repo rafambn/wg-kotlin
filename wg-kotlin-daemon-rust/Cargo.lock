@@ -322,6 +322,7 @@ dependencies = [
  "clap",
  "daemon-proto",
  "libc",
+ "route_manager",
  "scribe-rs",
  "serde_json",
  "tokio",

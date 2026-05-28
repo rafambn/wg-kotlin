@@ -30,17 +30,6 @@ impl DaemonGrpcService {
             active_sessions: Arc::new(Mutex::new(HashSet::new())),
         }
     }
-
-    async fn log_event(&self, event: &str, success: bool, fields: Vec<(String, Value)>) {
-        let scribe = self.scribe.lock().await;
-        let mut scroll = scribe.new_scroll(None);
-        scroll.insert("event".to_string(), Value::String(event.to_string()));
-        for (key, value) in fields {
-            scroll.insert(key, value);
-        }
-
-        scribe.seal(scroll, success);
-    }
 }
 
 #[tonic::async_trait]
@@ -74,7 +63,15 @@ impl Daemon for DaemonGrpcService {
                 "duration_ms".to_string(),
                 Value::Number((started_at.elapsed().as_millis() as u64).into()),
             ));
-            self.log_event("daemon_session", false, fields).await;
+            {
+                let scribe = self.scribe.lock().await;
+                let mut scroll = scribe.new_scroll(None);
+                scroll.insert("event".to_string(), Value::String("daemon_session".to_string()));
+                for (key, value) in fields {
+                    scroll.insert(key, value);
+                }
+                scribe.seal(scroll, false);
+            }
             return Err(Status::invalid_argument(error_message));
         }
 
@@ -104,7 +101,15 @@ impl Daemon for DaemonGrpcService {
                 "duration_ms".to_string(),
                 Value::Number((started_at.elapsed().as_millis() as u64).into()),
             ));
-            self.log_event("daemon_session", false, fields).await;
+            {
+                let scribe = self.scribe.lock().await;
+                let mut scroll = scribe.new_scroll(None);
+                scroll.insert("event".to_string(), Value::String("daemon_session".to_string()));
+                for (key, value) in fields {
+                    scroll.insert(key, value);
+                }
+                scribe.seal(scroll, false);
+            }
             return Err(Status::failed_precondition(error_message));
         }
 
@@ -121,7 +126,15 @@ impl Daemon for DaemonGrpcService {
                 "duration_ms".to_string(),
                 Value::Number((started_at.elapsed().as_millis() as u64).into()),
             ));
-            self.log_event("daemon_session", false, fields).await;
+            {
+                let scribe = self.scribe.lock().await;
+                let mut scroll = scribe.new_scroll(None);
+                scroll.insert("event".to_string(), Value::String("daemon_session".to_string()));
+                for (key, value) in fields {
+                    scroll.insert(key, value);
+                }
+                scribe.seal(scroll, false);
+            }
             return Err(Status::resource_exhausted(error_message));
         }
 
@@ -146,7 +159,15 @@ impl Daemon for DaemonGrpcService {
                     "duration_ms".to_string(),
                     Value::Number((started_at.elapsed().as_millis() as u64).into()),
                 ));
-                self.log_event("daemon_session", false, fields).await;
+                {
+                    let scribe = self.scribe.lock().await;
+                    let mut scroll = scribe.new_scroll(None);
+                    scroll.insert("event".to_string(), Value::String("daemon_session".to_string()));
+                    for (key, value) in fields {
+                        scroll.insert(key, value);
+                    }
+                    scribe.seal(scroll, false);
+                }
                 return Err(Status::failed_precondition(error_message));
             }
         };
@@ -161,8 +182,15 @@ impl Daemon for DaemonGrpcService {
             "interface".to_string(),
             Value::String(session.interface_name().to_string()),
         ));
-        self.log_event("daemon_session_started", true, started_fields)
-            .await;
+        {
+            let scribe = self.scribe.lock().await;
+            let mut scroll = scribe.new_scroll(None);
+            scroll.insert("event".to_string(), Value::String("daemon_session_started".to_string()));
+            for (key, value) in started_fields {
+                scroll.insert(key, value);
+            }
+            scribe.seal(scroll, true);
+        }
 
         let service = self.clone();
         tokio::spawn(async move {
@@ -289,18 +317,28 @@ impl DaemonGrpcService {
             ));
         }
 
-        self.log_event("daemon_session", success, fields.clone())
-            .await;
+        {
+            let scribe = self.scribe.lock().await;
+            let mut scroll = scribe.new_scroll(None);
+            scroll.insert("event".to_string(), Value::String("daemon_session".to_string()));
+            for (key, value) in fields.clone() {
+                scroll.insert(key, value);
+            }
+            scribe.seal(scroll, success);
+        }
 
-        self.log_event(
-            "daemon_session_stopped",
-            success,
-            vec![
+        {
+            let scribe = self.scribe.lock().await;
+            let mut scroll = scribe.new_scroll(None);
+            scroll.insert("event".to_string(), Value::String("daemon_session_stopped".to_string()));
+            for (key, value) in vec![
                 ("interface".to_string(), Value::String(interface_name)),
                 ("outcome".to_string(), Value::String(outcome.to_string())),
-            ],
-        )
-        .await;
+            ] {
+                scroll.insert(key, value);
+            }
+            scribe.seal(scroll, success);
+        }
     }
 }
 

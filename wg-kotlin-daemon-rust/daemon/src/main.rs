@@ -1,7 +1,7 @@
 use anyhow::{Context, bail};
 use axum::{Router, response::IntoResponse, routing::get};
 use clap::Parser;
-use daemon::{logging, platform, server};
+use daemon::{logging, server};
 use daemon_proto::pb::daemon_server::DaemonServer;
 use serde_json::Value;
 use server::DaemonGrpcService;
@@ -29,7 +29,6 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let bind_ip = resolve_host(&cli.host)?;
     ensure_root()?;
-    platform::ensure_required_binaries(platform::required_binaries()).map_err(anyhow::Error::msg)?;
 
     let log_path = cli.log_path.unwrap_or_else(|| {
         let mut dir =

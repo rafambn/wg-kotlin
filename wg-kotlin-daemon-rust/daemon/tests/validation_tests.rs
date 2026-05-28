@@ -56,8 +56,8 @@ fn accepts_valid_complete_config() {
     validate_config(&config).expect("config should be accepted");
 }
 
-    #[test]
-    fn rejects_empty_addresses() {
+#[test]
+fn rejects_empty_addresses() {
         let config = TunSessionConfig { interface_name: "utun0".to_string(), addresses: vec![], ..Default::default() };
 
         let error = validate_config(&config).expect_err("config should be rejected");

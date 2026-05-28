@@ -15,6 +15,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 proto_dir.join("daemon.proto"),
                 proto_dir.join("tun_session_config.proto"),
                 proto_dir.join("dns_config.proto"),
+                proto_dir.join("ip_addr.proto"),
             ],
             &[proto_dir],
         )?;
@@ -22,6 +23,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=../../daemon-protocol/daemon.proto");
     println!("cargo:rerun-if-changed=../../daemon-protocol/tun_session_config.proto");
     println!("cargo:rerun-if-changed=../../daemon-protocol/dns_config.proto");
+    println!("cargo:rerun-if-changed=../../daemon-protocol/ip_addr.proto");
 
     Ok(())
 }

@@ -1,8 +1,9 @@
+use crate::ip_util::proto_ip_to_cidr;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
-use daemon_proto::pb::TunSessionConfig;
+use daemon_proto::pb::{IpAddr, TunSessionConfig};
 
 #[cfg(target_os = "linux")]
 pub mod linux;
@@ -72,25 +73,26 @@ pub fn prepare_session_start() -> Result<(), String> {
     Ok(())
 }
 
-pub fn normalize_items(values: &[String]) -> Vec<String> {
-    let mut normalized = Vec::<String>::new();
-
-    for item in values {
-        let trimmed = item.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let normalized_item = normalize_slash_separated(trimmed);
-        if !normalized
-            .iter()
-            .any(|existing| existing == &normalized_item)
-        {
-            normalized.push(normalized_item);
+pub fn cidrs_to_args(values: &[IpAddr]) -> Vec<String> {
+    let mut seen = Vec::new();
+    for addr in values {
+        let cidr = proto_ip_to_cidr(addr);
+        if !seen.contains(&cidr) {
+            seen.push(cidr);
         }
     }
+    seen
+}
 
-    normalized
+pub fn ips_to_args(values: &[IpAddr]) -> Vec<String> {
+    let mut seen = Vec::new();
+    for addr in values {
+        let ip = proto_ip_to_cidr(addr);
+        if !seen.contains(&ip) {
+            seen.push(ip);
+        }
+    }
+    seen
 }
 
 pub fn normalize_domains(values: &[String]) -> Vec<String> {
@@ -113,16 +115,6 @@ pub fn normalize_domains(values: &[String]) -> Vec<String> {
     }
 
     normalized
-}
-
-fn normalize_slash_separated(value: &str) -> String {
-    let mut parts = value.splitn(2, '/');
-    let left = parts.next().unwrap_or_default().trim();
-    let right = parts.next();
-    match right {
-        Some(right_part) => format!("{left}/{}", right_part.trim()),
-        None => left.to_string(),
-    }
 }
 
 pub fn ip_literal(cidr_or_ip: &str) -> &str {

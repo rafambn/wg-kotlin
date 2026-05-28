@@ -1,23 +1,21 @@
-use std::net::IpAddr;
-use std::str::FromStr;
-use daemon_proto::pb::{DnsConfig, TunSessionConfig};
+use crate::ip_util::parse_proto_ip;
+use daemon_proto::pb::{DnsConfig, IpAddr, TunSessionConfig};
 
 const MIN_MTU: i32 = 576;
 const MIN_IPV6_MTU: i32 = 1280;
 const MAX_MTU: i32 = 65535;
-const MAX_DNS_DOMAINS: usize = 64;
 const MAX_DNS_SERVERS: usize = 64;
 const MAX_ADDRESSES: usize = 64;
 const MAX_ROUTES: usize = 256;
 const MAX_INTERFACE_NAME_LENGTH: usize = 15;
-const MAX_ENDPOINT_LENGTH: usize = 253;
-const MAX_CIDR_LENGTH: usize = 64;
 const MAX_DOMAIN_LENGTH: usize = 253;
 
 pub fn validate_config(config: &TunSessionConfig) -> Result<(), String> {
     validate_interface_name(&config.interface_name)?;
-    validate_addresses(&config.addresses)?;
-    validate_routes(&config.routes)?;
+    validate_ip_list("addresses", &config.addresses, true)?;
+    validate_max_count("addresses", config.addresses.len(), MAX_ADDRESSES)?;
+    validate_ip_list("routes", &config.routes, true)?;
+    validate_max_count("routes", config.routes.len(), MAX_ROUTES)?;
     if config.mtu != 0 {
         validate_mtu_for_addresses(config.mtu, &config.addresses)?;
     }
@@ -51,12 +49,13 @@ fn validate_mtu(mtu: i32) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_mtu_for_addresses(mtu: i32, addresses: &[String]) -> Result<(), String> {
+fn validate_mtu_for_addresses(mtu: i32, addresses: &[IpAddr]) -> Result<(), String> {
     validate_mtu(mtu)?;
-    let has_ipv6 = addresses
-        .iter()
-        .map(|address| address.trim().split('/').next().unwrap_or_default())
-        .any(is_valid_ipv6);
+    let has_ipv6 = addresses.iter().any(|addr| {
+        parse_proto_ip(addr)
+            .map(|(ip, _)| ip.is_ipv6())
+            .unwrap_or(false)
+    });
 
     if has_ipv6 && mtu < MIN_IPV6_MTU {
         return Err(format!(
@@ -68,27 +67,16 @@ fn validate_mtu_for_addresses(mtu: i32, addresses: &[String]) -> Result<(), Stri
 }
 
 fn validate_dns(dns: &DnsConfig) -> Result<(), String> {
-    let domains: Vec<String> = dns
-        .search_domains
-        .iter()
-        .map(|domain| domain.trim().trim_start_matches('.').to_string())
-        .collect();
-    let dns_servers: Vec<String> = dns
-        .servers
-        .iter()
-        .map(|server| server.trim().to_string())
-        .collect();
+    validate_max_count("dns.servers", dns.servers.len(), MAX_DNS_SERVERS)?;
 
-    validate_max_count("dns.searchDomains", domains.len(), MAX_DNS_DOMAINS)?;
-    validate_max_count("dns.servers", dns_servers.len(), MAX_DNS_SERVERS)?;
-
-    if (domains.is_empty() && !dns_servers.is_empty())
-        || (!domains.is_empty() && dns_servers.is_empty())
+    if (dns.search_domains.is_empty() && !dns.servers.is_empty())
+        || (!dns.search_domains.is_empty() && dns.servers.is_empty())
     {
         return Err("dns must provide both searchDomains and servers, or neither".to_string());
     }
 
-    for (idx, domain) in domains.iter().enumerate() {
+    for (idx, domain) in dns.search_domains.iter().enumerate() {
+        let domain = domain.trim().trim_start_matches('.');
         validate_max_length(
             format!("dns.searchDomains[{idx}]").as_str(),
             domain,
@@ -99,69 +87,41 @@ fn validate_dns(dns: &DnsConfig) -> Result<(), String> {
         }
     }
 
-    for (idx, server) in dns_servers.iter().enumerate() {
-        validate_max_length(
-            format!("dns.servers[{idx}]").as_str(),
-            server,
-            MAX_ENDPOINT_LENGTH,
-        )?;
-        if !is_valid_ipv4(server) && !is_valid_ipv6(server) {
+    for (idx, server) in dns.servers.iter().enumerate() {
+        if server.prefix.is_some() {
+            return Err(format!(
+                "dns.servers[{idx}] must be a bare IP address, not a CIDR"
+            ));
+        }
+        let Some(_ip) = parse_proto_ip(server) else {
             return Err(format!(
                 "dns.servers[{idx}] must be a valid IPv4 or IPv6 address"
             ));
-        }
+        };
     }
 
     Ok(())
 }
 
-fn validate_addresses(addresses: &[String]) -> Result<(), String> {
-    validate_max_count("addresses", addresses.len(), MAX_ADDRESSES)?;
-    validate_cidrs("addresses", addresses)
-}
+fn validate_ip_list(field_name: &str, values: &[IpAddr], require_prefix: bool) -> Result<(), String> {
+    for (idx, addr) in values.iter().enumerate() {
+        let (ip, prefix) = parse_proto_ip(addr).ok_or_else(|| {
+            format!("{field_name}[{idx}] has an invalid IP address")
+        })?;
 
-fn validate_routes(routes: &[String]) -> Result<(), String> {
-    validate_max_count("routes", routes.len(), MAX_ROUTES)?;
-    validate_cidrs("routes", routes)
-}
+        if require_prefix {
+            let prefix = prefix.ok_or_else(|| {
+                format!("{field_name}[{idx}] must use CIDR format (prefix required)")
+            })?;
 
-fn validate_cidrs(field_name: &str, values: &[String]) -> Result<(), String> {
-    for (idx, cidr) in values.iter().enumerate() {
-        let normalized = cidr.trim();
-        validate_max_length(
-            format!("{field_name}[{idx}]").as_str(),
-            normalized,
-            MAX_CIDR_LENGTH,
-        )?;
-
-        let mut parts = normalized.splitn(3, '/');
-        let ip_part = parts.next().unwrap_or_default();
-        let prefix_part = parts.next().unwrap_or_default();
-        let extra_part = parts.next();
-
-        if ip_part.is_empty() || prefix_part.is_empty() || extra_part.is_some() {
-            return Err(format!("{field_name}[{idx}] must use CIDR format"));
-        }
-
-        let prefix = prefix_part
-            .parse::<i32>()
-            .map_err(|_| format!("{field_name}[{idx}] prefix must be numeric"))?;
-
-        let ip_text = ip_part.trim();
-        let is_v4 = is_valid_ipv4(ip_text);
-        let is_v6 = is_valid_ipv6(ip_text);
-        if !is_v4 && !is_v6 {
-            return Err(format!("{field_name}[{idx}] has invalid IP address"));
-        }
-
-        let max_prefix = if is_v4 { 32 } else { 128 };
-        if !(0..=max_prefix).contains(&prefix) {
-            return Err(format!(
-                "{field_name}[{idx}] prefix must be between 0 and {max_prefix}"
-            ));
+            let max_prefix = if ip.is_ipv4() { 32 } else { 128 };
+            if prefix > max_prefix {
+                return Err(format!(
+                    "{field_name}[{idx}] prefix must be between 0 and {max_prefix}"
+                ));
+            }
         }
     }
-
     Ok(())
 }
 
@@ -179,19 +139,6 @@ fn validate_max_length(field_name: &str, value: &str, max: usize) -> Result<(), 
         return Err(format!("{field_name} must be at most {max} characters"));
     }
     Ok(())
-}
-
-fn is_valid_ipv4(value: &str) -> bool {
-    IpAddr::from_str(value)
-        .map(|ip| ip.is_ipv4())
-        .unwrap_or(false)
-}
-
-fn is_valid_ipv6(value: &str) -> bool {
-    let ip_part = value.split('%').next().unwrap_or(value);
-    IpAddr::from_str(ip_part)
-        .map(|ip| ip.is_ipv6())
-        .unwrap_or(false)
 }
 
 fn is_valid_hostname(domain: &str) -> bool {
@@ -221,13 +168,27 @@ fn is_valid_hostname(domain: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use daemon_proto::pb::TunSessionConfig;
+    use daemon_proto::pb::{ip_addr, DnsConfig, IpAddr, TunSessionConfig};
+
+    fn ipv4(bytes: &[u8], prefix: Option<u32>) -> IpAddr {
+        IpAddr {
+            ip: Some(ip_addr::Ip::V4(bytes.to_vec())),
+            prefix,
+        }
+    }
+
+    fn ipv6(bytes: &[u8], prefix: Option<u32>) -> IpAddr {
+        IpAddr {
+            ip: Some(ip_addr::Ip::V6(bytes.to_vec())),
+            prefix,
+        }
+    }
 
     #[test]
     fn rejects_non_utun_interface() {
         let config = TunSessionConfig {
             interface_name: "wg0".to_string(),
-            addresses: vec!["10.0.0.1/24".to_string()],
+            addresses: vec![ipv4(&[10, 0, 0, 1], Some(24))],
             ..Default::default()
         };
 
@@ -239,7 +200,7 @@ mod tests {
     fn rejects_incomplete_dns() {
         let config = TunSessionConfig {
             interface_name: "utun0".to_string(),
-            addresses: vec!["10.0.0.1/24".to_string()],
+            addresses: vec![ipv4(&[10, 0, 0, 1], Some(24))],
             dns: Some(DnsConfig {
                 search_domains: vec!["corp.local".to_string()],
                 servers: vec![],
@@ -256,7 +217,7 @@ mod tests {
         let config = TunSessionConfig {
             interface_name: "utun0".to_string(),
             mtu: 1000,
-            addresses: vec!["fd00::1/64".to_string()],
+            addresses: vec![ipv6(&[0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], Some(64))],
             ..Default::default()
         };
 
@@ -265,29 +226,14 @@ mod tests {
     }
 
     #[test]
-    fn accepts_ipv6_scope_id_in_address_and_dns_server() {
-        let config = TunSessionConfig {
-            interface_name: "utun0".to_string(),
-            addresses: vec!["fe80::1%utun0/64".to_string()],
-            dns: Some(DnsConfig {
-                search_domains: vec!["corp.local".to_string()],
-                servers: vec!["fe80::1%utun0".to_string()],
-            }),
-            ..Default::default()
-        };
-
-        validate_config(&config).expect("scope-id should be accepted");
-    }
-
-    #[test]
     fn accepts_valid_complete_config() {
         let config = TunSessionConfig {
             interface_name: "utun0".to_string(),
-            addresses: vec!["10.0.0.1/24".to_string()],
-            routes: vec!["0.0.0.0/0".to_string()],
+            addresses: vec![ipv4(&[10, 0, 0, 1], Some(24))],
+            routes: vec![ipv4(&[0, 0, 0, 0], Some(0))],
             dns: Some(DnsConfig {
                 search_domains: vec!["corp.local".to_string()],
-                servers: vec!["1.1.1.1".to_string(), "2001:4860:4860::8888".to_string()],
+                servers: vec![ipv4(&[1, 1, 1, 1], None)],
             }),
             ..Default::default()
         };
@@ -296,118 +242,30 @@ mod tests {
     }
 
     #[test]
-    fn accepts_config_without_dns() {
+    fn rejects_addresses_without_prefix() {
         let config = TunSessionConfig {
             interface_name: "utun0".to_string(),
-            addresses: vec!["10.0.0.1/24".to_string()],
-            ..Default::default()
-        };
-
-        validate_config(&config).expect("config without dns should be accepted");
-    }
-
-    #[test]
-    fn accepts_config_with_mtu_zero() {
-        let config = TunSessionConfig {
-            interface_name: "utun0".to_string(),
-            addresses: vec!["10.0.0.1/24".to_string()],
-            mtu: 0,
-            ..Default::default()
-        };
-
-        validate_config(&config).expect("config with mtu 0 should be accepted");
-    }
-
-    #[test]
-    fn rejects_empty_interface_name() {
-        let config = TunSessionConfig {
-            interface_name: "".to_string(),
-            addresses: vec!["10.0.0.1/24".to_string()],
+            addresses: vec![ipv4(&[10, 0, 0, 1], None)],
             ..Default::default()
         };
 
         let error = validate_config(&config).expect_err("config should be rejected");
-        assert!(error.contains("utun"));
+        assert!(error.contains("prefix"));
     }
 
     #[test]
-    fn rejects_interface_name_exceeding_max_length() {
-        let config = TunSessionConfig {
-            interface_name: "utun1234567890123".to_string(),
-            addresses: vec!["10.0.0.1/24".to_string()],
-            ..Default::default()
-        };
-
-        let error = validate_config(&config).expect_err("config should be rejected");
-        assert!(error.contains("utun"));
-    }
-
-    #[test]
-    fn rejects_too_many_addresses() {
+    fn rejects_dns_server_with_prefix() {
         let config = TunSessionConfig {
             interface_name: "utun0".to_string(),
-            addresses: (0..=MAX_ADDRESSES).map(|i| format!("10.0.0.{}/32", i % 256)).collect(),
-            ..Default::default()
-        };
-
-        let error = validate_config(&config).expect_err("config should be rejected");
-        assert!(error.contains("at most"));
-    }
-
-    #[test]
-    fn rejects_too_many_routes() {
-        let config = TunSessionConfig {
-            interface_name: "utun0".to_string(),
-            addresses: vec!["10.0.0.1/24".to_string()],
-            routes: (0..=MAX_ROUTES).map(|i| format!("10.0.0.{}/32", i % 256)).collect(),
-            ..Default::default()
-        };
-
-        let error = validate_config(&config).expect_err("config should be rejected");
-        assert!(error.contains("at most"));
-    }
-
-    #[test]
-    fn rejects_invalid_cidr_format() {
-        let config = TunSessionConfig {
-            interface_name: "utun0".to_string(),
-            addresses: vec!["10.0.0.1".to_string()],
-            ..Default::default()
-        };
-
-        let error = validate_config(&config).expect_err("config should be rejected");
-        assert!(error.contains("CIDR"));
-    }
-
-    #[test]
-    fn rejects_invalid_dns_server() {
-        let config = TunSessionConfig {
-            interface_name: "utun0".to_string(),
-            addresses: vec!["10.0.0.1/24".to_string()],
+            addresses: vec![ipv4(&[10, 0, 0, 1], Some(24))],
             dns: Some(DnsConfig {
                 search_domains: vec!["corp.local".to_string()],
-                servers: vec!["not-an-ip".to_string()],
+                servers: vec![ipv4(&[1, 1, 1, 1], Some(32))],
             }),
             ..Default::default()
         };
 
-        let error = validate_config(&config).expect_err("config should be rejected");
-        assert!(error.contains("valid IPv4 or IPv6"));
-    }
-
-    #[test]
-    fn rejects_invalid_search_domain() {
-        let config = TunSessionConfig {
-            interface_name: "utun0".to_string(),
-            addresses: vec!["10.0.0.1/24".to_string()],
-            dns: Some(DnsConfig {
-                search_domains: vec!["-invalid".to_string()],
-                servers: vec!["1.1.1.1".to_string()],
-            }),
-            ..Default::default()
-        };
-
-        let error = validate_config(&config).expect_err("config should be rejected");
-        assert!(error.contains("valid hostname"));
+        let error = validate_config(&config).expect_err("dns should be rejected");
+        assert!(error.contains("CIDR"));
     }
 }

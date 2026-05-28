@@ -2,12 +2,13 @@ syntax = "proto3";
 
 package wgdaemon;
 
-import "ip_addr.proto";
-
 option java_multiple_files = true;
 option java_package = "com.rafambn.wgkotlin.daemon.proto";
 
-message DnsConfig {
-    repeated IpAddr servers = 1;
-    repeated string search_domains = 2;
+message IpAddr {
+    oneof ip {
+        bytes v4 = 1;
+        bytes v6 = 2;
+    }
+    optional uint32 prefix = 3;
 }

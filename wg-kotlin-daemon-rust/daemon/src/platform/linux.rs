@@ -1,8 +1,9 @@
+use crate::ip_util::proto_ip_to_cidr;
 use crate::platform::{
-    ensure_required_binaries, ip_literal, is_ipv6_literal, normalize_domains, normalize_items,
-    run_command, CleanupHook, EndpointRoute,
+    cidrs_to_args, ensure_required_binaries, ip_literal, ips_to_args, is_ipv6_literal,
+    normalize_domains, run_command, CleanupHook, EndpointRoute,
 };
-use daemon_proto::pb::TunSessionConfig;
+use daemon_proto::pb::{IpAddr, TunSessionConfig};
 
 const NOT_FOUND_PATTERNS: &[&str] = &[
     "not found",
@@ -17,20 +18,15 @@ pub fn configure_session(
 ) -> Result<CleanupHook, String> {
     ensure_required_binaries(&["ip", "resolvectl"])?;
 
-    let addresses = normalize_items(&config.addresses);
-    let routes = normalize_items(&config.routes);
+    let addresses = cidrs_to_args(&config.addresses);
+    let routes = cidrs_to_args(&config.routes);
     let endpoint_routes = resolve_endpoint_routes(&config.endpoints);
     let endpoint_ips: Vec<String> = endpoint_routes
         .iter()
         .map(|(endpoint, _)| endpoint.to_string())
         .collect();
-    let dns_servers = normalize_items(
-        &config
-            .dns
-            .as_ref()
-            .map(|dns| dns.servers.clone())
-            .unwrap_or_default(),
-    );
+    let dns_servers =
+        ips_to_args(config.dns.as_ref().map(|dns| &dns.servers[..]).unwrap_or(&[]));
     let dns_domains: Vec<String> = normalize_domains(
         &config
             .dns
@@ -175,11 +171,11 @@ fn cleanup_linux_session(
     }
 }
 
-fn resolve_endpoint_routes(endpoints: &[String]) -> Vec<(String, EndpointRoute)> {
+fn resolve_endpoint_routes(endpoints: &[IpAddr]) -> Vec<(String, EndpointRoute)> {
     let mut resolved = Vec::<(String, EndpointRoute)>::new();
 
     for endpoint in endpoints {
-        let endpoint_ip = endpoint_host(endpoint);
+        let endpoint_ip = endpoint_host(&proto_ip_to_cidr(endpoint));
 
         if endpoint_ip.is_empty() {
             continue;

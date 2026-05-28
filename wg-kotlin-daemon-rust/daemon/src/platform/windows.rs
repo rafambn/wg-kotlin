@@ -1,6 +1,6 @@
 use crate::platform::{
-    ensure_required_binaries, ip_literal, is_ipv6_literal, normalize_domains, normalize_items,
-    run_command, CleanupHook,
+    cidrs_to_args, ensure_required_binaries, ip_literal, ips_to_args, is_ipv6_literal,
+    normalize_domains, run_command, CleanupHook,
 };
 use std::sync::{Mutex, OnceLock};
 use daemon_proto::pb::TunSessionConfig;
@@ -21,15 +21,10 @@ pub fn configure_session(
 ) -> Result<CleanupHook, String> {
     ensure_required_binaries(&["netsh", "powershell"])?;
 
-    let addresses = normalize_items(&config.addresses);
-    let routes = normalize_items(&config.routes);
-    let dns_servers = normalize_items(
-        &config
-            .dns
-            .as_ref()
-            .map(|dns| dns.servers.clone())
-            .unwrap_or_default(),
-    );
+    let addresses = cidrs_to_args(&config.addresses);
+    let routes = cidrs_to_args(&config.routes);
+    let dns_servers =
+        ips_to_args(config.dns.as_ref().map(|dns| &dns.servers[..]).unwrap_or(&[]));
     let dns_domains = normalize_domains(
         &config
             .dns

@@ -1,6 +1,6 @@
+use crate::ip_util::parse_proto_ip;
 use crate::platform::{self, CleanupHook};
 use std::net::IpAddr;
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use tun_rs::{DeviceBuilder, InterruptEvent, SyncDevice};
@@ -106,28 +106,28 @@ impl TunSession {
 }
 
 fn parse_primary_address(config: &TunSessionConfig) -> Result<(IpAddr, u8), String> {
-    let Some(primary_address) = config.addresses.first() else {
-        return Err("session config missing primary address".to_string());
-    };
+    let addr = config
+        .addresses
+        .first()
+        .ok_or_else(|| "session config missing primary address".to_string())?;
 
-    let (ip_text, prefix_text) = primary_address
-        .split_once('/')
-        .ok_or_else(|| format!("invalid CIDR '{}': missing '/'", primary_address))?;
+    let prefix = addr
+        .prefix
+        .ok_or_else(|| "primary address must include a CIDR prefix".to_string())?;
 
-    let ip = IpAddr::from_str(ip_text.trim())
-        .map_err(|_| format!("invalid IP address '{}'", ip_text.trim()))?;
-    let prefix = prefix_text
-        .trim()
-        .parse::<u8>()
-        .map_err(|_| format!("invalid prefix length '{}'", prefix_text.trim()))?;
+    let ip = parse_proto_ip(addr)
+        .ok_or_else(|| "primary address has an invalid IP".to_string())?
+        .0;
 
-    let max_prefix = if ip.is_ipv4() { 32 } else { 128 };
+    let max_prefix: u32 = if ip.is_ipv4() { 32 } else { 128 };
     if prefix > max_prefix {
         return Err(format!(
-            "invalid prefix length '{}': expected 0..={max_prefix}",
-            prefix_text.trim()
+            "invalid prefix length {prefix}: expected 0..={max_prefix}",
         ));
     }
+
+    let prefix = u8::try_from(prefix)
+        .map_err(|_| format!("prefix length {prefix} exceeds u8 range"))?;
 
     Ok((ip, prefix))
 }
@@ -143,11 +143,26 @@ fn is_supported_interface_name(interface_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use daemon_proto::pb::{ip_addr, IpAddr as ProtoIpAddr};
+
+    fn ipv4(bytes: &[u8], prefix: Option<u32>) -> ProtoIpAddr {
+        ProtoIpAddr {
+            ip: Some(ip_addr::Ip::V4(bytes.to_vec())),
+            prefix,
+        }
+    }
+
+    fn ipv6(bytes: &[u8], prefix: Option<u32>) -> ProtoIpAddr {
+        ProtoIpAddr {
+            ip: Some(ip_addr::Ip::V6(bytes.to_vec())),
+            prefix,
+        }
+    }
 
     #[test]
     fn parse_primary_address_extracts_ipv4_and_prefix() {
         let config = TunSessionConfig {
-            addresses: vec!["10.0.0.1/24".to_string()],
+            addresses: vec![ipv4(&[10, 0, 0, 1], Some(24))],
             ..Default::default()
         };
         let (ip, prefix) = parse_primary_address(&config).unwrap();
@@ -158,7 +173,10 @@ mod tests {
     #[test]
     fn parse_primary_address_extracts_ipv6_and_prefix() {
         let config = TunSessionConfig {
-            addresses: vec!["fd00::1/64".to_string()],
+            addresses: vec![ipv6(
+                &[0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                Some(64),
+            )],
             ..Default::default()
         };
         let (ip, prefix) = parse_primary_address(&config).unwrap();
@@ -169,16 +187,7 @@ mod tests {
     #[test]
     fn parse_primary_address_rejects_missing_prefix() {
         let config = TunSessionConfig {
-            addresses: vec!["10.0.0.1".to_string()],
-            ..Default::default()
-        };
-        assert!(parse_primary_address(&config).is_err());
-    }
-
-    #[test]
-    fn parse_primary_address_rejects_invalid_prefix() {
-        let config = TunSessionConfig {
-            addresses: vec!["10.0.0.1/abc".to_string()],
+            addresses: vec![ipv4(&[10, 0, 0, 1], None)],
             ..Default::default()
         };
         assert!(parse_primary_address(&config).is_err());
@@ -187,7 +196,7 @@ mod tests {
     #[test]
     fn parse_primary_address_rejects_prefix_too_large_for_ipv4() {
         let config = TunSessionConfig {
-            addresses: vec!["10.0.0.1/33".to_string()],
+            addresses: vec![ipv4(&[10, 0, 0, 1], Some(33))],
             ..Default::default()
         };
         assert!(parse_primary_address(&config).is_err());
@@ -196,7 +205,10 @@ mod tests {
     #[test]
     fn parse_primary_address_rejects_prefix_too_large_for_ipv6() {
         let config = TunSessionConfig {
-            addresses: vec!["fd00::1/129".to_string()],
+            addresses: vec![ipv6(
+                &[0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                Some(129),
+            )],
             ..Default::default()
         };
         assert!(parse_primary_address(&config).is_err());

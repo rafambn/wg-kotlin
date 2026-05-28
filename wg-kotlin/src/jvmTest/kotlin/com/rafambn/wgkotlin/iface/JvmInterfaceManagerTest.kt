@@ -3,7 +3,11 @@ package com.rafambn.wgkotlin.iface
 import com.rafambn.wgkotlin.DnsConfig
 import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.VpnPeer
+import com.rafambn.wgkotlin.daemon.proto.IpAddr
+import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
+import kotlinx.io.bytestring.ByteString
+import java.net.InetAddress
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -39,7 +43,8 @@ class JvmInterfaceManagerTest {
 
         manager.reconfigure(configuration(interfaceName = "utun151", dns = DnsConfig(searchDomains = listOf("corp.local"), servers = listOf("9.9.9.9"))))
 
-        assertEquals(listOf("9.9.9.9"), executor.getConfig("utun151")?.dns?.servers)
+        val actualServers = executor.getConfig("utun151")?.dns?.servers ?: emptyList()
+        assertEquals(listOf(IpAddr { ip = IpAddr.Ip.V4(ByteString(InetAddress.getByName("9.9.9.9").address)) }), actualServers)
     }
 
     @Test

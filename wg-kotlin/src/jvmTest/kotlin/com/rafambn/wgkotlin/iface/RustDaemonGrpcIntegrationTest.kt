@@ -1,8 +1,11 @@
 package com.rafambn.wgkotlin.iface
 
+import com.rafambn.wgkotlin.daemon.proto.IpAddr
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
+import kotlinx.io.bytestring.ByteString
+import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.file.Files
@@ -52,7 +55,7 @@ class RustDaemonGrpcIntegrationTest {
                 executor.openSession(
                     config = TunSessionConfig {
                         interfaceName = "wg0"
-                        addresses = listOf("10.10.0.2/32")
+                        addresses = listOf(IpAddr { ip = IpAddr.Ip.V4(ByteString(InetAddress.getByName("10.10.0.2").address)); prefix = 32u })
                     },
                     pipe = clientPipe,
                     onFailure = {},

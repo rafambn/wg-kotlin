@@ -25,7 +25,9 @@ impl SessionManager {
 
         platform::prepare_session_start().map_err(|error| format!("failed to prepare platform session: {error}"))?;
 
-        let (primary_ip, prefix_len) = parse_primary_address(config)?;
+        let addr = config.addresses.first().unwrap();
+        let primary_ip = parse_proto_ip(addr).unwrap().0;
+        let prefix_len = u8::try_from(addr.prefix.unwrap()).unwrap();
 
         let mut builder = DeviceBuilder::new().name(config.interface_name.clone());
         builder = match primary_ip {
@@ -91,23 +93,6 @@ impl TunSession {
 
         Ok(())
     }
-}
-
-pub fn parse_primary_address(config: &TunSessionConfig) -> Result<(IpAddr, u8), String> {
-    let addr = config.addresses.first().ok_or_else(|| "session config missing primary address".to_string())?;
-
-    let prefix = addr.prefix.ok_or_else(|| "primary address must include a CIDR prefix".to_string())?;
-
-    let ip = parse_proto_ip(addr).ok_or_else(|| "primary address has an invalid IP".to_string())?.0;
-
-    let max_prefix: u32 = if ip.is_ipv4() { 32 } else { 128 };
-    if prefix > max_prefix {
-        return Err(format!("invalid prefix length {prefix}: expected 0..={max_prefix}",));
-    }
-
-    let prefix = u8::try_from(prefix).map_err(|_| format!("prefix length {prefix} exceeds u8 range"))?;
-
-    Ok((ip, prefix))
 }
 
 pub fn is_supported_interface_name(interface_name: &str) -> bool {

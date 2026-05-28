@@ -12,6 +12,7 @@ const MAX_DOMAIN_LENGTH: usize = 253;
 
 pub fn validate_config(config: &TunSessionConfig) -> Result<(), String> {
     validate_interface_name(&config.interface_name)?;
+    validate_non_empty("addresses", &config.addresses)?;
     validate_ip_list("addresses", &config.addresses, true)?;
     validate_max_count("addresses", config.addresses.len(), MAX_ADDRESSES)?;
     validate_ip_list("routes", &config.routes, true)?;
@@ -88,6 +89,13 @@ fn validate_ip_list(field_name: &str, values: &[IpAddr], require_prefix: bool) -
                 return Err(format!("{field_name}[{idx}] prefix must be between 0 and {max_prefix}"));
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_non_empty(field_name: &str, values: &[IpAddr]) -> Result<(), String> {
+    if values.is_empty() {
+        return Err(format!("{field_name} must contain at least one entry"));
     }
     Ok(())
 }

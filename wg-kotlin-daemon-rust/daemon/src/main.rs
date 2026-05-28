@@ -5,24 +5,15 @@ mod session;
 mod validation;
 
 use anyhow::{bail, Context};
-use bytes::Bytes;
+use axum::{response::IntoResponse, routing::get, Router};
 use clap::Parser;
-use http_body_util::{BodyExt, Full};
 use serde_json::Value;
 use server::DaemonGrpcService;
-use scribe_rs::Scribe;
-use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context as TaskContext, Poll};
-use std::time::Instant;
 use tokio::sync::Mutex;
-use tonic::codegen::{http, Body as HttpBody, Service};
-use tonic::body::Body as TonicBody;
-use tonic::transport::Server;
-use tower_layer::Layer;
+use tower::ServiceExt;
 use daemon_proto::pb::daemon_server::DaemonServer;
 
 #[derive(Parser, Debug)]
@@ -70,16 +61,21 @@ async fn main() -> anyhow::Result<()> {
         guard.seal(scroll, true);
     }
 
-    let service = DaemonGrpcService::new(Arc::clone(&scribe));
+    let grpc_service = DaemonGrpcService::new(Arc::clone(&scribe));
     let addr = SocketAddr::new(bind_ip, cli.port);
 
-    let server_result = Server::builder()
-        .layer(VersionEndpointLayer {
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            scribe: Arc::clone(&scribe),
-        })
-        .add_service(DaemonServer::new(service))
-        .serve_with_shutdown(addr, shutdown_signal())
+    let grpc_svc = DaemonServer::new(grpc_service);
+    let fallback = grpc_svc.map_request(|req: axum::extract::Request| {
+        req.map(|b| tonic::body::Body::new(b))
+    });
+
+    let app = Router::new()
+        .route("/version", get(version_handler))
+        .fallback_service(fallback);
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let server_result = axum::serve(listener, app.into_make_service())
+        .with_graceful_shutdown(shutdown_signal())
         .await;
 
     if let Err(error) = &server_result {
@@ -113,6 +109,10 @@ fn resolve_host(host: &str) -> anyhow::Result<IpAddr> {
     }
 
     Ok(ip)
+}
+
+async fn version_handler() -> impl IntoResponse {
+    env!("CARGO_PKG_VERSION")
 }
 
 #[cfg(target_family = "unix")]
@@ -165,139 +165,4 @@ fn ensure_root() -> anyhow::Result<()> {
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
-}
-
-#[derive(Clone)]
-struct VersionEndpointLayer {
-    version: String,
-    scribe: Arc<Mutex<Scribe>>,
-}
-
-impl<S> Layer<S> for VersionEndpointLayer {
-    type Service = VersionEndpointService<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        VersionEndpointService {
-            inner,
-            version: self.version.clone(),
-            scribe: Arc::clone(&self.scribe),
-        }
-    }
-}
-
-#[derive(Clone)]
-struct VersionEndpointService<S> {
-    inner: S,
-    version: String,
-    scribe: Arc<Mutex<Scribe>>,
-}
-
-impl<S, B> Service<http::Request<B>> for VersionEndpointService<S>
-where
-    S: Service<http::Request<B>, Response = http::Response<TonicBody>>
-        + Clone
-        + Send
-        + 'static,
-    S::Error: Send + 'static,
-    S::Future: Send + 'static,
-    B: HttpBody<Data = Bytes> + Send + 'static,
-    B::Error: Into<tonic::codegen::StdError> + Send + 'static,
-{
-    type Response = http::Response<TonicBody>;
-    type Error = S::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn poll_ready(&mut self, cx: &mut TaskContext<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, request: http::Request<B>) -> Self::Future {
-        let method = request.method().to_string();
-        let path = request.uri().path().to_string();
-        let started_at = Instant::now();
-        let scribe = Arc::clone(&self.scribe);
-
-        if path == "/version" && request.method() == http::Method::GET {
-            let version_bytes = Bytes::from(self.version.clone());
-            let body = TonicBody::new(
-                Full::new(version_bytes).map_err(|never| -> tonic::Status { match never {} }),
-            );
-            let response = http::Response::builder()
-                .status(http::StatusCode::OK)
-                .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
-                .body(body)
-                .expect("version response is valid");
-            return Box::pin(async move {
-                log_http_request(
-                    scribe,
-                    method,
-                    path,
-                    http::StatusCode::OK.as_u16(),
-                    started_at.elapsed().as_millis(),
-                    None,
-                )
-                .await;
-                Ok(response)
-            });
-        }
-
-        let future = self.inner.call(request);
-        Box::pin(async move {
-            let response = future.await;
-            let duration_ms = started_at.elapsed().as_millis();
-            match &response {
-                Ok(http_response) => {
-                    log_http_request(
-                        scribe,
-                        method,
-                        path,
-                        http_response.status().as_u16(),
-                        duration_ms,
-                        None,
-                    )
-                    .await;
-                }
-                Err(_) => {
-                    log_http_request(
-                        scribe,
-                        method,
-                        path,
-                        0,
-                        duration_ms,
-                        Some("service_error".to_string()),
-                    )
-                    .await;
-                }
-            }
-            response
-        })
-    }
-}
-
-async fn log_http_request(
-    scribe: Arc<Mutex<Scribe>>,
-    method: String,
-    path: String,
-    status: u16,
-    duration_ms: u128,
-    error_type: Option<String>,
-) {
-    let guard = scribe.lock().await;
-    let mut scroll = guard.new_scroll(None);
-    scroll.insert(
-        "event".to_string(),
-        Value::String("daemon_http_request".to_string()),
-    );
-    scroll.insert("method".to_string(), Value::String(method));
-    scroll.insert("path".to_string(), Value::String(path));
-    scroll.insert("status".to_string(), Value::Number((status as u64).into()));
-    scroll.insert(
-        "duration_ms".to_string(),
-        Value::Number((duration_ms as u64).into()),
-    );
-    if let Some(error_type) = error_type {
-        scroll.insert("error_type".to_string(), Value::String(error_type));
-    }
-    let success = status < 500 && scroll.get("error_type").is_none();
-    guard.seal(scroll, success);
 }

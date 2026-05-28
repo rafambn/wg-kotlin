@@ -5,15 +5,14 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
-bytes = "1.10.1"
+axum = "0.7"
 clap = { version = "4.5.53", features = ["derive"] }
-http-body-util = "0.1.3"
 libc = "0.2.177"
 serde_json = "1.0.145"
-tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "signal", "sync"] }
+tokio = { version = "1.48.0", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
 tokio-stream = { version = "0.1.18", features = ["sync"] }
 tonic = { version = "0.14.6", features = ["transport"] }
-tower-layer = "0.3.3"
+tower = { version = "0.5", features = ["util"] }
 tun-rs = { version = "2.8", features = ["interruptible"] }
 which = "7.0.2"
 scribe-rs = { path = "../scribe-rs" }
@@ -21,5 +20,3 @@ daemon-proto = { path = "../daemon-proto" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }
-
-

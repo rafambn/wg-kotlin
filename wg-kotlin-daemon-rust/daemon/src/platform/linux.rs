@@ -9,7 +9,6 @@ const NOT_FOUND_PATTERNS: &[&str] = &["not found", "no such process", "cannot fi
 pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
     ensure_required_binaries(&["ip", "resolvectl"])?;
 
-    let addresses = cidrs_to_args(&config.addresses);
     let routes = cidrs_to_args(&config.routes);
     let endpoint_routes = resolve_endpoint_routes(&config.endpoints);
     let endpoint_ips: Vec<String> = endpoint_routes.iter().map(|(endpoint, _)| endpoint.to_string()).collect();
@@ -22,47 +21,6 @@ pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Res
     let filtered_routes = filter_routes_for_endpoints(routes, &endpoint_ips);
 
     let setup_result = (|| -> Result<(), String> {
-        if config.mtu > 0 {
-            let mtu = config.mtu;
-            run_command(
-                "apply-mtu",
-                "ip",
-                &["link".to_string(), "set".to_string(), "dev".to_string(), interface_name.to_string(), "mtu".to_string(), mtu.to_string()],
-                None,
-                &[],
-                &[],
-            )?;
-        }
-
-        run_command(
-            "bring-interface-up",
-            "ip",
-            &["link".to_string(), "set".to_string(), "dev".to_string(), interface_name.to_string(), "up".to_string()],
-            None,
-            &[],
-            &[],
-        )?;
-
-        run_command(
-            "flush-addresses",
-            "ip",
-            &["address".to_string(), "flush".to_string(), "dev".to_string(), interface_name.to_string()],
-            None,
-            &[],
-            &[],
-        )?;
-
-        for address in &addresses {
-            run_command(
-                "add-address",
-                "ip",
-                &["address".to_string(), "add".to_string(), address.to_string(), "dev".to_string(), interface_name.to_string()],
-                None,
-                &[],
-                &[],
-            )?;
-        }
-
         for (endpoint, route) in &endpoint_routes {
             add_endpoint_route(endpoint, route)?;
         }

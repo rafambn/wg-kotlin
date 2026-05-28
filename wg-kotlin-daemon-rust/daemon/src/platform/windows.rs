@@ -1,5 +1,5 @@
 use crate::platform::{
-    CleanupHook, cidrs_to_args, ensure_required_binaries, ip_literal, ips_to_args, is_ipv6_literal, normalize_domains, run_command,
+    CleanupHook, cidrs_to_args, ensure_required_binaries, ips_to_args, is_ipv6_literal, normalize_domains, run_command,
 };
 use daemon_proto::pb::TunSessionConfig;
 use std::sync::{Mutex, OnceLock};
@@ -11,7 +11,6 @@ const NRPT_COMMENT_PREFIX: &str = "kmpvpn-daemon:";
 pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
     ensure_required_binaries(&["netsh", "powershell"])?;
 
-    let addresses = cidrs_to_args(&config.addresses);
     let routes = cidrs_to_args(&config.routes);
     let dns_servers = ips_to_args(config.dns.as_ref().map(|dns| &dns.servers[..]).unwrap_or(&[]));
     let dns_domains = normalize_domains(&config.dns.as_ref().map(|dns| dns.search_domains.clone()).unwrap_or_default())
@@ -19,93 +18,7 @@ pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Res
         .map(|domain| format!(".{domain}"))
         .collect::<Vec<String>>();
 
-    let has_ipv4 = addresses.iter().any(|address| !is_ipv6_literal(address));
-    let has_ipv6 = addresses.iter().any(|address| is_ipv6_literal(address));
-
     let setup_result = (|| -> Result<(), String> {
-        if config.mtu > 0 {
-            let mtu = config.mtu;
-            if has_ipv4 {
-                run_command(
-                    "apply-ipv4-mtu",
-                    "netsh",
-                    &vec![
-                        "interface".to_string(),
-                        "ipv4".to_string(),
-                        "set".to_string(),
-                        "subinterface".to_string(),
-                        interface_name.to_string(),
-                        format!("mtu={mtu}"),
-                        "store=active".to_string(),
-                    ],
-                    None,
-                    &[],
-                    &[],
-                )?;
-            }
-
-            if has_ipv6 {
-                run_command(
-                    "apply-ipv6-mtu",
-                    "netsh",
-                    &vec![
-                        "interface".to_string(),
-                        "ipv6".to_string(),
-                        "set".to_string(),
-                        "subinterface".to_string(),
-                        interface_name.to_string(),
-                        format!("mtu={mtu}"),
-                        "store=active".to_string(),
-                    ],
-                    None,
-                    &[],
-                    &[],
-                )?;
-            }
-        }
-
-        for address in &addresses {
-            delete_address(interface_name, address)?;
-
-            if is_ipv6_literal(address) {
-                run_command(
-                    "add-address",
-                    "netsh",
-                    &vec![
-                        "interface".to_string(),
-                        "ipv6".to_string(),
-                        "add".to_string(),
-                        "address".to_string(),
-                        format!("interface={interface_name}"),
-                        format!("address={address}"),
-                        "store=active".to_string(),
-                    ],
-                    None,
-                    &[],
-                    &[],
-                )?;
-            } else {
-                let (ip, prefix) = split_cidr(address)?;
-                run_command(
-                    "add-address",
-                    "netsh",
-                    &vec![
-                        "interface".to_string(),
-                        "ipv4".to_string(),
-                        "add".to_string(),
-                        "address".to_string(),
-                        format!("name={interface_name}"),
-                        format!("address={ip}"),
-                        format!("mask={}", prefix_to_mask(prefix)),
-                        "store=active".to_string(),
-                    ],
-                    None,
-                    &[],
-                    &[],
-                )?;
-            }
-        }
-
         for route in &routes {
             delete_route(interface_name, route)?;
             add_route(interface_name, route)?;
@@ -132,17 +45,17 @@ pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Res
     })();
 
     if let Err(setup_error) = setup_result {
-        return match cleanup_windows_session(&routes, &addresses, interface_name) {
+        return match cleanup_windows_session(&routes, interface_name) {
             Ok(()) => Err(setup_error),
             Err(cleanup_error) => Err(format!("{setup_error}; cleanup failed: {cleanup_error}")),
         };
     }
 
     let cleanup_interface = interface_name.to_string();
-    Ok(Box::new(move || cleanup_windows_session(&routes, &addresses, &cleanup_interface)))
+    Ok(Box::new(move || cleanup_windows_session(&routes, &cleanup_interface)))
 }
 
-fn cleanup_windows_session(routes: &[String], addresses: &[String], interface_name: &str) -> Result<(), String> {
+fn cleanup_windows_session(routes: &[String], interface_name: &str) -> Result<(), String> {
     let mut cleanup_error: Option<String> = None;
     let mut capture_error = |result: Result<(), String>| {
         if let Err(error) = result {
@@ -157,9 +70,6 @@ fn cleanup_windows_session(routes: &[String], addresses: &[String], interface_na
 
     for route in routes.iter().rev() {
         capture_error(delete_route(interface_name, route));
-    }
-    for address in addresses.iter().rev() {
-        capture_error(delete_address(interface_name, address));
     }
     capture_error(clear_nrpt_rules(interface_name));
 
@@ -192,67 +102,6 @@ fn route_args(command: &str, interface_name: &str, route: &str) -> Vec<String> {
     }
 
     args
-}
-
-fn delete_address(interface_name: &str, address: &str) -> Result<(), String> {
-    let delete_args = if is_ipv6_literal(address) {
-        vec![
-            vec![
-                "interface".to_string(),
-                "ipv6".to_string(),
-                "delete".to_string(),
-                "address".to_string(),
-                format!("interface={interface_name}"),
-                format!("address={}", ip_literal(address)),
-                "store=active".to_string(),
-            ],
-            vec![
-                "interface".to_string(),
-                "ipv6".to_string(),
-                "delete".to_string(),
-                "address".to_string(),
-                format!("interface={interface_name}"),
-                format!("address={}", ip_literal(address)),
-                "store=persistent".to_string(),
-            ],
-        ]
-    } else {
-        vec![
-            vec![
-                "interface".to_string(),
-                "ipv4".to_string(),
-                "delete".to_string(),
-                "address".to_string(),
-                format!("name={interface_name}"),
-                format!("address={}", ip_literal(address)),
-                "gateway=all".to_string(),
-                "store=active".to_string(),
-            ],
-            vec![
-                "interface".to_string(),
-                "ipv4".to_string(),
-                "delete".to_string(),
-                "address".to_string(),
-                format!("name={interface_name}"),
-                format!("address={}", ip_literal(address)),
-                "gateway=all".to_string(),
-                "store=persistent".to_string(),
-            ],
-        ]
-    };
-
-    let mut last_error: Option<String> = None;
-    for args in delete_args {
-        if let Err(error) = run_command("delete-address", "netsh", &args, None, &[], NOT_FOUND_PATTERNS) {
-            last_error = Some(error);
-        }
-    }
-
-    if let Some(error) = last_error {
-        return Err(error);
-    }
-
-    Ok(())
 }
 
 fn clear_nrpt_rules(interface_name: &str) -> Result<(), String> {
@@ -294,25 +143,6 @@ pub(crate) fn clear_stale_nrpt_rules_once() -> Result<(), String> {
 
 fn rule_comment(interface_name: &str) -> String {
     format!("{NRPT_COMMENT_PREFIX}{interface_name}")
-}
-
-fn split_cidr(cidr: &str) -> Result<(String, i32), String> {
-    let parts = cidr.split('/').collect::<Vec<&str>>();
-    if parts.len() != 2 {
-        return Err(format!("invalid CIDR: {cidr}"));
-    }
-
-    let prefix = parts[1].parse::<i32>().map_err(|_| format!("invalid CIDR prefix: {cidr}"))?;
-    Ok((parts[0].to_string(), prefix))
-}
-
-fn prefix_to_mask(prefix: i32) -> String {
-    if prefix <= 0 {
-        return "0.0.0.0".to_string();
-    }
-
-    let mask = (0xffff_ffffu64 << (32 - prefix)) & 0xffff_ffffu64;
-    [24, 16, 8, 0].iter().map(|shift| ((mask >> shift) & 0xff).to_string()).collect::<Vec<String>>().join(".")
 }
 
 const SET_NRPT_RULE_SCRIPT: &str = r#"

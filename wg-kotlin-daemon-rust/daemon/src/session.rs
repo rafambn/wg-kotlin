@@ -25,15 +25,18 @@ impl SessionManager {
 
         platform::prepare_session_start().map_err(|error| format!("failed to prepare platform session: {error}"))?;
 
-        let addr = config.addresses.first().unwrap();
-        let primary_ip = parse_proto_ip(addr).unwrap().0;
-        let prefix_len = u8::try_from(addr.prefix.unwrap()).unwrap();
-
         let mut builder = DeviceBuilder::new().name(config.interface_name.clone());
-        builder = match primary_ip {
-            IpAddr::V4(ipv4) => builder.ipv4(ipv4, prefix_len, None),
-            IpAddr::V6(ipv6) => builder.ipv6(ipv6, prefix_len),
-        };
+        for addr in &config.addresses {
+            let (ip, _) = parse_proto_ip(addr).unwrap();
+            let prefix = u8::try_from(addr.prefix.unwrap()).unwrap();
+            builder = match ip {
+                IpAddr::V4(v4) => builder.ipv4(v4, prefix, None),
+                IpAddr::V6(v6) => builder.ipv6(v6, prefix),
+            };
+        }
+        if config.mtu > 0 {
+            builder = builder.mtu(config.mtu as u16);
+        }
 
         let device = builder.build_sync().map_err(|error| format!("failed to create TUN device: {error}"))?;
 

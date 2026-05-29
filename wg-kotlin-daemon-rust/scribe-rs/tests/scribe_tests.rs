@@ -46,7 +46,7 @@ async fn saver_receives_sealed_scrolls() {
     let written = memory.written.lock().unwrap();
     assert_eq!(written.len(), 1, "saver should have received one scroll");
     let sealed = &written[0];
-    assert_eq!(sealed.success, true);
+    assert!(sealed.success);
     assert_eq!(sealed.data.get("scroll_id").and_then(Value::as_str), Some("scroll-1"));
     assert_eq!(sealed.data.get("event").and_then(Value::as_str), Some("daemon_startup"));
 }

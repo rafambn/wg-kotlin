@@ -5,10 +5,14 @@ package wgdaemon;
 option java_multiple_files = true;
 option java_package = "com.rafambn.wgkotlin.daemon.proto";
 
-message IpAddr {
-    oneof ip {
+message Ip {
+    oneof value {
         bytes v4 = 1;
         bytes v6 = 2;
     }
-    optional uint32 prefix = 3;
+}
+
+message Cidr {
+    Ip ip = 1;
+    uint32 prefix = 2;
 }

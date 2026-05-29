@@ -1,6 +1,5 @@
 package com.rafambn.wgkotlin.daemon.proto
 
-import kotlinx.io.Buffer
 import kotlinx.io.bytestring.ByteString
 import kotlinx.rpc.internal.utils.ExperimentalRpcApi
 import kotlinx.rpc.internal.utils.InternalRpcApi
@@ -12,7 +11,7 @@ class GrpcProtoWireCompatibilityTest {
     @Test
     fun dnsConfigRoundTripPreservesFields() {
         val original = DnsConfig {
-            servers = listOf(IpAddr { ip = IpAddr.Ip.V4(ByteString(byteArrayOf(1, 1, 1, 1))) })
+            servers = listOf(Ip { value = Ip.Value.V4(ByteString(byteArrayOf(1, 1, 1, 1))) })
             searchDomains = listOf("corp.example")
         }
 
@@ -21,8 +20,7 @@ class GrpcProtoWireCompatibilityTest {
 
         assertEquals(original.servers.size, decoded.servers.size)
         val server = decoded.servers.single()
-        assertEquals(IpAddr.Ip.V4(ByteString(byteArrayOf(1, 1, 1, 1))), server.ip)
-        assertEquals(null, server.prefix)
+        assertEquals(Ip.Value.V4(ByteString(byteArrayOf(1, 1, 1, 1))), server.value)
         assertEquals(listOf("corp.example"), decoded.searchDomains)
     }
 }

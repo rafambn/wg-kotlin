@@ -1,20 +1,20 @@
 package com.rafambn.wgkotlin.crypto
 
 import com.rafambn.wgkotlin.Engine
-import com.rafambn.wgkotlin.VpnConfiguration
+import com.rafambn.wgkotlin.ParsedVpnConfiguration
 import com.rafambn.wgkotlin.crypto.factory.BoringTunPeerSessionFactory
 import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
 import com.rafambn.wgkotlin.crypto.factory.QuicPeerSessionFactory
-import com.rafambn.wgkotlin.VpnPeer
 import com.rafambn.wgkotlin.network.io.UdpDatagram
-import com.rafambn.wgkotlin.network.resolveEndpointAddress
+
 import com.rafambn.wgkotlin.requireDistinctAllowedIpOwnership
-import com.rafambn.wgkotlin.requireUniquePeerPublicKeys
+import com.rafambn.wgkotlin.requireUniqueParsedPeerPublicKeys
 import com.rafambn.wgkotlin.requireUserspacePeerEndpoints
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.util.matches
-import com.rafambn.wgkotlin.util.parseCidr
 import com.rafambn.wgkotlin.util.parsePacketDestination
+import com.rafambn.wgkotlin.util.toCidrString
+import com.rafambn.wgkotlin.util.toPlainString
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -40,16 +40,16 @@ internal class CryptoSessionManagerImpl(
 
     private var scope: CoroutineScope? = null
 
-    override fun reconcileSessions(config: VpnConfiguration) {
-        requireUniquePeerPublicKeys(config.peers)
+    override fun reconcileSessions(config: ParsedVpnConfiguration) {
+        requireUniqueParsedPeerPublicKeys(config.peers)
         requireUserspacePeerEndpoints(config.peers)
         requireDistinctAllowedIpOwnership(config.peers)
 
         val resolvedPeers = config.peers.map { peer ->
-            val rawAddress = checkNotNull(peer.endpointAddress) {
-                "Peer `${peer.publicKey}` is missing endpointAddress"
+            when {
+                peer.endpointAddress != null -> peer
+                else -> error("Peer `${peer.publicKey}` has no endpoint address")
             }
-            peer.copy(endpointAddress = resolveEndpointAddress(rawAddress))
         }
 
         val desiredPeers = resolvedPeers.associateBy { peer -> peer.publicKey }
@@ -101,8 +101,6 @@ internal class CryptoSessionManagerImpl(
 
         runBlocking {
             reconcileMutex.withLock {
-                // Remove stats for peers that are no longer present so stale stats
-                // from a previous session don't bleed into a fresh one.
                 previousSessions.keys
                     .filter { key -> !nextSessions.containsKey(key) }
                     .forEach { key -> peerStatsByPublicKey.remove(key) }
@@ -156,9 +154,9 @@ internal class CryptoSessionManagerImpl(
             val stats = peerStatsByPublicKey[entry.peer.publicKey] ?: MutablePeerStats()
             VpnPeerStats(
                 publicKey = entry.peer.publicKey,
-                endpointAddress = entry.peer.endpointAddress,
+                endpointAddress = entry.peer.endpointAddress?.toPlainString(),
                 endpointPort = entry.peer.endpointPort,
-                allowedIps = entry.peer.allowedIps.toList(),
+                allowedIps = entry.peer.allowedIps.map { it.toCidrString() },
                 receivedBytes = stats.receivedBytes,
                 transmittedBytes = stats.transmittedBytes,
                 lastHandshakeEpochSeconds = null,
@@ -170,8 +168,6 @@ internal class CryptoSessionManagerImpl(
         try {
             while (true) {
                 val packet = tunPipe.receive()
-
-                // Collect action synchronously under the mutex — no suspension points inside.
                 var pendingNetwork: UdpDatagram? = null
                 var pendingTun: ByteArray? = null
 
@@ -197,12 +193,10 @@ internal class CryptoSessionManagerImpl(
                     }
                 }
 
-                // Send outside the mutex so the lock is never held across a suspension point.
                 pendingNetwork?.let { networkPipe.send(it) }
                 pendingTun?.let { tunPipe.send(it) }
             }
         } catch (_: CancellationException) {
-            // shutdown path
         } catch (throwable: Throwable) {
             onFailure(throwable)
         }
@@ -213,13 +207,12 @@ internal class CryptoSessionManagerImpl(
             while (true) {
                 val datagram = networkPipe.receive()
 
-                // Collect all actions synchronously under the mutex — no suspension points inside.
                 val pendingNetwork = mutableListOf<UdpDatagram>()
                 val pendingTun = mutableListOf<ByteArray>()
 
                 reconcileMutex.withLock {
                     val selected = sessionEntriesByPeer.values.firstOrNull { entry ->
-                        entry.peer.endpointAddress == datagram.remoteEndpoint.address &&
+                        entry.peer.endpointAddress?.toPlainString() == datagram.remoteEndpoint.address &&
                             entry.peer.endpointPort == datagram.remoteEndpoint.port
                     } ?: return@withLock
 
@@ -260,12 +253,10 @@ internal class CryptoSessionManagerImpl(
                     }
                 }
 
-                // Send outside the mutex so the lock is never held across a suspension point.
                 for (d in pendingNetwork) networkPipe.send(d)
                 for (p in pendingTun) tunPipe.send(p)
             }
         } catch (_: CancellationException) {
-            // shutdown path
         } catch (throwable: Throwable) {
             onFailure(throwable)
         }
@@ -276,7 +267,6 @@ internal class CryptoSessionManagerImpl(
             while (true) {
                 delay(DEFAULT_PERIODIC_INTERVAL_MILLIS)
 
-                // Collect all periodic actions synchronously under the mutex — no suspension points inside.
                 val pendingNetwork = mutableListOf<UdpDatagram>()
 
                 reconcileMutex.withLock {
@@ -301,11 +291,9 @@ internal class CryptoSessionManagerImpl(
                     }
                 }
 
-                // Send outside the mutex so the lock is never held across a suspension point.
                 for (d in pendingNetwork) networkPipe.send(d)
             }
         } catch (_: CancellationException) {
-            // shutdown path
         } catch (throwable: Throwable) {
             onFailure(throwable)
         }
@@ -319,13 +307,12 @@ internal class CryptoSessionManagerImpl(
         return sessionEntries
             .mapNotNull { entry ->
                 val match = entry.peer.allowedIps
-                    .mapNotNull { allowedIp -> parseCidr(allowedIp) }
-                    .filter { route -> route.matches(destination) }
-                    .maxByOrNull { route -> route.prefixLength }
+                    .filter { allowedIp -> allowedIp.matches(destination) }
+                    .maxByOrNull { route -> route.prefix }
                     ?: return@mapNotNull null
                 entry to match
             }
-            .maxByOrNull { (_, route) -> route.prefixLength }
+            .maxByOrNull { (_, route) -> route.prefix }
             ?.first
     }
 

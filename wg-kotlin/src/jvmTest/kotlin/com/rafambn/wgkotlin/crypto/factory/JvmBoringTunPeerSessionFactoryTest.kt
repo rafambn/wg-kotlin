@@ -1,7 +1,7 @@
 package com.rafambn.wgkotlin.crypto.factory
 
-import com.rafambn.wgkotlin.VpnConfiguration
-import com.rafambn.wgkotlin.VpnPeer
+import com.rafambn.wgkotlin.ParsedVpnConfiguration
+import com.rafambn.wgkotlin.ParsedVpnPeer
 import com.rafambn.wgkotlin.crypto.PacketAction
 import uniffi.wg_kotlin_uniffi_boringtun.convertX25519KeyToBase64
 import uniffi.wg_kotlin_uniffi_boringtun.generatePublicKey
@@ -17,10 +17,10 @@ class JvmBoringTunPeerSessionFactoryTest {
     @Test
     fun quicStrategyIsExplicitlyUnsupported() {
         val factory = QuicPeerSessionFactory()
-        val config = VpnConfiguration(
+        val config = ParsedVpnConfiguration(
             interfaceName = "wg-test",
             privateKey = "private-key",
-            peers = listOf(VpnPeer(publicKey = "peer-key")),
+            peers = listOf(ParsedVpnPeer(publicKey = "peer-key")),
         )
 
         assertFailsWith<UnsupportedOperationException> {
@@ -37,10 +37,10 @@ class JvmBoringTunPeerSessionFactoryTest {
         val localPrivateKey = toBase64(generateSecretKey())
         val remotePublicKey = toBase64(checkNotNull(generatePublicKey(generateSecretKey())))
 
-        val config = VpnConfiguration(
+        val config = ParsedVpnConfiguration(
             interfaceName = "wg-test",
             privateKey = localPrivateKey,
-            peers = listOf(VpnPeer(publicKey = remotePublicKey)),
+            peers = listOf(ParsedVpnPeer(publicKey = remotePublicKey)),
         )
 
         val factory = BoringTunPeerSessionFactory()

@@ -11,8 +11,8 @@ option java_package = "com.rafambn.wgkotlin.daemon.proto";
 message TunSessionConfig {
     string interface_name = 1;
     int32 mtu = 2;
-    repeated IpAddr addresses = 3;
-    repeated IpAddr peer_allowed_ips = 4;
-    repeated IpAddr peer_endpoints = 5;
+    repeated Cidr addresses = 3;
+    repeated Cidr peer_allowed_ips = 4;
+    repeated Ip peer_endpoints = 5;
     DnsConfig dns = 6;
 }

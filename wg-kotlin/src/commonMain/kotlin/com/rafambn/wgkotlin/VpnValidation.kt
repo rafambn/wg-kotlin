@@ -1,12 +1,12 @@
 package com.rafambn.wgkotlin
 
 import com.rafambn.wgkotlin.util.normalizedKey
-import com.rafambn.wgkotlin.util.parseCidr
+import com.rafambn.wgkotlin.util.toCidrString
 
-internal fun requireUserspacePeerEndpoints(peers: List<VpnPeer>) {
+internal fun requireUserspacePeerEndpoints(peers: List<ParsedVpnPeer>) {
     peers.forEachIndexed { index, peer ->
-        require(!peer.endpointAddress.isNullOrBlank()) {
-            "Peer `${peer.publicKey}` at index $index must define endpointAddress for BORINGTUN userspace runtime"
+        require(peer.endpointAddress != null || peer.endpointHost != null) {
+            "Peer `${peer.publicKey}` at index $index must define endpointAddress or endpointHost for BORINGTUN userspace runtime"
         }
         require(peer.endpointPort != null) {
             "Peer `${peer.publicKey}` at index $index must define endpointPort for BORINGTUN userspace runtime"
@@ -14,17 +14,15 @@ internal fun requireUserspacePeerEndpoints(peers: List<VpnPeer>) {
     }
 }
 
-internal fun requireDistinctAllowedIpOwnership(peers: List<VpnPeer>) {
+internal fun requireDistinctAllowedIpOwnership(peers: List<ParsedVpnPeer>) {
     val ownershipByNetwork: MutableMap<String, String> = linkedMapOf()
 
     peers.forEach { peer ->
         peer.allowedIps.forEach { allowedIp ->
-            val parsed = parseCidr(allowedIp)
-                ?: throw IllegalArgumentException("Peer `${peer.publicKey}` has invalid allowed IP `$allowedIp`")
-            val key = parsed.normalizedKey()
+            val key = allowedIp.normalizedKey()
             val previousOwner = ownershipByNetwork.putIfAbsent(key, peer.publicKey)
             require(previousOwner == null || previousOwner == peer.publicKey) {
-                "Allowed IP `${allowedIp}` overlaps ambiguously between peers `$previousOwner` and `${peer.publicKey}`"
+                "Allowed IP `${allowedIp.toCidrString()}` overlaps ambiguously between peers `$previousOwner` and `${peer.publicKey}`"
             }
         }
     }
@@ -40,6 +38,18 @@ internal fun requireValidRegex(interfaceName: String) {
     val interfaceNameRegex = Regex("utun[0-9]+")
     require(interfaceNameRegex.matches(interfaceName)) {
         "Interface name must match `${interfaceNameRegex.pattern}`."
+    }
+}
+
+internal fun requireUniqueParsedPeerPublicKeys(peers: List<ParsedVpnPeer>) {
+    val duplicatedKeys = peers
+        .groupingBy { peer -> peer.publicKey }
+        .eachCount()
+        .filterValues { count -> count > 1 }
+        .keys
+
+    require(duplicatedKeys.isEmpty()) {
+        "Peer public keys must be unique. Duplicated keys: ${duplicatedKeys.joinToString()}"
     }
 }
 

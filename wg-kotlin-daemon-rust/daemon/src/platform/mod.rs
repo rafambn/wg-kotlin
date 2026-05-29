@@ -1,5 +1,5 @@
-use crate::ip_util::{parse_proto_ip, proto_ip_to_cidr};
-use daemon_proto::pb::{IpAddr, TunSessionConfig};
+use crate::ip_util::{parse_proto_cidr, parse_proto_ip, proto_ip_to_string};
+use daemon_proto::pb::{Ip, TunSessionConfig};
 use route_manager::{Route, RouteManager};
 use std::io::{Read, Write};
 use std::net::IpAddr as StdIpAddr;
@@ -66,10 +66,10 @@ pub fn prepare_session_start() -> Result<(), String> {
     Ok(())
 }
 
-pub fn ips_to_args(values: &[IpAddr]) -> Vec<String> {
+pub fn ips_to_args(values: &[Ip]) -> Vec<String> {
     let mut seen = Vec::new();
     for addr in values {
-        let ip = proto_ip_to_cidr(addr);
+        let ip = proto_ip_to_string(addr);
         if !seen.contains(&ip) {
             seen.push(ip);
         }
@@ -227,8 +227,8 @@ pub fn build_and_filter_routes(
         .peer_allowed_ips
         .iter()
         .filter_map(|addr| {
-            let (ip, _) = parse_proto_ip(addr)?;
-            Some(Route::new(ip, u8::try_from(addr.prefix?).ok()?).with_if_name(interface_name.to_string()))
+            let (ip, prefix) = parse_proto_cidr(addr)?;
+            Some(Route::new(ip, u8::try_from(prefix).ok()?).with_if_name(interface_name.to_string()))
         })
         .collect();
 
@@ -236,13 +236,13 @@ pub fn build_and_filter_routes(
         .peer_endpoints
         .iter()
         .filter_map(|addr| {
-            let (ip, _) = parse_proto_ip(addr)?;
+            let ip = parse_proto_ip(addr)?;
             let found = mgr.find_route(&ip).ok()??;
             Some(found.with_if_name(interface_name.to_string()))
         })
         .collect();
 
-    let endpoint_ips: Vec<StdIpAddr> = config.peer_endpoints.iter().filter_map(|addr| parse_proto_ip(addr).map(|(ip, _)| ip)).collect();
+    let endpoint_ips: Vec<StdIpAddr> = config.peer_endpoints.iter().filter_map(|addr| parse_proto_ip(addr)).collect();
     let filtered_routes: Vec<Route> = routes
         .iter()
         .filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination()))

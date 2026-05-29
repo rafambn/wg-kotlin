@@ -1,4 +1,4 @@
-use daemon_proto::pb::{DnsConfig, ip_addr};
+use daemon_proto::pb::{DnsConfig, ip};
 use prost::Message;
 
 const DNS_CONFIG_FIXTURE: &[u8] =
@@ -10,9 +10,8 @@ fn dns_fixture_decodes_and_reencodes() {
 
     assert_eq!(decoded.servers.len(), 1);
     let server = &decoded.servers[0];
-    assert!(server.prefix.is_none());
-    match &server.ip {
-        Some(ip_addr::Ip::V4(bytes)) => assert_eq!(bytes.as_slice(), &[1, 1, 1, 1]),
+    match &server.value {
+        Some(ip::Value::V4(bytes)) => assert_eq!(bytes.as_slice(), &[1, 1, 1, 1]),
         _ => panic!("expected v4 server"),
     }
     assert_eq!(decoded.search_domains, vec!["corp.example".to_string()]);

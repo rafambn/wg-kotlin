@@ -1,6 +1,7 @@
 package com.rafambn.wgkotlin.iface
 
-import com.rafambn.wgkotlin.daemon.proto.IpAddr
+import com.rafambn.wgkotlin.daemon.proto.Cidr
+import com.rafambn.wgkotlin.daemon.proto.Ip
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
@@ -48,13 +49,13 @@ class RustDaemonGrpcIntegrationTest {
             waitForPort("127.0.0.1", port)
 
             val (clientPipe, _) = DuplexChannelPipe.create<ByteArray>()
-            val executor = DaemonSessionBridge(host = IpAddr.Ip.V4(ByteString(InetAddress.getByName("127.0.0.1").address)), port = port)
+            val executor = DaemonSessionBridge(host = Ip.Value.V4(ByteString(InetAddress.getByName("127.0.0.1").address)), port = port)
 
             val failure = assertFailsWith<IllegalStateException> {
                 executor.openSession(
                     config = TunSessionConfig {
                         interfaceName = "wg0"
-                        addresses = listOf(IpAddr { ip = IpAddr.Ip.V4(ByteString(InetAddress.getByName("10.10.0.2").address)); prefix = 32u })
+                        addresses = listOf(Cidr { ip = Ip { value = Ip.Value.V4(ByteString(InetAddress.getByName("10.10.0.2").address)) }; prefix = 32u })
                     },
                     pipe = clientPipe,
                     onFailure = {},

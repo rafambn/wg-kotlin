@@ -1,11 +1,13 @@
 package com.rafambn.wgkotlin.crypto
 
-import com.rafambn.wgkotlin.VpnConfiguration
-import com.rafambn.wgkotlin.VpnPeer
+import com.rafambn.wgkotlin.ParsedVpnConfiguration
+import com.rafambn.wgkotlin.ParsedVpnPeer
 import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.network.io.UdpEndpoint
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
+import com.rafambn.wgkotlin.util.toBareIp
+import com.rafambn.wgkotlin.util.toCidr
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -49,20 +51,20 @@ class CryptoSessionManagerTest {
         val manager = createManager(factory)
 
         manager.reconcileSessions(
-            configurationWithPeer(
-                VpnPeer(
+            configurationWithParsedPeer(
+                ParsedVpnPeer(
                     publicKey = "peer-a",
-                    endpointAddress = "10.0.0.1",
+                    endpointAddress = "10.0.0.1".toBareIp(),
                     endpointPort = 51820,
                 ),
             ),
         )
 
         manager.reconcileSessions(
-            configurationWithPeer(
-                VpnPeer(
+            configurationWithParsedPeer(
+                ParsedVpnPeer(
                     publicKey = "peer-a",
-                    endpointAddress = "10.0.0.2",
+                    endpointAddress = "10.0.0.2".toBareIp(),
                     endpointPort = 51821,
                 ),
             ),
@@ -82,9 +84,9 @@ class CryptoSessionManagerTest {
     fun duplicatePeerKeysAreRejected() {
         val manager = createManager(RecordingSessionFactory())
 
-        val duplicated = configurationWithPeer(
-            VpnPeer(publicKey = "peer-a"),
-            VpnPeer(publicKey = "peer-a"),
+        val duplicated = configurationWithParsedPeer(
+            ParsedVpnPeer(publicKey = "peer-a"),
+            ParsedVpnPeer(publicKey = "peer-a"),
         )
 
         assertFailsWith<IllegalArgumentException> {
@@ -141,22 +143,22 @@ class CryptoSessionManagerTest {
         assertEquals(1, factory.createdSessions.first().closeCalls)
     }
 
-    private fun configurationWithPeers(vararg peerKeys: String): VpnConfiguration {
-        return VpnConfiguration(
+    private fun configurationWithPeers(vararg peerKeys: String): ParsedVpnConfiguration {
+        return ParsedVpnConfiguration(
             interfaceName = "wg-test",
             privateKey = "private-key",
             peers = peerKeys.mapIndexed { index, key ->
-                VpnPeer(
+                ParsedVpnPeer(
                     publicKey = key,
-                    endpointAddress = "198.51.100.${index + 1}",
+                    endpointAddress = "198.51.100.${index + 1}".toBareIp(),
                     endpointPort = 51820 + index,
                 )
             },
         )
     }
 
-    private fun configurationWithPeer(vararg peers: VpnPeer): VpnConfiguration {
-        return VpnConfiguration(
+    private fun configurationWithParsedPeer(vararg peers: ParsedVpnPeer): ParsedVpnConfiguration {
+        return ParsedVpnConfiguration(
             interfaceName = "wg-test",
             privateKey = "private-key",
             peers = peers.toList(),
@@ -179,8 +181,8 @@ class CryptoSessionManagerTest {
         val createdSessions: MutableList<TestPeerSession> = mutableListOf()
 
         override fun create(
-            config: VpnConfiguration,
-            peer: VpnPeer,
+            config: ParsedVpnConfiguration,
+            peer: ParsedVpnPeer,
             peerIndex: Int,
         ): PeerSession {
             if (peer.publicKey == failOnPeer) {
@@ -213,12 +215,12 @@ class CryptoSessionManagerTest {
             peerSessionFactory = factory,
         )
         manager.reconcileSessions(
-            configurationWithPeer(
-                VpnPeer(
+            configurationWithParsedPeer(
+                ParsedVpnPeer(
                     publicKey = "peer-a",
-                    endpointAddress = "198.51.100.1",
+                    endpointAddress = "198.51.100.1".toBareIp(),
                     endpointPort = 51820,
-                    allowedIps = listOf("0.0.0.0/0"),
+                    allowedIps = listOf("0.0.0.0/0".toCidr()),
                 ),
             ),
         )
@@ -246,12 +248,12 @@ class CryptoSessionManagerTest {
             peerSessionFactory = factory,
         )
         manager.reconcileSessions(
-            configurationWithPeer(
-                VpnPeer(
+            configurationWithParsedPeer(
+                ParsedVpnPeer(
                     publicKey = "peer-a",
-                    endpointAddress = "198.51.100.1",
+                    endpointAddress = "198.51.100.1".toBareIp(),
                     endpointPort = 51820,
-                    allowedIps = listOf("0.0.0.0/0"),
+                    allowedIps = listOf("0.0.0.0/0".toCidr()),
                 ),
             ),
         )
@@ -283,12 +285,12 @@ class CryptoSessionManagerTest {
             peerSessionFactory = factory,
         )
         manager.reconcileSessions(
-            configurationWithPeer(
-                VpnPeer(
+            configurationWithParsedPeer(
+                ParsedVpnPeer(
                     publicKey = "peer-a",
-                    endpointAddress = "198.51.100.1",
+                    endpointAddress = "198.51.100.1".toBareIp(),
                     endpointPort = 51820,
-                    allowedIps = listOf("0.0.0.0/0"),
+                    allowedIps = listOf("0.0.0.0/0".toCidr()),
                 ),
             ),
         )
@@ -298,7 +300,6 @@ class CryptoSessionManagerTest {
         val payload = byteArrayOf(0xAA.toByte(), 0xBB.toByte(), 0xCC.toByte())
         testNet.send(UdpDatagram(payload = payload, remoteEndpoint = UdpEndpoint("198.51.100.1", 51820)))
 
-        // Allow the ingress worker to process the datagram.
         withTimeout(2_000) {
             while (manager.peerStats().firstOrNull { it.publicKey == "peer-a" }?.receivedBytes == 0L) {
                 delay(10)
@@ -322,19 +323,18 @@ class CryptoSessionManagerTest {
             peerSessionFactory = factory,
         )
         manager.reconcileSessions(
-            configurationWithPeer(
-                VpnPeer(
+            configurationWithParsedPeer(
+                ParsedVpnPeer(
                     publicKey = "peer-a",
-                    endpointAddress = "198.51.100.1",
+                    endpointAddress = "198.51.100.1".toBareIp(),
                     endpointPort = 51820,
-                    allowedIps = listOf("0.0.0.0/0"),
+                    allowedIps = listOf("0.0.0.0/0".toCidr()),
                 ),
             ),
         )
 
         manager.start(onFailure = { throw it })
 
-        // Periodic interval is 100 ms; wait up to 2 s for the first keepalive.
         val keepalive = withTimeout(2_000) { testNet.receive() }
         assertTrue(keepalive.payload.contentEquals(KEEPALIVE_BYTES))
         assertEquals("198.51.100.1", keepalive.remoteEndpoint.address)
@@ -345,16 +345,15 @@ class CryptoSessionManagerTest {
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private fun fakeIpv4Packet(dst: ByteArray = byteArrayOf(8, 8, 8, 8)): ByteArray {
-        // Minimal 20-byte IPv4 header with version=4, IHL=5.
         return byteArrayOf(
             0x45, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00,
-            10, 0, 0, 1,             // src: 10.0.0.1
+            10, 0, 0, 1,
             dst[0], dst[1], dst[2], dst[3],
         )
     }
 
     private class DataPlaneSessionFactory : PeerSessionFactory {
-        override fun create(config: VpnConfiguration, peer: VpnPeer, peerIndex: Int): PeerSession {
+        override fun create(config: ParsedVpnConfiguration, peer: ParsedVpnPeer, peerIndex: Int): PeerSession {
             return DataPlanePeerSession(peerPublicKey = peer.publicKey, peerIndex = peerIndex)
         }
     }

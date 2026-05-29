@@ -1,5 +1,5 @@
-use crate::ip_util::parse_proto_ip;
-use daemon_proto::pb::{DnsConfig, IpAddr, TunSessionConfig};
+use crate::ip_util::{parse_proto_cidr, parse_proto_ip};
+use daemon_proto::pb::{Cidr, DnsConfig, TunSessionConfig};
 
 const MIN_MTU: i32 = 576;
 const MIN_IPV6_MTU: i32 = 1280;
@@ -13,9 +13,9 @@ const MAX_DOMAIN_LENGTH: usize = 253;
 pub fn validate_config(config: &TunSessionConfig) -> Result<(), String> {
     validate_interface_name(&config.interface_name)?;
     validate_non_empty("addresses", &config.addresses)?;
-    validate_ip_list("addresses", &config.addresses, true)?;
+    validate_cidr_list("addresses", &config.addresses)?;
     validate_max_count("addresses", config.addresses.len(), MAX_ADDRESSES)?;
-    validate_ip_list("peer_allowed_ips", &config.peer_allowed_ips, true)?;
+    validate_cidr_list("peer_allowed_ips", &config.peer_allowed_ips)?;
     validate_max_count("peer_allowed_ips", config.peer_allowed_ips.len(), MAX_ROUTES)?;
     if config.mtu != 0 {
         validate_mtu_for_addresses(config.mtu, &config.addresses)?;
@@ -37,11 +37,11 @@ fn validate_interface_name(interface_name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_mtu_for_addresses(mtu: i32, addresses: &[IpAddr]) -> Result<(), String> {
+fn validate_mtu_for_addresses(mtu: i32, addresses: &[Cidr]) -> Result<(), String> {
     if !(MIN_MTU..=MAX_MTU).contains(&mtu) {
         return Err(format!("MTU must be between {MIN_MTU} and {MAX_MTU}"));
     }
-    let has_ipv6 = addresses.iter().any(|addr| parse_proto_ip(addr).map(|(ip, _)| ip.is_ipv6()).unwrap_or(false));
+    let has_ipv6 = addresses.iter().any(|addr| parse_proto_cidr(addr).map(|(ip, _)| ip.is_ipv6()).unwrap_or(false));
 
     if has_ipv6 && mtu < MIN_IPV6_MTU {
         return Err(format!("MTU must be at least {MIN_IPV6_MTU} when IPv6 addresses are configured"));
@@ -66,34 +66,27 @@ fn validate_dns(dns: &DnsConfig) -> Result<(), String> {
     }
 
     for (idx, server) in dns.servers.iter().enumerate() {
-        if server.prefix.is_some() {
-            return Err(format!("dns.servers[{idx}] must be a bare IP address, not a CIDR"));
-        }
-        let Some(_ip) = parse_proto_ip(server) else {
+        if parse_proto_ip(server).is_none() {
             return Err(format!("dns.servers[{idx}] must be a valid IPv4 or IPv6 address"));
-        };
+        }
     }
 
     Ok(())
 }
 
-fn validate_ip_list(field_name: &str, values: &[IpAddr], require_prefix: bool) -> Result<(), String> {
+fn validate_cidr_list(field_name: &str, values: &[Cidr]) -> Result<(), String> {
     for (idx, addr) in values.iter().enumerate() {
-        let (ip, prefix) = parse_proto_ip(addr).ok_or_else(|| format!("{field_name}[{idx}] has an invalid IP address"))?;
+        let (ip, prefix) = parse_proto_cidr(addr).ok_or_else(|| format!("{field_name}[{idx}] has an invalid IP address"))?;
 
-        if require_prefix {
-            let prefix = prefix.ok_or_else(|| format!("{field_name}[{idx}] must use CIDR format (prefix required)"))?;
-
-            let max_prefix = if ip.is_ipv4() { 32 } else { 128 };
-            if prefix > max_prefix {
-                return Err(format!("{field_name}[{idx}] prefix must be between 0 and {max_prefix}"));
-            }
+        let max_prefix = if ip.is_ipv4() { 32 } else { 128 };
+        if prefix > max_prefix {
+            return Err(format!("{field_name}[{idx}] prefix must be between 0 and {max_prefix}"));
         }
     }
     Ok(())
 }
 
-fn validate_non_empty(field_name: &str, values: &[IpAddr]) -> Result<(), String> {
+fn validate_non_empty(field_name: &str, values: &[Cidr]) -> Result<(), String> {
     if values.is_empty() {
         return Err(format!("{field_name} must contain at least one entry"));
     }

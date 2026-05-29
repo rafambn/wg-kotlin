@@ -1,4 +1,4 @@
-use crate::ip_util::parse_proto_ip;
+use crate::ip_util::parse_proto_cidr;
 use crate::platform::{self, CleanupHook};
 use daemon_proto::pb::TunSessionConfig;
 use std::net::IpAddr;
@@ -37,8 +37,8 @@ impl SessionManager {
 
         let mut builder = DeviceBuilder::new().name(config.interface_name.clone());
         for addr in &config.addresses {
-            let (ip, _) = parse_proto_ip(addr).unwrap();
-            let prefix = u8::try_from(addr.prefix.unwrap()).unwrap();
+            let (ip, prefix) = parse_proto_cidr(addr).unwrap();
+            let prefix = u8::try_from(prefix).unwrap();
             builder = match ip {
                 IpAddr::V4(v4) => builder.ipv4(v4, prefix, None),
                 IpAddr::V6(v6) => builder.ipv6(v6, prefix),

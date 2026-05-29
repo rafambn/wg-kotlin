@@ -1,15 +1,15 @@
 package com.rafambn.wgkotlin.crypto.factory
 
-import com.rafambn.wgkotlin.VpnConfiguration
-import com.rafambn.wgkotlin.VpnPeer
+import com.rafambn.wgkotlin.ParsedVpnConfiguration
+import com.rafambn.wgkotlin.ParsedVpnPeer
 import com.rafambn.wgkotlin.crypto.BoringTunPeerSession
 import com.rafambn.wgkotlin.crypto.PeerSession
 import uniffi.wg_kotlin_uniffi_boringtun.TunnelSession
 
-class BoringTunPeerSessionFactory : PeerSessionFactory {
+internal class BoringTunPeerSessionFactory : PeerSessionFactory {
     override fun create(
-        config: VpnConfiguration,
-        peer: VpnPeer,
+        config: ParsedVpnConfiguration,
+        peer: ParsedVpnPeer,
         peerIndex: Int,
     ): PeerSession {
         require(peerIndex >= 0) {

@@ -2,7 +2,7 @@ package com.rafambn.wgkotlin.iface
 
 import com.rafambn.wgkotlin.daemon.proto.ClientMessage
 import com.rafambn.wgkotlin.daemon.proto.Daemon
-import com.rafambn.wgkotlin.daemon.proto.IpAddr
+import com.rafambn.wgkotlin.daemon.proto.Ip
 import com.rafambn.wgkotlin.daemon.proto.Packet
 import com.rafambn.wgkotlin.daemon.proto.ServerMessage
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
@@ -26,7 +26,7 @@ import kotlinx.rpc.withService
 import kotlin.time.Duration.Companion.milliseconds
 
 class DaemonSessionBridge(
-    private val host: IpAddr.Ip,
+    private val host: Ip.Value,
     private val port: Int,
 ) : SessionBridge {
 

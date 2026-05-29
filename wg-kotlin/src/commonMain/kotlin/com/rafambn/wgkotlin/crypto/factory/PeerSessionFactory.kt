@@ -1,13 +1,13 @@
 package com.rafambn.wgkotlin.crypto.factory
 
-import com.rafambn.wgkotlin.VpnConfiguration
-import com.rafambn.wgkotlin.VpnPeer
+import com.rafambn.wgkotlin.ParsedVpnConfiguration
+import com.rafambn.wgkotlin.ParsedVpnPeer
 import com.rafambn.wgkotlin.crypto.PeerSession
 
-interface PeerSessionFactory {
+internal interface PeerSessionFactory {
     fun create(
-        config: VpnConfiguration,
-        peer: VpnPeer,
+        config: ParsedVpnConfiguration,
+        peer: ParsedVpnPeer,
         peerIndex: Int,
     ): PeerSession
 }

@@ -3,7 +3,6 @@ package com.rafambn.wgkotlin
 import com.rafambn.wgkotlin.crypto.CryptoSessionManagerImpl
 import com.rafambn.wgkotlin.iface.PlatformInterfaceFactory
 import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
-import com.rafambn.wgkotlin.iface.toTunSessionConfig
 import com.rafambn.wgkotlin.network.SocketManagerImpl
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
@@ -26,7 +25,8 @@ class Vpn(
     )
     private val socketManager = SocketManagerImpl(networkPipe = networkPipePair.first)
     private val interfaceManager = PlatformInterfaceFactory.create(tunPipePair.first)
-    private var currentConfiguration: VpnConfiguration? = null
+    private var currentParsedConfiguration: ParsedVpnConfiguration? = null
+    private var originalConfiguration: VpnConfiguration? = null
 
     init {
         requireNonBlankInterfaceName(interfaceName)
@@ -43,12 +43,14 @@ class Vpn(
             "Configuration interface name `${configuration.interfaceName}` does not match this Vpn's interface name `$interfaceName`"
         }
 
+        val parsed = configuration.toParsedVpnConfiguration()
         stop()
 
-        currentConfiguration = configuration
+        currentParsedConfiguration = parsed
+        originalConfiguration = configuration
 
         operation("reconcileSessions") {
-            cryptoSessionManager.reconcileSessions(configuration)
+            cryptoSessionManager.reconcileSessions(parsed)
         }
 
         operation("start") {
@@ -63,7 +65,7 @@ class Vpn(
         }
 
         operation("start") {
-            interfaceManager.start(configuration.toTunSessionConfig()) { stop() }
+            interfaceManager.start(parsed.toTunSessionConfig()) { stop() }
         }
     }
 
@@ -79,7 +81,7 @@ class Vpn(
             liveInformation.copy(peerStats = runtimePeerStats)
         }
 
-        return informationWithPeerStats.copy(vpnConfiguration = currentConfiguration)
+        return informationWithPeerStats.copy(vpnConfiguration = originalConfiguration)
     }
 
     fun stop() {
@@ -99,7 +101,8 @@ class Vpn(
         } catch (error: Throwable) {
             if (firstError == null) firstError = error
         }
-        currentConfiguration = null
+        currentParsedConfiguration = null
+        originalConfiguration = null
         if (firstError != null) throw firstError
     }
 

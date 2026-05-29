@@ -55,7 +55,6 @@ rpc {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
-    systemProperty("wgkotlin.platform.interface.mode", "in-memory")
 }
 
 //Publishing your Kotlin Multiplatform library to Maven Central

@@ -5,24 +5,14 @@ import org.koin.core.module.Module
 import org.koin.core.parameter.parametersOf
 import org.koin.dsl.koinApplication
 import org.koin.dsl.module
-import java.util.Locale
 
 internal object JvmInterfaceKoinBootstrap {
     private val baseModule: Module = module {
-
         factory<InterfaceCommandExecutor> {
-            when (
-                System.getProperty(
-                    JvmInterfaceProperties.INTERFACE_MODE,
-                    JvmInterfaceProperties.INTERFACE_MODE_PRODUCTION,
-                ).lowercase(Locale.ROOT)
-            ) {
-                JvmInterfaceProperties.INTERFACE_MODE_IN_MEMORY -> InMemoryInterfaceCommandExecutor()
-                else -> DaemonBackedInterfaceCommandExecutor(
-                    host = System.getProperty(JvmInterfaceProperties.DAEMON_HOST, JvmInterfaceProperties.DEFAULT_DAEMON_HOST),
-                    port = System.getProperty(JvmInterfaceProperties.DAEMON_PORT)?.toIntOrNull() ?: JvmInterfaceProperties.DEFAULT_DAEMON_PORT,
-                )
-            }
+            DaemonBackedInterfaceCommandExecutor(
+                host = System.getProperty(JvmInterfaceProperties.DAEMON_HOST, JvmInterfaceProperties.DEFAULT_DAEMON_HOST),
+                port = System.getProperty(JvmInterfaceProperties.DAEMON_PORT)?.toIntOrNull() ?: JvmInterfaceProperties.DEFAULT_DAEMON_PORT,
+            )
         }
 
         factory<InterfaceManager> { params ->

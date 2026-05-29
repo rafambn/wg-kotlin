@@ -1,8 +1,10 @@
 package com.rafambn.wgkotlin.iface
 
 import com.rafambn.wgkotlin.daemon.proto.Daemon
+import com.rafambn.wgkotlin.daemon.proto.IpAddr
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
+import com.rafambn.wgkotlin.util.toAddressString
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
@@ -11,7 +13,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -21,8 +22,8 @@ import kotlinx.rpc.grpc.client.GrpcClient
 import kotlinx.rpc.withService
 import java.util.concurrent.atomic.AtomicBoolean
 
-class DaemonBackedInterfaceCommandExecutor(
-    private val host: String,
+class DaemonSessionBridge(
+    private val host: IpAddr.Ip,
     private val port: Int,
 ) : InterfaceCommandExecutor {
 
@@ -34,7 +35,7 @@ class DaemonBackedInterfaceCommandExecutor(
         val client = createClient()
         val outgoingPackets = Channel<ByteArray>(capacity = DuplexChannelPipe.DEFAULT_CAPACITY)
         val scope = CoroutineScope(
-            SupervisorJob() + Dispatchers.IO + CoroutineName("kmpvpn-packet-rpc-bridge"),
+            SupervisorJob() + Dispatchers.IO + CoroutineName("wg-kotlin-packet-rpc-bridge"),
         )
         val bridgeReady = CompletableDeferred<Unit>()
         val bridgeTerminated = CompletableDeferred<Throwable>()
@@ -62,7 +63,6 @@ class DaemonBackedInterfaceCommandExecutor(
                 reportTermination(
                     IllegalStateException("Packet bridge closed by daemon for `${config.interfaceName}`: stream completed"),
                 )
-            } catch (_: CancellationException) {
             } catch (throwable: Throwable) {
                 throwable.printStackTrace()
                 if (!bridgeReady.isCompleted) {
@@ -101,7 +101,7 @@ class DaemonBackedInterfaceCommandExecutor(
                 onFailure(runBlocking { bridgeTerminated.await() })
             }
         } catch (throwable: Throwable) {
-            scope.cancel("DaemonBackedInterfaceCommandExecutor packet bridge failed to connect")
+            scope.cancel("DaemonSessionBridge packet bridge failed to connect")
             outgoingPackets.close()
             runCatching { client.close() }
             throw IllegalStateException(
@@ -112,7 +112,7 @@ class DaemonBackedInterfaceCommandExecutor(
 
         return AutoCloseable {
             outgoingPackets.close()
-            scope.cancel("DaemonBackedInterfaceCommandExecutor packet bridge closed")
+            scope.cancel("DaemonSessionBridge packet bridge closed")
             runBlocking {
                 withTimeoutOrNull(CLOSE_TIMEOUT_MILLIS) {
                     sessionCollectorJob.join()
@@ -124,7 +124,7 @@ class DaemonBackedInterfaceCommandExecutor(
     }
 
     private fun createClient(): DaemonProcessClient {
-        val grpcClient = GrpcClient(host, port) {
+        val grpcClient = GrpcClient(host.toAddressString(), port) {
             credentials = plaintext()
         }
         return DaemonProcessClient(

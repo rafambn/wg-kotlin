@@ -2,6 +2,8 @@ use anyhow::{Context, bail};
 use axum::{Router, response::IntoResponse, routing::get};
 use clap::Parser;
 use daemon::{logging, platform, server};
+#[cfg(target_os = "windows")]
+use daemon::session;
 use daemon_proto::pb::daemon_server::DaemonServer;
 use serde_json::Value;
 use server::DaemonGrpcService;
@@ -24,12 +26,31 @@ struct Cli {
     log_path: Option<PathBuf>,
 }
 
+#[cfg(target_os = "windows")]
+fn prepare_wintun() -> Result<String, String> {
+    let dll_bytes = include_bytes!("../resources/wintun-x64.dll");
+
+    let tmp = std::env::temp_dir().join("wg-kotlin-daemon-wintun");
+    std::fs::create_dir_all(&tmp).map_err(|e| format!("failed to create wintun temp dir: {e}"))?;
+    let dll_path = tmp.join("wintun.dll");
+    if !dll_path.exists() {
+        std::fs::write(&dll_path, dll_bytes).map_err(|e| format!("failed to extract wintun DLL: {e}"))?;
+    }
+    Ok(dll_path.to_string_lossy().to_string())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let bind_ip = resolve_host(&cli.host)?;
     ensure_root()?;
     platform::ensure_required_binaries(platform::required_binaries()).map_err(anyhow::Error::msg)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        let wintun_path = prepare_wintun().map_err(anyhow::Error::msg)?;
+        session::set_wintun_dll_path(wintun_path).map_err(anyhow::Error::msg)?;
+    }
 
     let log_path = cli.log_path.unwrap_or_else(|| {
         let mut dir =

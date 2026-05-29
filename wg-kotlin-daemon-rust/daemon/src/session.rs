@@ -4,7 +4,17 @@ use daemon_proto::pb::TunSessionConfig;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
+#[cfg(target_os = "windows")]
+use std::sync::OnceLock;
 use tun_rs::{DeviceBuilder, InterruptEvent, SyncDevice};
+
+#[cfg(target_os = "windows")]
+static WINTUN_DLL_PATH: OnceLock<String> = OnceLock::new();
+
+#[cfg(target_os = "windows")]
+pub fn set_wintun_dll_path(path: String) -> Result<(), String> {
+    WINTUN_DLL_PATH.set(path).map_err(|_| "wintun DLL path already initialized".to_string())
+}
 
 pub struct SessionManager;
 
@@ -36,6 +46,11 @@ impl SessionManager {
         }
         if config.mtu > 0 {
             builder = builder.mtu(config.mtu as u16);
+        }
+
+        #[cfg(target_os = "windows")]
+        if let Some(path) = WINTUN_DLL_PATH.get() {
+            builder = builder.wintun_file(path);
         }
 
         let device = builder.build_sync().map_err(|error| format!("failed to create TUN device: {error}"))?;

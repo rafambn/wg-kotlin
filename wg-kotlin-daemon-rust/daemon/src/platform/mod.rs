@@ -238,8 +238,14 @@ pub fn build_and_filter_routes(
         .filter_map(|addr| {
             let ip = parse_proto_ip(addr)?;
             let found = mgr.find_route(&ip).ok()??;
-            let prefix = found.prefix();
-            Some(Route::new(ip, prefix).with_if_name(interface_name.to_string()))
+            let host_prefix = if ip.is_ipv4() { 32u8 } else { 128u8 };
+            #[allow(unused_mut)]
+            let mut route = Route::new(ip, host_prefix).with_if_name(interface_name.to_string());
+            #[cfg(target_os = "linux")]
+            {
+                route = route.with_table(found.table());
+            }
+            Some(route)
         })
         .collect();
 

@@ -24,6 +24,7 @@ import kotlinx.io.bytestring.ByteString
 import kotlinx.rpc.grpc.client.GrpcClient
 import kotlinx.rpc.withService
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 class DaemonSessionBridge(
     private val host: Ip,
@@ -37,6 +38,10 @@ class DaemonSessionBridge(
     ): AutoCloseable {
         val grpcClient = GrpcClient(host.toAddressString(), port) {
             credentials = plaintext()
+            keepAlive {
+                time = 30.seconds
+                timeout = 10.seconds
+            }
         }
         val service = grpcClient.withService<Daemon>()
         val outgoingPackets = Channel<ByteArray>(capacity = DuplexChannelPipe.DEFAULT_CAPACITY)

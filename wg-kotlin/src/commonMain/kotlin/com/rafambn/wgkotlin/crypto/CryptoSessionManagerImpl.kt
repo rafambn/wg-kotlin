@@ -303,7 +303,7 @@ internal class CryptoSessionManagerImpl(
         packet: ByteArray,
         sessionEntries: Iterable<PeerSessionEntry>,
     ): PeerSessionEntry? {
-        val destination = parsePacketDestination(packet) ?: return null
+        val destination = parsePacketDestination(packet)
         return sessionEntries
             .mapNotNull { entry ->
                 val match = entry.peer.allowedIps

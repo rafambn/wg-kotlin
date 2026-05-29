@@ -1,6 +1,6 @@
 package com.rafambn.wgkotlin.network.io
 
-import com.rafambn.wgkotlin.network.resolveEndpointAddress
+import com.rafambn.wgkotlin.util.resolveEndpointAddress
 import io.ktor.network.sockets.BoundDatagramSocket
 import io.ktor.network.sockets.Datagram
 import io.ktor.network.sockets.InetSocketAddress

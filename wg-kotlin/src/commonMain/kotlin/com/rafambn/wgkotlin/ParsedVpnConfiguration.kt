@@ -5,8 +5,7 @@ import com.rafambn.wgkotlin.daemon.proto.DnsConfig as ProtoDnsConfig
 import com.rafambn.wgkotlin.daemon.proto.Ip
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.proto.invoke
-import com.rafambn.wgkotlin.network.resolveEndpointAddress
-import com.rafambn.wgkotlin.util.toBareIp
+import com.rafambn.wgkotlin.util.resolveEndpointAddressToBytes
 import com.rafambn.wgkotlin.util.toCidr
 import com.rafambn.wgkotlin.util.toCidrString
 
@@ -48,12 +47,12 @@ internal fun VpnConfiguration.toParsedVpnConfiguration(): ParsedVpnConfiguration
 
 internal fun DnsConfig.toParsedDnsConfig(): ParsedDnsConfig = ParsedDnsConfig(
     searchDomains = searchDomains,
-    servers = servers.map { it.toBareIp() },
+    servers = servers.map { resolveEndpointAddressToBytes(it) },
 )
 
 
 internal fun VpnPeer.toParsedVpnPeer(): ParsedVpnPeer {
-    val parsedIp = endpointAddress?.let { addr -> resolveEndpointAddress(addr).toBareIp() }
+    val parsedIp = endpointAddress?.let { addr -> resolveEndpointAddressToBytes(addr) }
     return ParsedVpnPeer(
         endpointPort = endpointPort,
         endpointAddress = parsedIp,

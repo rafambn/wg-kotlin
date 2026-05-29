@@ -5,25 +5,22 @@ import com.rafambn.wgkotlin.daemon.proto.Ip
 import com.rafambn.wgkotlin.daemon.proto.invoke
 import kotlinx.io.bytestring.ByteString
 
-internal fun parsePacketDestination(packet: ByteArray): Ip? {
-    if (packet.isEmpty()) return null
+internal fun parsePacketDestination(packet: ByteArray): Ip {
+    if (packet.isEmpty()) error("packet is empty")
 
     val version = ((packet[0].toInt() ushr 4) and 0x0f)
-    val value: Ip.Value? = when (version) {
-        4 -> if (packet.size >= 20) {
+    val value: Ip.Value = when (version) {
+        4 -> {
+            require(packet.size >= 20) { "IPv4 packet too short: ${packet.size} bytes" }
             Ip.Value.V4(ByteString(packet.copyOfRange(16, 20)))
-        } else {
-            null
         }
-        6 -> if (packet.size >= 40) {
+        6 -> {
+            require(packet.size >= 40) { "IPv6 packet too short: ${packet.size} bytes" }
             Ip.Value.V6(ByteString(packet.copyOfRange(24, 40)))
-        } else {
-            null
         }
-        else -> null
+        else -> error("unsupported IP version: $version")
     }
-    val ipValue = value ?: return null
-    return Ip { this.value = ipValue }
+    return Ip { this.value = value }
 
 }
 

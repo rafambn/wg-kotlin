@@ -37,7 +37,6 @@ class RustDaemonGrpcIntegrationTest {
             "127.0.0.1",
             "--port",
             port.toString(),
-            "--allow-non-root",
             "--log-path",
             logPath.toString(),
         )

@@ -21,6 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.runBlocking
 import kotlinx.rpc.krpc.ktor.server.Krpc
 import kotlinx.rpc.krpc.ktor.server.rpc
 import kotlinx.rpc.krpc.serialization.protobuf.protobuf
@@ -78,6 +79,7 @@ internal fun Application.module(
 }
 
 internal fun Application.installDaemonLogger() {
+    runBlocking { DaemonLogger.retire() }
     DaemonLogger.hire(
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
         channel = Channel(Channel.UNLIMITED),

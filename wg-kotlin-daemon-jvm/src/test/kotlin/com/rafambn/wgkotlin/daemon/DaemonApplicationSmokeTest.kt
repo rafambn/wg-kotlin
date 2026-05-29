@@ -5,8 +5,11 @@ import com.rafambn.wgkotlin.daemon.platformAdapter.PlatformAdapter
 import com.rafambn.wgkotlin.daemon.protocol.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.tun.TunHandle
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
@@ -17,11 +20,27 @@ import kotlinx.coroutines.withTimeout
 import java.util.ArrayDeque
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class DaemonApplicationSmokeTest {
+
+    @BeforeTest
+    fun initLogger() {
+        runBlocking { DaemonLogger.retire() }
+        DaemonLogger.hire(
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+            channel = Channel(Channel.UNLIMITED),
+        )
+    }
+
+    @AfterTest
+    fun cleanupLogger() = runBlocking {
+        DaemonLogger.retire()
+    }
 
     @Test
     fun startSessionStreamsPacketsAndClosesHandle() = runBlocking {

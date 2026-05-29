@@ -8,6 +8,7 @@ kotlinx-coroutines = "1.10.2"
 kotlinx-rpc-grpc = "0.11.0-grpc-188"
 ktor = "3.4.1"
 grpc = "1.75.0"
+protobuf-gradle-plugin = "0.9.5"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
@@ -38,3 +39,4 @@ maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "maven-publ
 gobley-cargo = { id = "dev.gobley.cargo", version.ref = "gobley" }
 gobley-uniffi = { id = "dev.gobley.uniffi", version.ref = "gobley" }
 atomicfu = { id = "org.jetbrains.kotlin.plugin.atomicfu", version.ref = "atomicfu" }
+protobuf = { id = "com.google.protobuf", version.ref = "protobuf-gradle-plugin" }

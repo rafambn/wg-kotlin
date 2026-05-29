@@ -4,7 +4,7 @@ import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.InetSocketAddress
 import io.ktor.network.sockets.aSocket
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -13,7 +13,7 @@ import kotlin.test.assertNotNull
 class JvmPacketIoAdaptersTest {
 
     @Test
-    fun ktorDatagramUdpPortRoutesPacketsOverSocket() = runTest {
+    fun ktorDatagramUdpPortRoutesPacketsOverSocket() = runBlocking(Dispatchers.IO) {
         val selectorManager = SelectorManager(Dispatchers.IO)
         val socketA = aSocket(selectorManager).udp().bind(InetSocketAddress("127.0.0.1", 0))
         val socketB = aSocket(selectorManager).udp().bind(InetSocketAddress("127.0.0.1", 0))
@@ -47,9 +47,9 @@ class JvmPacketIoAdaptersTest {
     }
 
     @Test
-    fun ktorDatagramUdpPortRoutesIpv6PacketsOverSocketWhenAvailable() = runTest {
+    fun ktorDatagramUdpPortRoutesIpv6PacketsOverSocketWhenAvailable() = runBlocking(Dispatchers.IO) {
         if (!isIpv6LoopbackAvailable()) {
-            return@runTest
+            return@runBlocking
         }
 
         val selectorManager = SelectorManager(Dispatchers.IO)

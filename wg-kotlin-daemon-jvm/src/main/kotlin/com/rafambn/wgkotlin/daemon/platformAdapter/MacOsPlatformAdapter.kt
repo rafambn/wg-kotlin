@@ -27,7 +27,7 @@ internal class MacOsPlatformAdapter(
         ).openDevice()
         val addresses = normalizeCidrs(config.addresses)
             .filterNot { address -> isPrimaryTunAddress(address, primaryAddress) }
-        val routes = normalizeCidrs(config.routes)
+        val routes = normalizeCidrs(config.peerAllowedIps)
         return try {
             val interfaceName = handle.interfaceName
 

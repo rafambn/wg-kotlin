@@ -26,12 +26,12 @@ internal fun VpnConfiguration.toTunSessionConfig(): TunSessionConfig {
         interfaceName = this@toTunSessionConfig.interfaceName
         mtu = this@toTunSessionConfig.mtu ?: 0
         addresses = this@toTunSessionConfig.addresses.map { it.toIpAddr() }
-        this.routes = routes.map { it.toIpAddr() }
+        this.peerAllowedIps = routes.map { it.toIpAddr() }
         dns = DnsConfig {
             searchDomains = this@toTunSessionConfig.dns.searchDomains
             servers = this@toTunSessionConfig.dns.servers.map { it.toIpAddr() }
         }
-        this.endpoints = endpoints.map { it.toIpAddr() }
+        this.peerEndpoints = endpoints.map { it.toIpAddr() }
     }
 }
 

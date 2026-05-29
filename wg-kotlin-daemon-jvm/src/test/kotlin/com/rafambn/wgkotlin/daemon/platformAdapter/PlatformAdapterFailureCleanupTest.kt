@@ -84,7 +84,7 @@ class PlatformAdapterFailureCleanupTest {
                 TunSessionConfig(
                     interfaceName = "utun0",
                     addresses = listOf("10.10.10.2/24"),
-                    routes = listOf("10.20.0.0/16"),
+                    peerAllowedIps = listOf("10.20.0.0/16"),
                     dns = DnsConfig(
                         searchDomains = listOf("corp.local"),
                         servers = listOf("1.1.1.1"),
@@ -177,7 +177,7 @@ class PlatformAdapterFailureCleanupTest {
                 TunSessionConfig(
                     interfaceName = "utun0",
                     addresses = listOf("fd00::2/64"),
-                    routes = listOf("::/0"),
+                    peerAllowedIps = listOf("::/0"),
                 ),
             )
             handle.close()
@@ -222,7 +222,7 @@ class PlatformAdapterFailureCleanupTest {
                     TunSessionConfig(
                         interfaceName = "utun7",
                         addresses = listOf("10.10.10.2/24"),
-                        routes = listOf("0.0.0.0/0"),
+                        peerAllowedIps = listOf("0.0.0.0/0"),
                     ),
                 )
             }
@@ -258,7 +258,7 @@ class PlatformAdapterFailureCleanupTest {
                 TunSessionConfig(
                     interfaceName = "utun7",
                     addresses = listOf("fd00::2/64"),
-                    routes = listOf("::/0"),
+                    peerAllowedIps = listOf("::/0"),
                 ),
             )
 
@@ -384,7 +384,7 @@ class PlatformAdapterFailureCleanupTest {
                 TunSessionConfig(
                     interfaceName = "utun7",
                     addresses = listOf("10.10.10.2/24", "10.10.10.3/24"),
-                    routes = listOf("10.20.0.0/16"),
+                    peerAllowedIps = listOf("10.20.0.0/16"),
                     dns = DnsConfig(
                         searchDomains = listOf("corp.local"),
                         servers = listOf("1.1.1.1"),

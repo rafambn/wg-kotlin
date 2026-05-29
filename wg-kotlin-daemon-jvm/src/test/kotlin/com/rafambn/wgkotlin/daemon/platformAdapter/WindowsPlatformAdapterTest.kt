@@ -113,7 +113,7 @@ class WindowsPlatformAdapterTest {
                     interfaceName = "requested-wg0",
                     mtu = 1400,
                     addresses = listOf("10.10.10.2/24"),
-                    routes = listOf("0.0.0.0/0"),
+                    peerAllowedIps = listOf("0.0.0.0/0"),
                     dns = DnsConfig(
                         searchDomains = listOf("corp.local"),
                         servers = listOf("1.1.1.1"),
@@ -199,7 +199,7 @@ class WindowsPlatformAdapterTest {
                 TunSessionConfig(
                     interfaceName = "requested-wg0",
                     addresses = listOf("10.10.10.2/24", "fd00::2/64"),
-                    routes = listOf("10.20.0.0/16", "fd01::/64"),
+                    peerAllowedIps = listOf("10.20.0.0/16", "fd01::/64"),
                 ),
             )
 
@@ -244,7 +244,7 @@ class WindowsPlatformAdapterTest {
                 TunSessionConfig(
                     interfaceName = "requested-wg0",
                     addresses = listOf(" 10.10.10.2 /24 "),
-                    routes = listOf(" 10.20.0.0 /16 "),
+                    peerAllowedIps = listOf(" 10.20.0.0 /16 "),
                 ),
             )
 
@@ -306,7 +306,7 @@ class WindowsPlatformAdapterTest {
                 TunSessionConfig(
                     interfaceName = "requested-wg0",
                     addresses = listOf("10.10.10.2/24", "fd00::2/64"),
-                    routes = listOf("10.20.0.0/16"),
+                    peerAllowedIps = listOf("10.20.0.0/16"),
                     dns = DnsConfig(
                         searchDomains = listOf("corp.local"),
                         servers = listOf("1.1.1.1"),

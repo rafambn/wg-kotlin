@@ -224,7 +224,7 @@ pub fn build_and_filter_routes(
     let mut mgr = RouteManager::new().map_err(|e| format!("route manager: {e}"))?;
 
     let routes: Vec<Route> = config
-        .routes
+        .peer_allowed_ips
         .iter()
         .filter_map(|addr| {
             let (ip, _) = parse_proto_ip(addr)?;
@@ -233,7 +233,7 @@ pub fn build_and_filter_routes(
         .collect();
 
     let endpoint_routes: Vec<Route> = config
-        .endpoints
+        .peer_endpoints
         .iter()
         .filter_map(|addr| {
             let (ip, _) = parse_proto_ip(addr)?;
@@ -242,7 +242,7 @@ pub fn build_and_filter_routes(
         })
         .collect();
 
-    let endpoint_ips: Vec<StdIpAddr> = config.endpoints.iter().filter_map(|addr| parse_proto_ip(addr).map(|(ip, _)| ip)).collect();
+    let endpoint_ips: Vec<StdIpAddr> = config.peer_endpoints.iter().filter_map(|addr| parse_proto_ip(addr).map(|(ip, _)| ip)).collect();
     let filtered_routes: Vec<Route> = routes
         .iter()
         .filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination()))

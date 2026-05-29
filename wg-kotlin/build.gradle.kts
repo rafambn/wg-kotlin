@@ -34,7 +34,6 @@ kotlin {
             implementation(libs.ktor.client.cio)
             implementation(libs.ktor.client.websockets)
             implementation(libs.grpc.netty.shaded)
-            implementation(libs.koin.core)
         }
 
         jvmTest.dependencies {

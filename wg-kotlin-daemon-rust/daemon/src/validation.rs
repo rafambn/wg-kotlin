@@ -15,8 +15,8 @@ pub fn validate_config(config: &TunSessionConfig) -> Result<(), String> {
     validate_non_empty("addresses", &config.addresses)?;
     validate_ip_list("addresses", &config.addresses, true)?;
     validate_max_count("addresses", config.addresses.len(), MAX_ADDRESSES)?;
-    validate_ip_list("routes", &config.routes, true)?;
-    validate_max_count("routes", config.routes.len(), MAX_ROUTES)?;
+    validate_ip_list("peer_allowed_ips", &config.peer_allowed_ips, true)?;
+    validate_max_count("peer_allowed_ips", config.peer_allowed_ips.len(), MAX_ROUTES)?;
     if config.mtu != 0 {
         validate_mtu_for_addresses(config.mtu, &config.addresses)?;
     }

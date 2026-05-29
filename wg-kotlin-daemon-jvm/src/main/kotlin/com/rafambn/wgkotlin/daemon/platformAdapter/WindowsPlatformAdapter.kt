@@ -28,7 +28,7 @@ internal class WindowsPlatformAdapter(
             prefixLength = primaryAddress.prefixLength,
         ).openDevice()
         val addresses = normalizeCidrs(config.addresses)
-        val routes = normalizeCidrs(config.routes)
+        val routes = normalizeCidrs(config.peerAllowedIps)
         return try {
             val interfaceName = baseHandle.interfaceName
             val hasIpv4Address = addresses.any { address -> !isIpv6AddressLiteral(address) }

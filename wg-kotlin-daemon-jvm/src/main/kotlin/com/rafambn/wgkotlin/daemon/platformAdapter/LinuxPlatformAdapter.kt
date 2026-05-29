@@ -28,7 +28,7 @@ internal class LinuxPlatformAdapter(
             prefixLength = primaryAddress.prefixLength,
         ).openDevice()
         val addresses = normalizeCidrs(config.addresses)
-        val routes = normalizeCidrs(config.routes)
+        val routes = normalizeCidrs(config.peerAllowedIps)
         val routingDomains = config.dns.searchDomains
             .map { domain -> domain.trim() }
             .filter { domain -> domain.isNotBlank() }
@@ -40,7 +40,7 @@ internal class LinuxPlatformAdapter(
             .filter { server -> server.isNotBlank() }
             .distinct()
         val hasDnsConfiguration = routingDomains.isNotEmpty() && dnsServers.isNotEmpty()
-        val endpointRoutes = resolveEndpointRoutes(config.endpoints)
+        val endpointRoutes = resolveEndpointRoutes(config.peerEndpoints)
         val endpointIps = endpointRoutes.map { (endpoint, _) -> endpoint }.toSet()
         val filteredRoutes = routes.filter { route ->
             route.substringBefore("/") !in endpointIps

@@ -38,7 +38,7 @@ internal object DaemonPayloadValidator {
     fun validate(config: TunSessionConfig) {
         validateInterfaceName(config.interfaceName)
         validateAddresses(config.addresses)
-        validateRoutes(config.routes)
+        validatePeerAllowedIps(config.peerAllowedIps)
         config.mtu?.let { mtu -> validateMtuForAddresses(mtu, config.addresses) }
         validateDns(config.dns)
     }
@@ -88,9 +88,9 @@ internal object DaemonPayloadValidator {
         }
     }
 
-    fun validateRoutes(routes: List<String>) {
-        validateMaxCount(fieldName = "routes", count = routes.size, max = MAX_ROUTES)
-        validateCidrs(fieldName = "routes", values = routes)
+    fun validatePeerAllowedIps(peerAllowedIps: List<String>) {
+        validateMaxCount(fieldName = "peerAllowedIps", count = peerAllowedIps.size, max = MAX_ROUTES)
+        validateCidrs(fieldName = "peerAllowedIps", values = peerAllowedIps)
     }
 
     private fun validateCidrs(fieldName: String, values: List<String>) {

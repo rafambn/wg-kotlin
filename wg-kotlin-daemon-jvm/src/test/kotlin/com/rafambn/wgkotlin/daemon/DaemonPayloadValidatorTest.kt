@@ -38,14 +38,14 @@ class DaemonPayloadValidatorTest {
     @Test
     fun validateAddressesAndRoutesAcceptIpv6Cidrs() {
         DaemonPayloadValidator.validateAddresses(listOf("fd00::1/128"))
-        DaemonPayloadValidator.validateRoutes(listOf("::/0"))
+        DaemonPayloadValidator.validatePeerAllowedIps(listOf("::/0"))
     }
 
     @Test
-    fun validateRoutesRejectsAboveMaxEntries() {
+    fun validatePeerAllowedIpsRejectsAboveMaxEntries() {
         val routes = List(257) { index -> "10.10.${index / 256}.${index % 256}/32" }
         assertFailsWith<PayloadValidationException> {
-            DaemonPayloadValidator.validateRoutes(routes)
+            DaemonPayloadValidator.validatePeerAllowedIps(routes)
         }
     }
 

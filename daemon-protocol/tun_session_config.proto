@@ -12,7 +12,7 @@ message TunSessionConfig {
     string interface_name = 1;
     int32 mtu = 2;
     repeated IpAddr addresses = 3;
-    repeated IpAddr routes = 4;
-    repeated IpAddr endpoints = 5;
+    repeated IpAddr peer_allowed_ips = 4;
+    repeated IpAddr peer_endpoints = 5;
     DnsConfig dns = 6;
 }

@@ -14,7 +14,6 @@ class JvmInterfaceManager(
     override fun isRunning(): Boolean = activeBridge != null
 
     override fun start(config: VpnConfiguration, onFailure: (Throwable) -> Unit) {
-        requireValidConfiguration(config)
         stop()
 
         val bridge = sessionBridge.openSession(
@@ -29,7 +28,7 @@ class JvmInterfaceManager(
         )
 
         activeBridge = bridge
-        currentConfig = config.copy(addresses = config.addresses.toMutableList())
+        currentConfig = config
     }
 
     override fun stop() {

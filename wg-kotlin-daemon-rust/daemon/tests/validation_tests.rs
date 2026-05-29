@@ -48,7 +48,7 @@ fn accepts_valid_complete_config() {
     let config = TunSessionConfig {
         interface_name: "utun0".to_string(),
         addresses: vec![ipv4(&[10, 0, 0, 1], Some(24))],
-        routes: vec![ipv4(&[0, 0, 0, 0], Some(0))],
+        peer_allowed_ips: vec![ipv4(&[0, 0, 0, 0], Some(0))],
         dns: Some(DnsConfig { search_domains: vec!["corp.local".to_string()], servers: vec![ipv4(&[1, 1, 1, 1], None)] }),
         ..Default::default()
     };

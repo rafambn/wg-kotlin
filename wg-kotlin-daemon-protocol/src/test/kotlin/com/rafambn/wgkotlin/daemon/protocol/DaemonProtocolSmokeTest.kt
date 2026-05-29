@@ -34,7 +34,7 @@ class DaemonProtocolSmokeTest {
             interfaceName = "utun42",
             mtu = 1420,
             addresses = listOf("10.20.30.40/32", "fd00::1/128"),
-            routes = listOf("0.0.0.0/0", "::/0"),
+            peerAllowedIps = listOf("0.0.0.0/0", "::/0"),
             dns = DnsConfig(
                 searchDomains = listOf("corp.local"),
                 servers = listOf("1.1.1.1"),

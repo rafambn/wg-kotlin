@@ -3,7 +3,6 @@ package com.rafambn.wgkotlin.util
 import com.rafambn.wgkotlin.daemon.proto.Cidr
 import com.rafambn.wgkotlin.daemon.proto.Ip
 import com.rafambn.wgkotlin.daemon.proto.invoke
-import kotlinx.io.bytestring.ByteString
 
 
 // "1.2.3.4" -> "1.2.3.4"

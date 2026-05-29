@@ -5,9 +5,6 @@ import io.ktor.network.sockets.BoundDatagramSocket
 import io.ktor.network.sockets.Datagram
 import io.ktor.network.sockets.InetSocketAddress
 import io.ktor.network.sockets.SocketAddress
-import io.ktor.network.sockets.port
-import io.ktor.network.sockets.toJavaAddress
-import io.ktor.util.network.address
 import io.ktor.utils.io.core.buildPacket
 import io.ktor.utils.io.core.writeFully
 import kotlinx.coroutines.withTimeoutOrNull

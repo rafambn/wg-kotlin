@@ -1,6 +1,6 @@
 package com.rafambn.wgkotlin.network.io
 
-import com.rafambn.wgkotlin.util.resolveEndpointAddress
+import com.rafambn.wgkotlin.util.resolveToIpString
 import io.ktor.network.sockets.BoundDatagramSocket
 import io.ktor.network.sockets.Datagram
 import io.ktor.network.sockets.InetSocketAddress
@@ -53,7 +53,7 @@ private fun SocketAddress.toUdpEndpoint(): UdpEndpoint {
     val address = if (raw.isIpLiteral()) {
         raw
     } else {
-        resolveEndpointAddress(raw)
+        raw.resolveToIpString()
     }
     return UdpEndpoint(
         address = address,

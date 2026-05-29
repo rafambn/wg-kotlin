@@ -3,7 +3,7 @@ package com.rafambn.wgkotlin.util
 import com.rafambn.wgkotlin.daemon.proto.Ip
 import java.net.InetAddress
 
-internal actual fun resolveEndpointAddress(address: String): String = InetAddress.getByName(address).hostAddress
+internal actual fun String.resolveToIpString(): String = InetAddress.getByName(this).hostAddress
 
-internal actual fun resolveEndpointAddressToBytes(address: String): Ip =
-    parsePacketDestination(InetAddress.getByName(address).address)
+internal actual fun String.resolveToIp(): Ip =
+    parsePacketDestination(InetAddress.getByName(this).address)

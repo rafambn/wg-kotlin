@@ -75,6 +75,7 @@ internal fun Ip.toPlainString(): String {
 // Cidr -> "10.0.0.1/24" / "fd00::1/64"
 internal fun Cidr.toCidrString(): String = "${ip.toPlainString()}/$prefix"
 
+// extracts the destination IP from a raw IPv4/IPv6 packet header
 internal fun parsePacketDestination(packet: ByteArray): Ip {
     if (packet.isEmpty()) error("packet is empty")
 
@@ -93,6 +94,8 @@ internal fun parsePacketDestination(packet: ByteArray): Ip {
 
 }
 
+// "10.0.0.0/8" matches "10.0.0.1" -> true
+// "10.0.0.0/8" matches "11.0.0.1" -> false
 internal fun Cidr.matches(destination: Ip): Boolean {
     val cidrBytes = ip.ipBytes() ?: return false
     val prefixLen = prefix.toInt()
@@ -110,6 +113,8 @@ internal fun Cidr.matches(destination: Ip): Boolean {
     return (cidrBytes[fullBytes].toInt() and mask) == (dstBytes[fullBytes].toInt() and mask)
 }
 
+// "10.0.0.0/24" -> "v4/24:0a000000"
+// "fd00::1/64" -> "v6/64:fd000000000000000000000000000000"
 internal fun Cidr.normalizedKey(): String {
     val ipBytes = ip.ipBytes() ?: error("Cidr without ip")
     val prefixLen = prefix.toInt()
@@ -130,12 +135,14 @@ internal fun Cidr.normalizedKey(): String {
     }
 }
 
+// Ip -> raw bytes, null if unset
 internal fun Ip.ipBytes(): ByteArray? = when (value) {
     is Ip.Value.V4 -> (value as Ip.Value.V4).value.toByteArray()
     is Ip.Value.V6 -> (value as Ip.Value.V6).value.toByteArray()
     else -> null
 }
 
+// zeroes out bits beyond the network prefix
 private fun normalizeNetworkBytes(bytes: ByteArray, prefixLength: Int): ByteArray {
     val normalized = bytes.copyOf()
     val fullBytes = prefixLength / 8

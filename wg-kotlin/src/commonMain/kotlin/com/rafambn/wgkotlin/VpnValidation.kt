@@ -15,14 +15,16 @@ internal fun requireUserspacePeerEndpoints(peers: List<ParsedVpnPeer>) {
 }
 
 internal fun requireDistinctAllowedIpOwnership(peers: List<ParsedVpnPeer>) {
-    val ownershipByNetwork: MutableMap<String, String> = linkedMapOf()
-
-    peers.forEach { peer ->
-        peer.allowedIps.forEach { allowedIp ->
+    val seen = mutableMapOf<String, String>()
+    for (peer in peers) {
+        for (allowedIp in peer.allowedIps) {
             val key = allowedIp.normalizedKey()
-            val previousOwner = ownershipByNetwork.putIfAbsent(key, peer.publicKey)
-            require(previousOwner == null || previousOwner == peer.publicKey) {
-                "Allowed IP `${allowedIp.toCidrString()}` overlaps ambiguously between peers `$previousOwner` and `${peer.publicKey}`"
+            val previous = seen.put(key, peer.publicKey)
+            if (previous != null && previous != peer.publicKey) {
+                error(
+                    "Allowed IP `${allowedIp.toCidrString()}` overlaps between " +
+                        "`$previous` and `${peer.publicKey}`"
+                )
             }
         }
     }

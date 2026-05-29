@@ -238,7 +238,8 @@ pub fn build_and_filter_routes(
         .filter_map(|addr| {
             let ip = parse_proto_ip(addr)?;
             let found = mgr.find_route(&ip).ok()??;
-            Some(found.with_if_name(interface_name.to_string()))
+            let prefix = found.prefix();
+            Some(Route::new(ip, prefix).with_if_name(interface_name.to_string()))
         })
         .collect();
 

@@ -3,9 +3,6 @@ name: Build and Test
 on:
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -17,7 +14,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -73,7 +70,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -84,7 +81,7 @@ jobs:
         run: cargo build --manifest-path wg-kotlin-daemon-rust/daemon/Cargo.toml --release --target ${{ matrix.target }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ matrix.artifact-name }}
           path: wg-kotlin-daemon-rust/target/${{ matrix.target }}/release/wg-kotlin-daemon${{ matrix.binary-suffix }}

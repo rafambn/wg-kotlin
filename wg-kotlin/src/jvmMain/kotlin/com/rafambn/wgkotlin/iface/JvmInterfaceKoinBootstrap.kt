@@ -11,7 +11,7 @@ import java.net.InetAddress
 
 internal object JvmInterfaceKoinBootstrap {
     private val baseModule: Module = module {
-        factory<InterfaceCommandExecutor> {
+        factory<SessionBridge> {
             val hostStr = System.getProperty(JvmInterfaceProperties.DAEMON_HOST, JvmInterfaceProperties.DEFAULT_DAEMON_HOST)
             val addr = InetAddress.getByName(hostStr)
             DaemonSessionBridge(
@@ -26,7 +26,7 @@ internal object JvmInterfaceKoinBootstrap {
 
         factory<InterfaceManager> { params ->
             val tunPipe = params.get<DuplexChannelPipe<ByteArray>>()
-            JvmInterfaceManager(commandExecutor = get(), tunPipe = tunPipe)
+            JvmInterfaceManager(sessionBridge = get(), tunPipe = tunPipe)
         }
     }
 

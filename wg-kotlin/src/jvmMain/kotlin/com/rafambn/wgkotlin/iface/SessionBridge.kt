@@ -3,7 +3,7 @@ package com.rafambn.wgkotlin.iface
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 
-interface InterfaceCommandExecutor {
+interface SessionBridge {
     fun openSession(
         config: TunSessionConfig,
         pipe: DuplexChannelPipe<ByteArray>,

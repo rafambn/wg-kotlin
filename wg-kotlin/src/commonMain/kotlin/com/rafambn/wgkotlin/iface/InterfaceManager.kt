@@ -9,7 +9,5 @@ interface InterfaceManager {
 
     fun stop()
 
-    fun reconfigure(config: VpnConfiguration)
-
     fun information(): VpnInterfaceInformation?
 }

@@ -5,7 +5,7 @@ import com.rafambn.wgkotlin.requireValidConfiguration
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 
 class JvmInterfaceManager(
-    private val commandExecutor: InterfaceCommandExecutor,
+    private val sessionBridge: SessionBridge,
     private val tunPipe: DuplexChannelPipe<ByteArray>,
 ) : InterfaceManager {
     private var currentConfig: VpnConfiguration? = null
@@ -17,7 +17,7 @@ class JvmInterfaceManager(
         requireValidConfiguration(config)
         stop()
 
-        val bridge = commandExecutor.openSession(
+        val bridge = sessionBridge.openSession(
             config = config.toTunSessionConfig(),
             pipe = tunPipe,
             onFailure = { throwable ->
@@ -36,11 +36,6 @@ class JvmInterfaceManager(
         runCatching { activeBridge?.close() }
         activeBridge = null
         currentConfig = null
-    }
-
-    override fun reconfigure(config: VpnConfiguration) {
-        stop()
-        start(config)
     }
 
     override fun information(): VpnInterfaceInformation? {

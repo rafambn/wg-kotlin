@@ -35,6 +35,3 @@ dependencyResolutionManagement {
 }
 include(":wg-kotlin")
 include(":wg-kotlin-uniffi-boringtun")
-include(":wg-kotlin-uniffi-tun-rs")
-include(":wg-kotlin-daemon-protocol")
-include(":wg-kotlin-daemon-jvm")

@@ -4,11 +4,7 @@
 `wg-kotlin` (WireGuard Kotlin) is a multi-module Gradle project for a Kotlin Multiplatform WireGuard implementation.
 
 - `wg-kotlin/`: core Kotlin Multiplatform library. Kotlin lives under `src/commonMain`, `src/jvmMain`, `src/commonTest`, and `src/jvmTest`. Rust sources live in `src/commonMain/rust`.
-- `wg-kotlin-daemon-protocol/`: shared daemon RPC models and transport contracts.
-- `wg-kotlin-daemon-jvm/`: privileged JVM daemon executable.
 - `docs/`: repository notes and design scratch files.
-
-Keep module boundaries intact: `:wg-kotlin` must not depend on `:wg-kotlin-daemon-jvm`; daemon modules communicate through `:wg-kotlin-daemon-protocol`.
 
 ## Daemon Platform Policy
 - Daemon sessions intentionally accept only interface names matching `utun[0-9]+`, even on Linux and Windows, to keep cross-platform behavior consistent.
@@ -18,7 +14,6 @@ Keep module boundaries intact: `:wg-kotlin` must not depend on `:wg-kotlin-daemo
 ## Build, Test, and Development Commands
 - `./gradlew build`: compile all modules and run their default verification tasks.
 - `./gradlew :wg-kotlin:check`: run core module compilation and tests.
-- `./gradlew :wg-kotlin-daemon-jvm:test`: run daemon JVM tests only.
 - `cargo test --manifest-path wg-kotlin/Cargo.toml`: run Rust tests when changing the embedded Rust library directly.
 
 Use JDK 17 for Gradle builds.

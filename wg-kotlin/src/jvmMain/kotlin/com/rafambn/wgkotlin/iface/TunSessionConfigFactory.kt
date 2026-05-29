@@ -9,7 +9,7 @@ import com.rafambn.wgkotlin.network.resolveEndpointAddress
 import kotlinx.io.bytestring.ByteString
 import java.net.InetAddress
 
-internal fun VpnConfiguration.toTunSessionConfig(): TunSessionConfig {
+internal actual fun VpnConfiguration.toTunSessionConfig(): TunSessionConfig {
     val routes = peers
         .flatMap { peer -> peer.allowedIps }
         .filter { route -> route.isNotBlank() }

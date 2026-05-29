@@ -1,7 +1,5 @@
 package com.rafambn.wgkotlin.util
 
-import com.rafambn.wgkotlin.daemon.proto.IpAddr
-
 internal sealed interface ParsedIpAddress {
     val bytes: ByteArray
     val maxPrefixLength: Int
@@ -230,13 +228,3 @@ private fun normalizeNetworkBytes(
     return normalized
 }
 
-internal fun IpAddr.Ip.toAddressString(): String = when (this) {
-    is IpAddr.Ip.V4 -> value.toByteArray().joinToString(".") { (it.toInt() and 0xff).toString() }
-    is IpAddr.Ip.V6 -> {
-        val raw = value.toByteArray()
-        val segments = raw.toList().chunked(2).map { (hi, lo) ->
-            (hi.toInt().and(0xff).shl(8) or lo.toInt().and(0xff)).toString(16)
-        }
-        "[${segments.joinToString(":")}]"
-    }
-}

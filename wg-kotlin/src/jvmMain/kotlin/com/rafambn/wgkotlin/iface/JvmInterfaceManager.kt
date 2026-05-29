@@ -1,23 +1,25 @@
 package com.rafambn.wgkotlin.iface
 
-import com.rafambn.wgkotlin.VpnConfiguration
-import com.rafambn.wgkotlin.requireValidConfiguration
+import com.rafambn.wgkotlin.DnsConfig
+import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
+import com.rafambn.wgkotlin.util.toCidrString
+import com.rafambn.wgkotlin.util.toPlainString
 
 class JvmInterfaceManager(
     private val sessionBridge: SessionBridge,
     private val tunPipe: DuplexChannelPipe<ByteArray>,
 ) : InterfaceManager {
-    private var currentConfig: VpnConfiguration? = null
+    private var currentConfig: TunSessionConfig? = null
     private var activeBridge: AutoCloseable? = null
 
     override fun isRunning(): Boolean = activeBridge != null
 
-    override fun start(config: VpnConfiguration, onFailure: (Throwable) -> Unit) {
+    override fun start(config: TunSessionConfig, onFailure: (Throwable) -> Unit) {
         stop()
 
         val bridge = sessionBridge.openSession(
-            config = config.toTunSessionConfig(),
+            config = config,
             pipe = tunPipe,
             onFailure = { throwable ->
                 runCatching { activeBridge?.close() }
@@ -42,10 +44,12 @@ class JvmInterfaceManager(
         return VpnInterfaceInformation(
             interfaceName = config.interfaceName,
             isUp = isRunning(),
-            addresses = config.addresses.toList(),
-            dns = config.dns,
-            mtu = config.mtu,
-            listenPort = config.listenPort,
+            addresses = config.addresses.map { it.toCidrString() },
+            dns = DnsConfig(
+                searchDomains = config.dns.searchDomains,
+                servers = config.dns.servers.map { it.toPlainString() },
+            ),
+            mtu = if (config.mtu == 0) null else config.mtu,
         )
     }
 }

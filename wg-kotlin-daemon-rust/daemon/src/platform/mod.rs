@@ -242,7 +242,7 @@ pub fn build_and_filter_routes(
         })
         .collect();
 
-    let endpoint_ips: Vec<StdIpAddr> = config.peer_endpoints.iter().filter_map(|addr| parse_proto_ip(addr)).collect();
+    let endpoint_ips: Vec<StdIpAddr> = config.peer_endpoints.iter().filter_map(parse_proto_ip).collect();
     let filtered_routes: Vec<Route> = routes
         .iter()
         .filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination()))

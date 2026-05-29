@@ -50,7 +50,7 @@ impl SessionManager {
 
         #[cfg(target_os = "windows")]
         if let Some(path) = WINTUN_DLL_PATH.get() {
-            builder = builder.wintun_file(path);
+            builder = builder.wintun_file(path.clone());
         }
 
         let device = builder.build_sync().map_err(|error| format!("failed to create TUN device: {error}"))?;

@@ -7,7 +7,7 @@ gobley = "0.3.7"
 kotlinx-coroutines = "1.10.2"
 kotlinx-rpc-grpc = "0.11.0-grpc-188"
 ktor = "3.4.1"
-grpc = "1.75.0"
+grpc = "1.80.0"
 protobuf-gradle-plugin = "0.9.5"
 
 [libraries]

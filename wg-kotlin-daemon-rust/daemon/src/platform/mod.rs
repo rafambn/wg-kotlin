@@ -313,4 +313,4 @@ pub fn into_cleanup_hook(
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
 const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(25);
-const MAX_COMMAND_OUTPUT_BYTES: usize = 1 * 1024 * 1024;
+const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;

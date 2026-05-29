@@ -56,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::new(bind_ip, cli.port);
 
     let grpc_svc = DaemonServer::new(grpc_service);
-    let fallback = grpc_svc.map_request(|req: axum::extract::Request| req.map(|b| tonic::body::Body::new(b)));
+    let fallback = grpc_svc.map_request(|req: axum::extract::Request| req.map(tonic::body::Body::new));
 
     let app = Router::new().route("/version", get(version_handler)).fallback_service(fallback);
 

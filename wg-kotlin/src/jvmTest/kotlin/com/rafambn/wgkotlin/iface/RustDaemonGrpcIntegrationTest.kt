@@ -49,7 +49,7 @@ class RustDaemonGrpcIntegrationTest {
             waitForPort("127.0.0.1", port)
 
             val (clientPipe, _) = DuplexChannelPipe.create<ByteArray>()
-            val executor = DaemonSessionBridge(host = Ip.Value.V4(ByteString(InetAddress.getByName("127.0.0.1").address)), port = port)
+            val executor = DaemonSessionBridge(host = Ip { value = Ip.Value.V4(ByteString(InetAddress.getByName("127.0.0.1").address)) }, port = port)
 
             val failure = assertFailsWith<IllegalStateException> {
                 executor.openSession(

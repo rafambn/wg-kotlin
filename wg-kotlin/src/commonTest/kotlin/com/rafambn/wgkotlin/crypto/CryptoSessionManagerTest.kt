@@ -6,7 +6,7 @@ import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.network.io.UdpEndpoint
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
-import com.rafambn.wgkotlin.util.toBareIp
+import com.rafambn.wgkotlin.util.resolveToIp
 import com.rafambn.wgkotlin.util.toCidr
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -54,7 +54,7 @@ class CryptoSessionManagerTest {
             configurationWithParsedPeer(
                 ParsedVpnPeer(
                     publicKey = "peer-a",
-                    endpointAddress = "10.0.0.1".toBareIp(),
+                    endpointAddress = "10.0.0.1".resolveToIp(),
                     endpointPort = 51820,
                 ),
             ),
@@ -64,7 +64,7 @@ class CryptoSessionManagerTest {
             configurationWithParsedPeer(
                 ParsedVpnPeer(
                     publicKey = "peer-a",
-                    endpointAddress = "10.0.0.2".toBareIp(),
+                    endpointAddress = "10.0.0.2".resolveToIp(),
                     endpointPort = 51821,
                 ),
             ),
@@ -150,7 +150,7 @@ class CryptoSessionManagerTest {
             peers = peerKeys.mapIndexed { index, key ->
                 ParsedVpnPeer(
                     publicKey = key,
-                    endpointAddress = "198.51.100.${index + 1}".toBareIp(),
+                    endpointAddress = "198.51.100.${index + 1}".resolveToIp(),
                     endpointPort = 51820 + index,
                 )
             },
@@ -218,7 +218,7 @@ class CryptoSessionManagerTest {
             configurationWithParsedPeer(
                 ParsedVpnPeer(
                     publicKey = "peer-a",
-                    endpointAddress = "198.51.100.1".toBareIp(),
+                    endpointAddress = "198.51.100.1".resolveToIp(),
                     endpointPort = 51820,
                     allowedIps = listOf("0.0.0.0/0".toCidr()),
                 ),
@@ -251,7 +251,7 @@ class CryptoSessionManagerTest {
             configurationWithParsedPeer(
                 ParsedVpnPeer(
                     publicKey = "peer-a",
-                    endpointAddress = "198.51.100.1".toBareIp(),
+                    endpointAddress = "198.51.100.1".resolveToIp(),
                     endpointPort = 51820,
                     allowedIps = listOf("0.0.0.0/0".toCidr()),
                 ),
@@ -288,7 +288,7 @@ class CryptoSessionManagerTest {
             configurationWithParsedPeer(
                 ParsedVpnPeer(
                     publicKey = "peer-a",
-                    endpointAddress = "198.51.100.1".toBareIp(),
+                    endpointAddress = "198.51.100.1".resolveToIp(),
                     endpointPort = 51820,
                     allowedIps = listOf("0.0.0.0/0".toCidr()),
                 ),
@@ -326,7 +326,7 @@ class CryptoSessionManagerTest {
             configurationWithParsedPeer(
                 ParsedVpnPeer(
                     publicKey = "peer-a",
-                    endpointAddress = "198.51.100.1".toBareIp(),
+                    endpointAddress = "198.51.100.1".resolveToIp(),
                     endpointPort = 51820,
                     allowedIps = listOf("0.0.0.0/0".toCidr()),
                 ),

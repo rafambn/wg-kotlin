@@ -26,7 +26,7 @@ import kotlinx.rpc.withService
 import kotlin.time.Duration.Companion.milliseconds
 
 class DaemonSessionBridge(
-    private val host: Ip.Value,
+    private val host: Ip,
     private val port: Int,
 ) : SessionBridge {
 

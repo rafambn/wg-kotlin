@@ -10,6 +10,7 @@ import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.util.toAddressString
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,8 +19,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.bytestring.ByteString
 import kotlinx.rpc.grpc.client.GrpcClient
 import kotlinx.rpc.withService
@@ -31,7 +34,7 @@ class DaemonSessionBridge(
     private val port: Int,
 ) : SessionBridge {
 
-    override fun openSession(
+    override suspend fun openSession(
         config: TunSessionConfig,
         pipe: DuplexChannelPipe<ByteArray>,
         onFailure: (Throwable) -> Unit,
@@ -48,6 +51,13 @@ class DaemonSessionBridge(
         val scope = CoroutineScope(
             SupervisorJob() + Dispatchers.IO + CoroutineName("wg-kotlin-packet-rpc-bridge"),
         )
+        val readiness = CompletableDeferred<Unit>()
+
+        fun reportFailure(throwable: Throwable) {
+            if (!readiness.completeExceptionally(throwable)) {
+                onFailure(throwable)
+            }
+        }
 
         scope.launch {
             try {
@@ -68,13 +78,15 @@ class DaemonSessionBridge(
                     when (val payload = response.payload) {
                         is ServerMessage.Payload.IncomingPacket -> pipe.send(payload.value.data.toByteArray())
                         is ServerMessage.Payload.Error -> throw IllegalStateException("Daemon session failed (${payload.value.code}): ${payload.value.message}")
-                        is ServerMessage.Payload.Started -> { }
+                        is ServerMessage.Payload.Started -> readiness.complete(Unit)
                         null -> throw IllegalStateException("Daemon returned empty session message payload")
                     }
                 }
-            } catch (_: CancellationException) {
+                throw IllegalStateException("Daemon session ended")
+            } catch (throwable: CancellationException) {
+                if (scope.isActive) reportFailure(throwable)
             } catch (throwable: Throwable) {
-                onFailure(throwable)
+                reportFailure(throwable)
             }
         }
 
@@ -83,22 +95,32 @@ class DaemonSessionBridge(
                 while (true) {
                     outgoingPackets.send(pipe.receive())
                 }
-            } catch (_: CancellationException) {
+            } catch (throwable: CancellationException) {
+                if (scope.isActive) reportFailure(throwable)
             } catch (throwable: Throwable) {
-                onFailure(throwable)
+                reportFailure(throwable)
             }
         }
 
-        return AutoCloseable {
+        val session = AutoCloseable {
             outgoingPackets.close()
             scope.cancel()
             grpcClient.shutdownNow()
             runCatching { runBlocking { grpcClient.awaitTermination(CLOSE_TIMEOUT_MILLIS.milliseconds) } }
         }
+
+        return try {
+            withTimeout(START_TIMEOUT_MILLIS.milliseconds) { readiness.await() }
+            session
+        } catch (throwable: Throwable) {
+            session.close()
+            throw throwable
+        }
     }
 
     private companion object {
         const val CLOSE_TIMEOUT_MILLIS: Long = 5_000
+        const val START_TIMEOUT_MILLIS: Long = 30_000
     }
 }
 

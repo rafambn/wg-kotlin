@@ -79,6 +79,7 @@ internal fun ParsedVpnConfiguration.toTunSessionConfig(): TunSessionConfig {
         addresses = this@toTunSessionConfig.addresses
         this.peerAllowedIps = routes
         dns = ProtoDnsConfig {
+            searchDomains = this@toTunSessionConfig.dns.searchDomains
             servers = this@toTunSessionConfig.dns.servers
         }
         this.peerEndpoints = endpoints

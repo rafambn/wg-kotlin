@@ -54,12 +54,7 @@ pub fn create_daemon_scribe(log_path: &Path) -> anyhow::Result<Scribe> {
 }
 
 fn normalized_os() -> &'static str {
-    match std::env::consts::OS {
-        "windows" => "windows",
-        "macos" => "macos",
-        "linux" => "linux",
-        _ => std::env::consts::OS,
-    }
+    std::env::consts::OS
 }
 
 fn normalized_arch() -> &'static str {

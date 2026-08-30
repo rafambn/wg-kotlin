@@ -2,10 +2,10 @@ use crate::ip_util::parse_proto_cidr;
 use crate::platform::{self, CleanupHook};
 use daemon_proto::pb::TunSessionConfig;
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
 #[cfg(target_os = "windows")]
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use tun_rs::{DeviceBuilder, InterruptEvent, SyncDevice};
 
 #[cfg(target_os = "windows")]

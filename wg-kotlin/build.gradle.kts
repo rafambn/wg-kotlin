@@ -18,7 +18,7 @@ kotlin {
             implementation(libs.ktor.network)
             implementation(libs.ktor.io)
             implementation(libs.kotlinx.rpc.grpc.core)
-            implementation(libs.kotlinx.rpc.protobuf.core)
+            implementation(libs.kotlinx.rpc.protobuf)
         }
 
         commonTest.dependencies {

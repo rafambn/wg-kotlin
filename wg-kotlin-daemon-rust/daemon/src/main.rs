@@ -1,9 +1,9 @@
 use anyhow::{Context, bail};
 use axum::{Router, response::IntoResponse, routing::get};
 use clap::Parser;
-use daemon::{logging, platform, server};
 #[cfg(target_os = "windows")]
 use daemon::session;
+use daemon::{logging, platform, server};
 use daemon_proto::pb::daemon_server::DaemonServer;
 use serde_json::Value;
 use server::DaemonGrpcService;

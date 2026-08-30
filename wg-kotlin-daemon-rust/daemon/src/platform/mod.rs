@@ -217,10 +217,7 @@ fn read_capped<R: Read>(mut reader: R, max_bytes: usize) -> std::io::Result<Vec<
     Ok(output)
 }
 
-pub fn build_and_filter_routes(
-    config: &TunSessionConfig,
-    interface_name: &str,
-) -> Result<(RouteManager, Vec<Route>, Vec<Route>), String> {
+pub fn build_and_filter_routes(config: &TunSessionConfig, interface_name: &str) -> Result<(RouteManager, Vec<Route>, Vec<Route>), String> {
     let mut mgr = RouteManager::new().map_err(|e| format!("route manager: {e}"))?;
 
     let routes: Vec<Route> = config
@@ -237,24 +234,20 @@ pub fn build_and_filter_routes(
         .iter()
         .filter_map(|addr| {
             let ip = parse_proto_ip(addr)?;
-            let found = mgr.find_route(&ip).ok()??;
+            let _found = mgr.find_route(&ip).ok()??;
             let host_prefix = if ip.is_ipv4() { 32u8 } else { 128u8 };
             #[allow(unused_mut)]
             let mut route = Route::new(ip, host_prefix).with_if_name(interface_name.to_string());
             #[cfg(target_os = "linux")]
             {
-                route = route.with_table(found.table());
+                route = route.with_table(_found.table());
             }
             Some(route)
         })
         .collect();
 
     let endpoint_ips: Vec<StdIpAddr> = config.peer_endpoints.iter().filter_map(parse_proto_ip).collect();
-    let filtered_routes: Vec<Route> = routes
-        .iter()
-        .filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination()))
-        .cloned()
-        .collect();
+    let filtered_routes: Vec<Route> = routes.iter().filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination())).cloned().collect();
 
     Ok((mgr, filtered_routes, endpoint_routes))
 }
@@ -309,12 +302,10 @@ pub fn into_cleanup_hook(
     let cleanup_interface = interface_name.clone();
     match setup_result {
         Ok(()) => Ok(Box::new(move || cleanup_routes(&filtered_routes, &endpoint_routes, || dns_teardown(&cleanup_interface)))),
-        Err(setup_error) => {
-            match cleanup_routes(&filtered_routes, &endpoint_routes, || dns_teardown(&interface_name)) {
-                Ok(()) => Err(setup_error),
-                Err(cleanup_error) => Err(format!("{setup_error}; cleanup failed: {cleanup_error}")),
-            }
-        }
+        Err(setup_error) => match cleanup_routes(&filtered_routes, &endpoint_routes, || dns_teardown(&interface_name)) {
+            Ok(()) => Err(setup_error),
+            Err(cleanup_error) => Err(format!("{setup_error}; cleanup failed: {cleanup_error}")),
+        },
     }
 }
 

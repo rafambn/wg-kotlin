@@ -3,12 +3,18 @@
 <p align="center">A Kotlin Multiplatform WireGuard runtime backed by BoringTun and a native Rust daemon.</p>
 
 <p align="center">
-  <a href="https://github.com/rafambn/wg-kotlin/actions/workflows/build-and-test.yml">
-    <img alt="Build and Test" src="https://github.com/rafambn/wg-kotlin/actions/workflows/build-and-test.yml/badge.svg">
-  </a>
+  <img src="wg-kotlin-logo.svg" alt="WG-Kotlin logo" width="180" height="180">
+</p>
+
+<p align="center">
+  <a href="https://github.com/rafambn/wg-kotlin/actions/workflows/build-and-test.yml"><img alt="Build and Test" src="https://github.com/rafambn/wg-kotlin/actions/workflows/build-and-test.yml/badge.svg"></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.4.5-0A7EA4">
   <img alt="Platform Targets" src="https://img.shields.io/badge/targets-jvm-0A7EA4">
   <img alt="Daemon Targets" src="https://img.shields.io/badge/daemon-linux%20%7C%20macos%20%7C%20windows-0A7EA4">
+</p>
+
+<p align="center">
+  <img alt="Repository views" src="https://profile.rafambn.com/badge/rafambn/wg-kotlin.svg">
 </p>
 
 <p align="center">

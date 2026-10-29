@@ -1,6 +1,5 @@
 use crate::platform::{
-    add_routes_with_predelete, build_and_filter_routes, into_cleanup_hook, CleanupHook,
-    ips_to_args, normalize_domains, run_command,
+    CleanupHook, add_routes_with_predelete, build_and_filter_routes, into_cleanup_hook, ips_to_args, normalize_domains, run_command,
 };
 use daemon_proto::pb::TunSessionConfig;
 

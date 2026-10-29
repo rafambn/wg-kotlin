@@ -1,14 +1,14 @@
 [versions]
 
-kotlin = "2.3.20"
-atomicfu = "2.3.10"
-maven-publish = "0.36.0"
+kotlin = "2.4.10"
+atomicfu = "2.4.10"
+maven-publish = "0.37.0"
 gobley = "0.3.7"
-kotlinx-coroutines = "1.10.2"
-kotlinx-rpc-grpc = "0.11.0-grpc-188"
-ktor = "3.4.1"
-grpc = "1.80.0"
-protobuf-gradle-plugin = "0.9.5"
+kotlinx-coroutines = "1.11.0"
+kotlinx-rpc-grpc = "0.11.0-grpc-189"
+ktor = "3.5.2"
+grpc = "1.83.1"
+protobuf-gradle-plugin = "0.10.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
@@ -21,7 +21,7 @@ ktor-network = { module = "io.ktor:ktor-network", version.ref = "ktor" }
 ktor-io = { module = "io.ktor:ktor-io", version.ref = "ktor" }
 kotlinx-rpc-grpc-core = { module = "org.jetbrains.kotlinx:kotlinx-rpc-grpc-core", version.ref = "kotlinx-rpc-grpc" }
 kotlinx-rpc-grpc-client = { module = "org.jetbrains.kotlinx:kotlinx-rpc-grpc-client", version.ref = "kotlinx-rpc-grpc" }
-kotlinx-rpc-protobuf-core = { module = "org.jetbrains.kotlinx:kotlinx-rpc-protobuf-core", version.ref = "kotlinx-rpc-grpc" }
+kotlinx-rpc-protobuf = { module = "org.jetbrains.kotlinx:kotlinx-rpc-protobuf", version.ref = "kotlinx-rpc-grpc" }
 kotlinx-rpc-grpc-krpc-client = { module = "org.jetbrains.kotlinx:kotlinx-rpc-krpc-client", version.ref = "kotlinx-rpc-grpc" }
 kotlinx-rpc-grpc-krpc-server = { module = "org.jetbrains.kotlinx:kotlinx-rpc-krpc-server", version.ref = "kotlinx-rpc-grpc" }
 kotlinx-rpc-grpc-krpc-serialization-protobuf = { module = "org.jetbrains.kotlinx:kotlinx-rpc-krpc-serialization-protobuf", version.ref = "kotlinx-rpc-grpc" }

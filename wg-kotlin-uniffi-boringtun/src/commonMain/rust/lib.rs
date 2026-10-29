@@ -1,3 +1,4 @@
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use boringtun::noise::{Tunn, TunnResult};
 use boringtun::x25519::{PublicKey, StaticSecret};
 use rand_core::OsRng;
@@ -40,7 +41,7 @@ pub fn convert_x25519_key_to_base64(key: Vec<u8>) -> Option<String> {
 
     let mut key32 = [0u8; 32];
     key32.copy_from_slice(&key);
-    Some(base64::encode(key32))
+    Some(STANDARD.encode(key32))
 }
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -73,13 +74,13 @@ impl TunnelSession {
         keep_alive: u16,
         index: u32,
     ) -> Result<Arc<Self>, TunnelError> {
-        let private = StaticSecret::from(parse_key_bytes(&arg_secret_key)
-            .ok_or(TunnelError::InvalidBase64Key)?);
-        let public = PublicKey::from(parse_key_bytes(&arg_public_key)
-            .ok_or(TunnelError::InvalidBase64Key)?);
+        let private = StaticSecret::from(
+            parse_key_bytes(&arg_secret_key).ok_or(TunnelError::InvalidBase64Key)?,
+        );
+        let public =
+            PublicKey::from(parse_key_bytes(&arg_public_key).ok_or(TunnelError::InvalidBase64Key)?);
         let preshared = match arg_preshared_key {
-            Some(v) => Some(parse_key_bytes(&v)
-                .ok_or(TunnelError::InvalidBase64Key)?),
+            Some(v) => Some(parse_key_bytes(&v).ok_or(TunnelError::InvalidBase64Key)?),
             None => None,
         };
 
@@ -87,7 +88,11 @@ impl TunnelSession {
             private,
             public,
             preshared,
-            if keep_alive == 0 { None } else { Some(keep_alive) },
+            if keep_alive == 0 {
+                None
+            } else {
+                Some(keep_alive)
+            },
             index,
             None,
         );
@@ -125,7 +130,7 @@ impl TunnelSession {
 }
 
 fn parse_key_bytes(encoded: &str) -> Option<[u8; 32]> {
-    let decoded = base64::decode(encoded).ok()?;
+    let decoded = STANDARD.decode(encoded).ok()?;
     if decoded.len() != 32 {
         return None;
     }

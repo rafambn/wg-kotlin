@@ -107,7 +107,8 @@ impl DaemonGrpcService {
                     None => {}
                 }
             }
-        }.await;
+        }
+        .await;
 
         let close_result = session.close();
         let read_join_result = read_task.await;
@@ -244,7 +245,11 @@ impl Daemon for DaemonGrpcService {
         let interface_name = session.interface_name().to_string();
 
         let (tx, rx) = mpsc::channel::<Result<ServerMessage, Status>>(PACKET_CHANNEL_CAPACITY);
-        let _ = tx.send(Ok(ServerMessage { payload: Some(ServerPayload::Started(SessionStarted { interface_name: session.interface_name().to_string() })) })).await;
+        let _ = tx
+            .send(Ok(ServerMessage {
+                payload: Some(ServerPayload::Started(SessionStarted { interface_name: session.interface_name().to_string() })),
+            }))
+            .await;
         let mut started_fields = session_fields.clone();
         started_fields.push(("interface".to_string(), Value::String(session.interface_name().to_string())));
         self.seal_scroll("daemon_session_started", started_fields, true).await;
@@ -292,4 +297,3 @@ fn session_config_fields(config: &TunSessionConfig) -> Vec<(String, Value)> {
         ("mtu_configured".to_string(), Value::Bool(config.mtu != 0)),
     ]
 }
-

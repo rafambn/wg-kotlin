@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Módulos do wg-kotlin</title>
+<style>
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: transparent; }
+body { color: var(--foreground, CanvasText); font: 14px/1.5 var(--font-sans, system-ui); }
+button { font: inherit; cursor: pointer; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.tabs button { padding: 8px 14px; border: 1px solid var(--border, GrayText); border-radius: var(--radius, 10px); background: transparent; color: var(--muted-foreground, GrayText); }
+.tabs button[aria-selected="true"] { color: var(--primary-foreground, HighlightText); background: var(--primary, Highlight); border-color: var(--primary, Highlight); }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted-foreground, GrayText); font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sample { width: 24px; border-top: 2px solid; }
+.dep { color: var(--chart-1, Highlight); }
+.gen { color: var(--chart-3, GrayText); }
+.gen.sample { border-top-style: dashed; }
+.rpc { color: var(--chart-2, Highlight); }
+.canvas { overflow-x: auto; margin-top: 10px; }
+svg { display: block; width: 100%; min-width: 660px; height: auto; }
+.group rect { fill: var(--muted, Canvas); fill-opacity: .4; stroke: var(--border, GrayText); stroke-dasharray: 5 5; rx: 14px; }
+.group text { fill: var(--muted-foreground, GrayText); font-size: 13px; font-weight: 600; }
+.edge { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.edge.dep { stroke: var(--chart-1, Highlight); }
+.edge.gen { stroke: var(--chart-3, GrayText); stroke-dasharray: 5 5; }
+.edge.rpc { stroke: var(--chart-2, Highlight); }
+.edge-label rect { fill: var(--background, Canvas); rx: 4px; }
+.edge-label text { fill: var(--muted-foreground, GrayText); font-size: 12px; }
+.node { cursor: pointer; outline: none; }
+.node rect { fill: var(--card, Canvas); stroke: var(--border, GrayText); stroke-width: 1.5; rx: 12px; }
+.node .title { fill: var(--foreground, CanvasText); font: 600 15px var(--font-mono, monospace); }
+.node .sub { fill: var(--muted-foreground, GrayText); font-size: 13px; }
+.node .tag { fill: var(--muted-foreground, GrayText); font-size: 10px; font-weight: 600; letter-spacing: .7px; }
+.node.selected rect, .node:focus rect { stroke: var(--primary, Highlight); stroke-width: 2.5; }
+.node:hover rect { stroke: var(--primary, Highlight); }
+.detail { margin-top: 12px; padding: 16px; border-radius: var(--radius, 12px); background: var(--card, Canvas); }
+.detail strong { font-family: var(--font-mono, monospace); font-size: 14px; overflow-wrap: anywhere; }
+.detail p { margin: 7px 0 9px; }
+.detail code { color: var(--muted-foreground, GrayText); font: 11px var(--font-mono, monospace); overflow-wrap: anywhere; }
+.foot { color: var(--muted-foreground, GrayText); font-size: 12px; margin: 12px 0 0; }
+@media (prefers-reduced-motion: no-preference) { .node rect { transition: stroke .15s; } }
+</style>
+</head>
+<body>
+<div class="tabs" role="tablist" aria-label="Visão da arquitetura">
+  <button role="tab" id="tab-modules" aria-selected="true" aria-controls="diagram" data-view="modules">Conexões entre módulos</button>
+  <button role="tab" id="tab-runtime" aria-selected="false" aria-controls="diagram" data-view="runtime">Fluxo de pacotes</button>
+</div>
+<div class="legend" aria-label="Legenda das conexões">
+  <span><i class="sample dep"></i>Dependência / chamada</span>
+  <span><i class="sample gen"></i>Geração de contratos</span>
+  <span><i class="sample rpc"></i>Comunicação bidirecional</span>
+</div>
+<div class="canvas"><svg id="diagram" role="img" aria-labelledby="diagram-title diagram-desc"></svg></div>
+<aside class="detail" aria-live="polite">
+  <strong id="detail-title"></strong>
+  <p id="detail-text"></p>
+  <code id="detail-source"></code>
+</aside>
+<p class="foot" id="foot"></p>
+<script>
+const NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('diagram');
+let selected = 'wg';
+const details = {
+  wg: ['wg-kotlin', 'API Vpn, configuração, sessões criptográficas e sockets UDP. No alvo JVM, também abre a sessão gRPC com o daemon.', 'wg-kotlin/build.gradle.kts · src/commonMain/.../Vpn.kt'],
+  wrapper: ['wg-kotlin-uniffi-boringtun', 'Módulo Gradle e crate Rust. Gobley gera os bindings UniFFI e empacota a biblioteca nativa. Mantém uma sessão BoringTun por peer.', 'wg-kotlin-uniffi-boringtun/build.gradle.kts · Cargo.toml · src/commonMain/rust/lib.rs'],
+  boringtun: ['boringtun', 'Dependência externa do wrapper. Implementa o protocolo WireGuard: handshake, criptografia, replay protection, cookies e timers.', 'wg-kotlin-uniffi-boringtun/Cargo.toml'],
+  protocol: ['daemon-protocol', 'Diretório compartilhado de arquivos .proto. Gera os tipos Kotlin usados por wg-kotlin e os tipos/serviço Rust de daemon-proto.', 'daemon-protocol/*.proto · wg-kotlin/src/commonMain/proto → ../../../daemon-protocol'],
+  daemon: ['wg-kotlin-daemon-rust/daemon', 'Processo separado com privilégios de administrador. Expõe a sessão gRPC, cria o TUN e configura endereços, MTU, rotas e DNS.', 'wg-kotlin-daemon-rust/daemon/Cargo.toml · src/main.rs · src/server.rs · src/session.rs'],
+  proto: ['wg-kotlin-daemon-rust/daemon-proto', 'Crate dos contratos e do serviço gRPC gerados a partir dos .proto compartilhados, usando tonic/prost.', 'wg-kotlin-daemon-rust/daemon-proto/build.rs · src/lib.rs'],
+  scribe: ['wg-kotlin-daemon-rust/scribe-rs', 'Biblioteca de logs do daemon. Cria e sela scrolls com os eventos e o contexto das operações.', 'wg-kotlin-daemon-rust/scribe-rs/Cargo.toml · src/scribe.rs'],
+  tun: ['Interface TUN / sistema operacional', 'Conecta os pacotes IP da máquina à VPN. O daemon lê e escreve nessa interface por tun-rs e gerencia a configuração de rede.', 'wg-kotlin-daemon-rust/daemon/src/session.rs · src/platform/'],
+  bridge: ['wg-kotlin · DaemonSessionBridge', 'Envia a configuração inicial e troca pacotes IP com o daemon no mesmo stream gRPC Session. Conecta o stream ao DuplexChannelPipe.', 'wg-kotlin/src/jvmMain/.../iface/DaemonSessionBridge.kt · daemon-protocol/daemon.proto'],
+  crypto: ['wg-kotlin · CryptoSessionManager', 'Seleciona o peer, organiza os pacotes e aciona criptografia, descriptografia e timers pela implementação BoringTunPeerSession.', 'wg-kotlin/src/commonMain/.../crypto/CryptoSessionManagerImpl.kt · BoringTunPeerSession.kt'],
+  sockets: ['wg-kotlin · SocketManager', 'Envia e recebe datagramas UDP IPv4/IPv6 dos peers remotos. Os datagramas transportam mensagens WireGuard.', 'wg-kotlin/src/commonMain/.../network/SocketManagerImpl.kt'],
+  peer: ['Peer WireGuard remoto', 'Outra ponta do túnel. Recebe mensagens WireGuard por UDP e faz o caminho inverso para as respostas.', 'Endpoint configurado em VpnPeer'],
+};
+const graphs = {
+  modules: {
+    height: 660,
+    title: 'Módulos e contratos do wg-kotlin',
+    description: 'wg-kotlin depende do wrapper UniFFI, que usa BoringTun. O módulo Kotlin se comunica por gRPC com o daemon Rust. O daemon depende de daemon-proto e scribe-rs. Os arquivos daemon-protocol geram contratos Kotlin e Rust.',
+    groups: [
+      [8, 116, 326, 394, 'Gradle · módulos JVM'],
+      [384, 116, 326, 394, 'wg-kotlin-daemon-rust · workspace Cargo'],
+    ],
+    nodes: [
+      ['protocol', 220, 6, 280, 84, 'daemon-protocol', ['arquivos .proto compartilhados'], 'CONTRATO'],
+      ['wg', 24, 170, 294, 104, 'wg-kotlin', ['API Vpn · sessões · UDP · cliente gRPC'], 'MÓDULO GRADLE'],
+      ['daemon', 400, 170, 294, 104, 'daemon', ['binário wg-kotlin-daemon', 'TUN · rotas · DNS · MTU'], 'CRATE / PROCESSO'],
+      ['wrapper', 24, 386, 294, 106, 'wg-kotlin-uniffi-boringtun', ['bindings UniFFI + biblioteca Rust'], 'MÓDULO GRADLE + CRATE'],
+      ['proto', 400, 386, 140, 106, 'daemon-proto', ['tipos + serviço', 'gRPC gerados'], 'CRATE'],
+      ['scribe', 554, 386, 140, 106, 'scribe-rs', ['logs por', 'scrolls'], 'CRATE'],
+      ['boringtun', 24, 564, 294, 84, 'boringtun', ['motor WireGuard em Rust'], 'DEPENDÊNCIA EXTERNA'],
+    ],
+    edges: [
+      ['gen', 'M220 44 H171 V170', 'gera Kotlin', 170, 124],
+      ['gen', 'M500 44 H730 V536 H470 V492', 'gera Rust', 582, 536],
+      ['dep', 'M171 274 V386', 'UniFFI / biblioteca nativa', 171, 329],
+      ['dep', 'M171 492 V564', 'dependência Cargo', 171, 533],
+      ['dep', 'M470 274 V386', 'contratos gRPC', 465, 331],
+      ['dep', 'M624 274 V386', 'logging', 624, 331],
+      ['rpc', 'M318 220 H400', 'gRPC', 359, 199, true],
+    ],
+    foot: 'Dois módulos Gradle e três crates no workspace Rust. daemon-protocol é o contrato compartilhado. Selecione um bloco para ver os arquivos de origem.',
+  },
+  runtime: {
+    height: 836,
+    title: 'Fluxo bidirecional de pacotes entre TUN e peer remoto',
+    description: 'O sistema operacional troca pacotes IP com o daemon pelo TUN. O daemon usa gRPC para trocar esses pacotes com wg-kotlin. CryptoSessionManager chama o wrapper UniFFI dentro do processo JVM. SocketManager troca os pacotes WireGuard por UDP com o peer remoto.',
+    groups: [[14, 260, 712, 415, 'Processo da aplicação · JVM + biblioteca Rust nativa']],
+    nodes: [
+      ['tun', 236, 6, 272, 84, 'Interface TUN', ['sistema operacional'], 'SO'],
+      ['daemon', 236, 130, 272, 82, 'daemon', ['TUN · configuração de rede'], 'PROCESSO RUST COM PRIVILÉGIOS'],
+      ['bridge', 34, 300, 672, 84, 'DaemonSessionBridge', ['configuração + pacotes IP no stream Session'], 'WG-KOTLIN · JVM'],
+      ['crypto', 34, 446, 300, 88, 'CryptoSessionManager', ['orquestra criptografia e peers'], 'WG-KOTLIN'],
+      ['wrapper', 398, 432, 308, 114, 'wg-kotlin-uniffi-boringtun', ['UniFFI → Tunn do BoringTun', 'cifra / decifra · handshake · timers'], 'BIBLIOTECA NO MESMO PROCESSO'],
+      ['sockets', 34, 594, 672, 84, 'SocketManager', ['sockets UDP IPv4 / IPv6'], 'WG-KOTLIN'],
+      ['peer', 236, 740, 272, 84, 'Peer WireGuard remoto', ['outra ponta do túnel'], 'REDE'],
+    ],
+    edges: [
+      ['rpc', 'M372 90 V130', 'IP / tun-rs', 454, 107, true],
+      ['rpc', 'M372 212 V300', 'gRPC local · configuração + IP', 372, 242, true],
+      ['rpc', 'M184 384 V446', 'pacotes IP', 239, 418, true],
+      ['dep', 'M334 490 H398', 'UniFFI', 366, 473, true],
+      ['rpc', 'M184 534 V594', 'pacotes WireGuard', 266, 566, true],
+      ['rpc', 'M372 678 V740', 'UDP · pacotes WireGuard', 372, 708, true],
+    ],
+    foot: 'As setas funcionam nos dois sentidos. A criptografia roda no processo JVM pelo wrapper nativo. O daemon é um processo separado responsável pelo TUN e pela configuração de rede.',
+  },
+};
+function el(tag, attrs = {}, text) {
+  const item = document.createElementNS(NS, tag);
+  for (const [key, value] of Object.entries(attrs)) item.setAttribute(key, value);
+  if (text !== undefined) item.textContent = text;
+  return item;
+}
+function choose(id) {
+  selected = id;
+  const [title, text, source] = details[id];
+  document.getElementById('detail-title').textContent = title;
+  document.getElementById('detail-text').textContent = text;
+  document.getElementById('detail-source').textContent = source;
+  svg.querySelectorAll('.node').forEach(node => node.classList.toggle('selected', node.dataset.id === id));
+}
+function draw(view) {
+  const graph = graphs[view];
+  svg.replaceChildren();
+  svg.setAttribute('viewBox', `0 0 740 ${graph.height}`);
+  svg.append(el('title', {id: 'diagram-title'}, graph.title), el('desc', {id: 'diagram-desc'}, graph.description));
+  const defs = el('defs');
+  for (const [kind, color] of [['dep', 'var(--chart-1, Highlight)'], ['gen', 'var(--chart-3, GrayText)'], ['rpc', 'var(--chart-2, Highlight)']]) {
+    const marker = el('marker', {id: `arrow-${kind}`, viewBox: '0 0 8 8', refX: '7', refY: '4', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse'});
+    marker.append(el('path', {d: 'M0 0 L8 4 L0 8 Z', fill: color}));
+    defs.append(marker);
+  }
+  svg.append(defs);
+  for (const [x, y, w, h, title] of graph.groups) {
+    const group = el('g', {class: 'group'});
+    group.append(el('rect', {x, y, width: w, height: h}), el('text', {x: x + 16, y: y + 26}, title));
+    svg.append(group);
+  }
+  for (const [kind, path, label, x, y, bidirectional] of graph.edges) {
+    const attrs = {class: `edge ${kind}`, d: path, 'marker-end': `url(#arrow-${kind})`};
+    if (bidirectional) attrs['marker-start'] = `url(#arrow-${kind})`;
+    svg.append(el('path', attrs));
+  }
+  for (const [kind, path, label, x, y] of graph.edges) {
+    const group = el('g', {class: 'edge-label'});
+    const width = label.length * 6.3 + 14;
+    group.append(el('rect', {x: x - width / 2, y: y - 13, width, height: 21}), el('text', {x, y: y + 2, 'text-anchor': 'middle'}, label));
+    svg.append(group);
+  }
+  for (const [id, x, y, w, h, title, lines, tag] of graph.nodes) {
+    const group = el('g', {class: 'node', role: 'button', tabindex: '0', 'aria-label': `Detalhes de ${details[id][0]}`, 'data-id': id});
+    group.append(el('rect', {x, y, width: w, height: h}));
+    group.append(el('text', {class: 'tag', x: x + 16, y: y + 20}, tag));
+    group.append(el('text', {class: 'title', x: x + 16, y: y + 43}, title));
+    lines.forEach((line, index) => group.append(el('text', {class: 'sub', x: x + 16, y: y + 64 + index * 18}, line)));
+    group.addEventListener('click', () => choose(id));
+    group.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(id); }
+    });
+    svg.append(group);
+  }
+  document.querySelectorAll('[data-view]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.view === view)));
+  document.getElementById('foot').textContent = graph.foot;
+  if (!graph.nodes.some(node => node[0] === selected)) selected = view === 'runtime' ? 'crypto' : 'wg';
+  choose(selected);
+}
+document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => draw(button.dataset.view)));
+draw('modules');
+</script>
+</body>
+</html>

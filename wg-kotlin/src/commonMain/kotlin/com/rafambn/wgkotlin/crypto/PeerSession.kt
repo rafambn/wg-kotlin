@@ -11,7 +11,7 @@ interface PeerSession : AutoCloseable {
         return PacketAction.NotSupported("encryptRawPacket")
     }
 
-    fun decryptToRawPacket(src: ByteArray, dstSize: UInt): PacketAction {
+    fun decryptToRawPacket(src: ByteArray, dstSize: UInt, sourceIp: String): PacketAction {
         return PacketAction.NotSupported("decryptToRawPacket")
     }
 

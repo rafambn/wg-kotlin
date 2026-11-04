@@ -369,7 +369,7 @@ class CryptoSessionManagerTest {
         override fun encryptRawPacket(src: ByteArray, dstSize: UInt): PacketAction =
             PacketAction.WriteToNetwork(src + ENCRYPT_MARKER)
 
-        override fun decryptToRawPacket(src: ByteArray, dstSize: UInt): PacketAction =
+        override fun decryptToRawPacket(src: ByteArray, dstSize: UInt, sourceIp: String): PacketAction =
             if (src.isEmpty()) PacketAction.Done else PacketAction.WriteToTunIpv4(src + DECRYPT_MARKER)
 
         override fun runPeriodicTask(dstSize: UInt): PacketAction =

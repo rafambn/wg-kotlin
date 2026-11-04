@@ -220,7 +220,11 @@ internal class CryptoSessionManagerImpl(
                         .getOrPut(selected.peer.publicKey) { MutablePeerStats() }
                         .receivedBytes += datagram.payload.size.toLong()
 
-                    var result = selected.session.decryptToRawPacket(datagram.payload, DEFAULT_PACKET_BUFFER_SIZE)
+                    var result = selected.session.decryptToRawPacket(
+                        src = datagram.payload,
+                        dstSize = DEFAULT_PACKET_BUFFER_SIZE,
+                        sourceIp = datagram.remoteEndpoint.address,
+                    )
                     var iterations = 0
 
                     while (result !is PacketAction.Done) {
@@ -249,7 +253,11 @@ internal class CryptoSessionManagerImpl(
                             )
                         }
 
-                        result = selected.session.decryptToRawPacket(ByteArray(0), DEFAULT_PACKET_BUFFER_SIZE)
+                        result = selected.session.decryptToRawPacket(
+                            src = ByteArray(0),
+                            dstSize = DEFAULT_PACKET_BUFFER_SIZE,
+                            sourceIp = datagram.remoteEndpoint.address,
+                        )
                     }
                 }
 

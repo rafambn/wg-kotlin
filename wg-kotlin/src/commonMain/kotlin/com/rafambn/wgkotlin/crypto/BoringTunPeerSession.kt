@@ -17,15 +17,13 @@ class BoringTunPeerSession(
         ensureActive("encryptRawPacket")
         return toPacketAction(
             result = tunnel.encryptRawPacket(src = src, dstSize = dstSize),
-            operation = "encryptRawPacket",
         )
     }
 
-    override fun decryptToRawPacket(src: ByteArray, dstSize: UInt): PacketAction {
+    override fun decryptToRawPacket(src: ByteArray, dstSize: UInt, sourceIp: String): PacketAction {
         ensureActive("decryptToRawPacket")
         return toPacketAction(
-            result = tunnel.decryptToRawPacket(src = src, dstSize = dstSize),
-            operation = "decryptToRawPacket",
+            result = tunnel.decryptToRawPacket(src = src, dstSize = dstSize, sourceIp = sourceIp),
         )
     }
 
@@ -33,7 +31,6 @@ class BoringTunPeerSession(
         ensureActive("runPeriodicTask")
         return toPacketAction(
             result = tunnel.runPeriodicTask(dstSize = dstSize),
-            operation = "runPeriodicTask",
         )
     }
 
@@ -52,27 +49,13 @@ class BoringTunPeerSession(
         }
     }
 
-    private fun toPacketAction(result: TunnelPacketResult, operation: String): PacketAction {
-        val boundedSize = result.size.toInt().coerceIn(0, result.packet.size)
-        val boundedPacket = result.packet.copyOfRange(0, boundedSize)
-
-        return when (result.op.toInt()) {
-            OP_DONE -> PacketAction.Done
-            OP_WRITE_TO_NETWORK -> PacketAction.WriteToNetwork(boundedPacket)
-            OP_ERROR -> PacketAction.Error(result.size)
-            OP_WRITE_TO_TUNNEL_IPV4 -> PacketAction.WriteToTunIpv4(boundedPacket)
-            OP_WRITE_TO_TUNNEL_IPV6 -> PacketAction.WriteToTunIpv6(boundedPacket)
-            else -> throw IllegalStateException(
-                "Unsupported tunnel op `${result.op}` from `$operation` for `${peerPublicKey}`",
-            )
+    private fun toPacketAction(result: TunnelPacketResult): PacketAction {
+        return when (result) {
+            is TunnelPacketResult.Done -> PacketAction.Done
+            is TunnelPacketResult.WriteToNetwork -> PacketAction.WriteToNetwork(result.packet)
+            is TunnelPacketResult.Error -> PacketAction.Error(result.code)
+            is TunnelPacketResult.WriteToTunnelV4 -> PacketAction.WriteToTunIpv4(result.packet)
+            is TunnelPacketResult.WriteToTunnelV6 -> PacketAction.WriteToTunIpv6(result.packet)
         }
-    }
-
-    private companion object {
-        const val OP_DONE: Int = 0
-        const val OP_WRITE_TO_NETWORK: Int = 1
-        const val OP_ERROR: Int = 2
-        const val OP_WRITE_TO_TUNNEL_IPV4: Int = 4
-        const val OP_WRITE_TO_TUNNEL_IPV6: Int = 6
     }
 }

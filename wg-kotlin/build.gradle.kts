@@ -1,3 +1,5 @@
+import kotlinx.rpc.protoc.proto
+
 plugins {
     alias(libs.plugins.multiplatform)
     alias(libs.plugins.kotlin.serialization)
@@ -12,13 +14,19 @@ kotlin {
     jvm()
 
     sourceSets {
-        commonMain.dependencies {
-            implementation(project(":wg-kotlin-uniffi-boringtun"))
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.ktor.network)
-            implementation(libs.ktor.io)
-            implementation(libs.kotlinx.rpc.grpc.core)
-            implementation(libs.kotlinx.rpc.protobuf.core)
+        commonMain {
+            proto {
+                setSrcDirs(listOf(rootProject.layout.projectDirectory.dir("daemon-protocol")))
+            }
+
+            dependencies {
+                implementation(project(":wg-kotlin-uniffi-boringtun"))
+                implementation(libs.kotlinx.coroutines.core)
+                implementation(libs.ktor.network)
+                implementation(libs.ktor.io)
+                implementation(libs.kotlinx.rpc.grpc.core)
+                implementation(libs.kotlinx.rpc.protobuf.core)
+            }
         }
 
         commonTest.dependencies {

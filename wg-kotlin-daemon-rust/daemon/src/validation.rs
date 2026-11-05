@@ -5,6 +5,7 @@ const MIN_MTU: i32 = 576;
 const MIN_IPV6_MTU: i32 = 1280;
 const MAX_MTU: i32 = 65535;
 const MAX_DNS_SERVERS: usize = 64;
+const MAX_DNS_DOMAINS: usize = 64;
 const MAX_ADDRESSES: usize = 64;
 const MAX_ROUTES: usize = 256;
 const MAX_INTERFACE_NAME_LENGTH: usize = 15;
@@ -52,14 +53,15 @@ fn validate_mtu_for_addresses(mtu: i32, addresses: &[Cidr]) -> Result<(), String
 
 fn validate_dns(dns: &DnsConfig) -> Result<(), String> {
     validate_max_count("dns.servers", dns.servers.len(), MAX_DNS_SERVERS)?;
+    validate_max_count("dns.searchDomains", dns.search_domains.len(), MAX_DNS_DOMAINS)?;
 
     if (dns.search_domains.is_empty() && !dns.servers.is_empty()) || (!dns.search_domains.is_empty() && dns.servers.is_empty()) {
         return Err("dns must provide both searchDomains and servers, or neither".to_string());
     }
 
     for (idx, domain) in dns.search_domains.iter().enumerate() {
-        let domain = domain.trim().trim_start_matches('.');
         validate_max_length(format!("dns.searchDomains[{idx}]").as_str(), domain, MAX_DOMAIN_LENGTH)?;
+        let domain = domain.trim().trim_start_matches('.');
         if domain.is_empty() || !is_valid_hostname(domain) {
             return Err(format!("dns.searchDomains[{idx}] must be a valid hostname"));
         }

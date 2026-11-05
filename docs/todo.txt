@@ -82,12 +82,13 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
     NRPT interrompem o script e são propagadas ao Rust pelo status do processo.
     Referência: daemon/src/platform/windows.rs, scripts de configuração e limpeza.
 
-10. Limitar a quantidade de domínios DNS e isolar operações bloqueantes.
-    A validação aceita milhares de domínios, a normalização tem custo
-    quadrático e o Windows inicia um PowerShell sequencial para cada domínio.
-    Essas operações ocorrem na thread assíncrona do RPC e podem prejudicar
-    outras sessões. Aplicar limites antes do processamento e executar as
-    operações bloqueantes fora das threads do executor assíncrono.
+10. Implementado: limitar o trabalho DNS e isolar a inicialização bloqueante.
+    Aceitar até 64 domínios, com no máximo 253 bytes por entrada original,
+    antes de remover espaços, pontos iniciais ou duplicatas. Usar HashSet
+    para deduplicar preservando a ordem e criar as regras NRPT em uma única
+    execução do PowerShell. Executar a inicialização em spawn_blocking,
+    sob uma task que mantém a reserva até concluir a inicialização e a limpeza,
+    mesmo quando o cliente desconecta durante o trabalho bloqueante.
     Referência: daemon/src/validation.rs, validate_dns(), daemon/src/platform/mod.rs,
     normalize_domains(), e daemon/src/platform/windows.rs, configure_session().
 
@@ -117,14 +118,12 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
     Referência: daemon/src/platform/windows.rs, clear_stale_nrpt_rules_once()
     e CLEAR_ALL_NRPT_RULES_SCRIPT.
 
-14. Desfazer a inicialização quando o RPC for cancelado antes de iniciar o loop.
-    Após reservar o nome e configurar a sessão, o handler aguarda o mutex do
-    logger antes de iniciar run_session_loop(). Se o cliente cancelar nesse
-    intervalo, a reserva permanece em active_sessions e close() não é chamado.
-    TunSession também não executa o cleanup_hook ao ser descartada, deixando
-    efeitos externos como DNS sem limpeza. Usar um guard de inicialização que
-    reverta a reserva e a configuração até transferir a sessão ao seu responsável.
-    Referência: daemon/src/server.rs, session(), e daemon/src/session.rs, TunSession.
+14. Implementado junto ao item 10: manter a responsabilidade pela inicialização
+    após o cancelamento do RPC. A task da sessão aguarda o worker bloqueante,
+    executa close() se o cliente saiu e libera a reserva após a limpeza.
+    Validado em Linux com DNS real travado durante a inicialização, cancelamento
+    da conexão e reutilização do nome após remover TUN, rotas e DNS.
+    Referência: daemon/src/server.rs, session() e run_session_loop().
 
 15. Limitar o conteúdo de entradas inválidas registrado nos logs.
     session_config_fields() copia interface_name antes da validação e registra

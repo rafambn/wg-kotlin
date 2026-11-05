@@ -102,3 +102,35 @@ fn rejects_dns_server_with_prefix() {
     let error = validate_config(&config).expect_err("dns should be rejected");
     assert!(error.contains("valid"));
 }
+
+#[test]
+fn limits_dns_domains_before_normalization() {
+    let mut config = TunSessionConfig {
+        interface_name: "utun0".to_string(),
+        addresses: vec![cidr_v4(&[10, 0, 0, 1], 24)],
+        dns: Some(DnsConfig {
+            search_domains: (0..64).map(|index| format!("domain{index}.test")).collect(),
+            servers: vec![ip_v4(&[1, 1, 1, 1])],
+        }),
+        ..Default::default()
+    };
+    validate_config(&config).unwrap();
+    config.dns.as_mut().unwrap().search_domains.push("domain0.test".to_string());
+    assert!(validate_config(&config).unwrap_err().contains("dns.searchDomains supports at most 64"));
+}
+
+#[test]
+fn bounds_raw_domain_length_before_trimming() {
+    let domain = format!("{}.{}.{}.{}", "a".repeat(63), "b".repeat(63), "c".repeat(63), "d".repeat(61));
+    let mut config = TunSessionConfig {
+        interface_name: "utun0".to_string(),
+        addresses: vec![cidr_v4(&[10, 0, 0, 1], 24)],
+        dns: Some(DnsConfig { search_domains: vec![domain.clone()], servers: vec![ip_v4(&[1, 1, 1, 1])] }),
+        ..Default::default()
+    };
+    validate_config(&config).unwrap();
+    config.dns.as_mut().unwrap().search_domains[0] = format!(" {domain}");
+    assert!(validate_config(&config).unwrap_err().contains("dns.searchDomains[0] must be at most 253"));
+    config.dns.as_mut().unwrap().search_domains[0] = " .corp.test ".to_string();
+    validate_config(&config).unwrap();
+}

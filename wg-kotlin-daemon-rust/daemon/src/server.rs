@@ -70,8 +70,8 @@ impl DaemonService {
             }
         };
         let write = async move {
-            // Let initialization transfer the session to its loop before
-            // cancelling socket writes; otherwise startup resources can leak.
+            // Initialization keeps its own task until teardown; cancelling
+            // socket writes only drops the response receiver.
             let responses = service.session(rx, stopping.clone()).await;
             tokio::select! {
                 biased;
@@ -332,32 +332,41 @@ impl DaemonService {
             return Err(Status::resource_exhausted(error_message));
         }
 
-        let session = match SessionManager::start(&config) {
-            Ok(session) => session,
-            Err(error_message) => {
-                self.active_sessions.lock().await.remove(&config.interface_name);
-                let mut fields = session_fields.clone();
-                fields.push(("outcome".to_string(), Value::String("start_failed".to_string())));
-                fields.push(("error".to_string(), Value::String(error_message.clone())));
-                fields.push(("error_type".to_string(), Value::String("start_failed".to_string())));
-                fields.push(("duration_ms".to_string(), Value::Number((started_at.elapsed().as_millis() as u64).into())));
-                self.seal_scroll("daemon_session", fields, false).await;
-                return Err(Status::failed_precondition(error_message));
-            }
-        };
-
         let (tx, rx) = mpsc::channel::<Result<ServerMessage, Status>>(PACKET_CHANNEL_CAPACITY);
-        let _ = tx
-            .send(Ok(ServerMessage {
-                payload: Some(ServerPayload::Started(SessionStarted { interface_name: session.interface_name().to_string() })),
-            }))
-            .await;
-        let mut started_fields = session_fields.clone();
-        started_fields.push(("interface".to_string(), Value::String(session.interface_name().to_string())));
-        self.seal_scroll("daemon_session_started", started_fields, true).await;
-
         let service = self.clone();
+        // This task owns initialization through teardown, even if the client
+        // disconnects while the blocking worker is still configuring the OS.
         tokio::spawn(async move {
+            let interface_name = config.interface_name.clone();
+            if tx.is_closed() || *shutdown.borrow() {
+                service.active_sessions.lock().await.remove(&interface_name);
+                return;
+            }
+            let start_result = tokio::task::spawn_blocking(move || SessionManager::start(&config))
+                .await
+                .unwrap_or_else(|error| Err(format!("failed joining session initialization: {error}")));
+            let session = match start_result {
+                Ok(session) => session,
+                Err(error_message) => {
+                    let mut fields = session_fields.clone();
+                    fields.push(("outcome".to_string(), Value::String("start_failed".to_string())));
+                    fields.push(("error".to_string(), Value::String(error_message.clone())));
+                    fields.push(("error_type".to_string(), Value::String("start_failed".to_string())));
+                    fields.push(("duration_ms".to_string(), Value::Number((started_at.elapsed().as_millis() as u64).into())));
+                    service.seal_scroll("daemon_session", fields, false).await;
+                    service.active_sessions.lock().await.remove(&interface_name);
+                    let _ = tx.try_send(Err(Status::failed_precondition(error_message)));
+                    return;
+                }
+            };
+            let _ = tx
+                .send(Ok(ServerMessage {
+                    payload: Some(ServerPayload::Started(SessionStarted { interface_name: session.interface_name().to_string() })),
+                }))
+                .await;
+            let mut started_fields = session_fields.clone();
+            started_fields.push(("interface".to_string(), Value::String(session.interface_name().to_string())));
+            service.seal_scroll("daemon_session_started", started_fields, true).await;
             service.run_session_loop(incoming, session, shutdown, started_at, session_fields, tx).await;
         });
 
@@ -502,6 +511,36 @@ mod tests {
             service.retire_logs().await;
             result.unwrap().unwrap().unwrap();
             assert!(service.active_sessions.lock().await.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_or_cancelled_start_releases_the_reservation() {
+        use daemon_proto::pb::{Cidr, Ip, ip};
+
+        for cancel in [false, true] {
+            let mut scribe = Scribe::builder().build();
+            scribe.hire();
+            let service = DaemonService::new(Arc::new(Mutex::new(scribe)));
+            let (_shutdown_tx, shutdown) = watch::channel(false);
+            let config = TunSessionConfig {
+                interface_name: "utun7".to_string(),
+                addresses: vec![Cidr { ip: Some(Ip { value: Some(ip::Value::V4(vec![10, 0, 0, 1])) }), prefix: 24 }],
+                // Route resolution fails before any TUN or OS configuration.
+                peer_endpoints: vec![Ip { value: None }],
+                ..Default::default()
+            };
+            let (tx, rx) = mpsc::channel(1);
+            tx.send(Ok(ClientMessage { payload: Some(ClientPayload::Config(config)) })).await.unwrap();
+            let mut responses = service.session(rx, shutdown).await.unwrap();
+            if cancel {
+                drop(responses);
+            } else {
+                let error = tokio::time::timeout(Duration::from_secs(2), responses.recv()).await.unwrap().unwrap().unwrap_err();
+                assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+            }
+            tokio::time::timeout(Duration::from_secs(2), service.wait_for_sessions()).await.unwrap();
+            service.retire_logs().await;
         }
     }
 

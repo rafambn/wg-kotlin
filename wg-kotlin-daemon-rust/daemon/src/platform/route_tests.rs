@@ -1,5 +1,11 @@
-use super::resolve_endpoint_routes;
+use super::{normalize_domains, resolve_endpoint_routes};
 use daemon_proto::pb::{Ip, TunSessionConfig};
+
+#[test]
+fn dns_normalization_deduplicates_without_reordering() {
+    let domains = [" .z.corp.test ", "a.corp.test", "z.corp.test", "..m.corp.test", "a.corp.test", " ", "..."].map(str::to_string);
+    assert_eq!(normalize_domains(&domains), ["z.corp.test", "a.corp.test", "m.corp.test"]);
+}
 
 #[test]
 fn no_endpoints_require_no_route_lookup() {

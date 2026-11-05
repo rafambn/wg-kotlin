@@ -21,11 +21,17 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
    a preparação não ocorrer, sem buscar wintun.dll em outro local.
    Referência: daemon/src/wintun.rs, main.rs e session.rs.
 
-3. Corrigir as rotas de exceção dos endpoints WireGuard.
-   Preservar a interface física, o gateway e os atributos relevantes da rota
-   original. Atualmente as rotas /32 e /128 apontam para a própria TUN,
-   capturando o tráfego UDP WireGuard e impedindo o handshake.
-   Referência: daemon/src/platform/mod.rs, build_and_filter_routes().
+3. Implementado: preservar a saída anterior dos endpoints WireGuard.
+   Consultar as rotas antes de criar a TUN e configurar seus endereços.
+   As exceções /32 e /128 preservam a saída escolhida pelo kernel. No Linux,
+   RTM_GETROUTE com FIB_MATCH/LOOKUP_TABLE respeita as regras e a tabela
+   selecionada, preserva onlink e exclui nexthops mortos;
+   no macOS, a mensagem de instalação inclui explicitamente RTA_IFP e o índice
+   da interface anterior, além da origem solicitada na consulta.
+   No Windows, a consulta usa GetBestRoute2.
+   Falhas de consulta ou ausência de rota impedem iniciar a sessão.
+   Referência: daemon/src/platform/endpoint_{linux,macos,windows}.rs,
+   resolve_endpoint_routes(), e daemon/src/session.rs, SessionManager::start().
 
 4. Corrigir a exclusão e a restauração de rotas no macOS.
    A exclusão antes da adição pode remover rotas do sistema, inclusive a rota

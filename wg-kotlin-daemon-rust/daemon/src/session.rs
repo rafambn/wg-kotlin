@@ -41,6 +41,7 @@ impl SessionManager {
         #[cfg(target_os = "windows")]
         let wintun = WINTUN_DLL.get().and_then(Weak::upgrade).ok_or("Wintun DLL is not initialized")?;
 
+        let endpoint_routes = platform::resolve_endpoint_routes(config)?;
         platform::prepare_session_start().map_err(|error| format!("failed to prepare platform session: {error}"))?;
 
         let mut builder = DeviceBuilder::new().name(config.interface_name.clone());
@@ -70,7 +71,7 @@ impl SessionManager {
 
         let interrupt = InterruptEvent::new().map_err(|error| format!("failed to create TUN interrupt event: {error}"))?;
 
-        let cleanup_hook = platform::configure_session(config, &interface_name).map_err(|error| {
+        let cleanup_hook = platform::configure_session(config, &interface_name, endpoint_routes).map_err(|error| {
             let _ = interrupt.trigger();
             format!("failed to configure platform session: {error}")
         })?;

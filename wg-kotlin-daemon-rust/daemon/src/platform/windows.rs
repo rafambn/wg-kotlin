@@ -1,14 +1,14 @@
 use crate::platform::{
-    add_routes_with_predelete, build_and_filter_routes, into_cleanup_hook, CleanupHook,
-    ips_to_args, normalize_domains, run_command,
+    CleanupHook, add_routes_with_predelete, build_and_filter_routes, into_cleanup_hook, ips_to_args, normalize_domains, run_command,
 };
 use daemon_proto::pb::TunSessionConfig;
+use super::EndpointRoute;
 use std::sync::{Mutex, OnceLock};
 
 const NRPT_COMMENT_PREFIX: &str = "kmpvpn-daemon:";
 
-pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
-    let (mut mgr, filtered_routes, endpoint_routes) = build_and_filter_routes(config, interface_name)?;
+pub fn configure_session(config: &TunSessionConfig, interface_name: &str, endpoint_routes: Vec<EndpointRoute>) -> Result<CleanupHook, String> {
+    let (mut mgr, filtered_routes, endpoint_routes) = build_and_filter_routes(config, interface_name, endpoint_routes)?;
 
     let dns_servers = ips_to_args(config.dns.as_ref().map(|dns| &dns.servers[..]).unwrap_or(&[]));
     let dns_domains = normalize_domains(&config.dns.as_ref().map(|dns| dns.search_domains.clone()).unwrap_or_default())

@@ -14,6 +14,17 @@ pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+#[cfg(target_os = "linux")]
+#[path = "endpoint_linux.rs"]
+mod endpoint;
+#[cfg(target_os = "macos")]
+#[path = "endpoint_macos.rs"]
+mod endpoint;
+#[cfg(target_os = "windows")]
+#[path = "endpoint_windows.rs"]
+mod endpoint;
+pub use endpoint::EndpointRoute;
+
 pub type CleanupHook = Box<dyn FnOnce() -> Result<(), String> + Send + 'static>;
 
 pub fn required_binaries() -> &'static [&'static str] {
@@ -36,20 +47,20 @@ pub fn required_binaries() -> &'static [&'static str] {
     &[]
 }
 
-pub fn configure_session(config: &TunSessionConfig, interface_name: &str) -> Result<CleanupHook, String> {
+pub fn configure_session(config: &TunSessionConfig, interface_name: &str, endpoint_routes: Vec<EndpointRoute>) -> Result<CleanupHook, String> {
     #[cfg(target_os = "linux")]
     {
-        return linux::configure_session(config, interface_name);
+        return linux::configure_session(config, interface_name, endpoint_routes);
     }
 
     #[cfg(target_os = "macos")]
     {
-        return macos::configure_session(config, interface_name);
+        return macos::configure_session(config, interface_name, endpoint_routes);
     }
 
     #[cfg(target_os = "windows")]
     {
-        return windows::configure_session(config, interface_name);
+        return windows::configure_session(config, interface_name, endpoint_routes);
     }
 
     #[allow(unreachable_code)]
@@ -224,12 +235,24 @@ fn read_capped<R: Read>(mut reader: R, max_bytes: usize) -> std::io::Result<Vec<
     Ok(output)
 }
 
+/// Resolve before creating the TUN: assigning its addresses can install
+/// connected routes that would hide the endpoint's previous egress route.
+pub fn resolve_endpoint_routes(config: &TunSessionConfig) -> Result<Vec<EndpointRoute>, String> {
+    config.peer_endpoints
+        .iter()
+        .map(|addr| {
+            let ip = parse_proto_ip(addr).ok_or("invalid peer endpoint address")?;
+            EndpointRoute::lookup(ip).map_err(|error| format!("failed to resolve route for endpoint {ip}: {error}"))
+        })
+        .collect()
+}
+
 pub fn build_and_filter_routes(
     config: &TunSessionConfig,
     interface_name: &str,
-) -> Result<(RouteManager, Vec<Route>, Vec<Route>), String> {
-    let mut mgr = RouteManager::new().map_err(|e| format!("route manager: {e}"))?;
-
+    endpoint_routes: Vec<EndpointRoute>,
+) -> Result<(RouteManager, Vec<Route>, Vec<EndpointRoute>), String> {
+    let mgr = RouteManager::new().map_err(|e| format!("route manager: {e}"))?;
     let routes: Vec<Route> = config
         .peer_allowed_ips
         .iter()
@@ -239,42 +262,24 @@ pub fn build_and_filter_routes(
         })
         .collect();
 
-    let endpoint_routes: Vec<Route> = config
-        .peer_endpoints
-        .iter()
-        .filter_map(|addr| {
-            let ip = parse_proto_ip(addr)?;
-            let found = mgr.find_route(&ip).ok()??;
-            let host_prefix = if ip.is_ipv4() { 32u8 } else { 128u8 };
-            #[allow(unused_mut)]
-            let mut route = Route::new(ip, host_prefix).with_if_name(interface_name.to_string());
-            #[cfg(target_os = "linux")]
-            {
-                route = route.with_table(found.table());
-            }
-            Some(route)
-        })
-        .collect();
-
     let endpoint_ips: Vec<StdIpAddr> = config.peer_endpoints.iter().filter_map(parse_proto_ip).collect();
-    let filtered_routes: Vec<Route> = routes
-        .iter()
-        .filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination()))
-        .cloned()
-        .collect();
+    let filtered_routes: Vec<Route> = routes.iter().filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination())).cloned().collect();
 
     Ok((mgr, filtered_routes, endpoint_routes))
 }
 
-pub fn add_routes_with_predelete(mgr: &mut RouteManager, filtered_routes: &[Route], endpoint_routes: &[Route]) -> Result<(), String> {
-    for route in endpoint_routes.iter().chain(filtered_routes.iter()) {
+pub fn add_routes_with_predelete(mgr: &mut RouteManager, filtered_routes: &[Route], endpoint_routes: &[EndpointRoute]) -> Result<(), String> {
+    for route in endpoint_routes {
+        route.replace().map_err(|error| format!("failed to add endpoint route: {error}"))?;
+    }
+    for route in filtered_routes {
         let _ = mgr.delete(route);
         mgr.add(route).map_err(|e| format!("failed to add route: {e}"))?;
     }
     Ok(())
 }
 
-fn cleanup_routes<F>(filtered_routes: &[Route], endpoint_routes: &[Route], dns_teardown: F) -> Result<(), String>
+fn cleanup_routes<F>(filtered_routes: &[Route], endpoint_routes: &[EndpointRoute], dns_teardown: F) -> Result<(), String>
 where
     F: FnOnce() -> Result<(), String>,
 {
@@ -292,11 +297,14 @@ where
 
     match RouteManager::new() {
         Ok(mut mgr) => {
-            for route in filtered_routes.iter().rev().chain(endpoint_routes.iter().rev()) {
+            for route in filtered_routes.iter().rev() {
                 capture_error(mgr.delete(route).map_err(|e| e.to_string()));
             }
         }
         Err(e) => capture_error(Err(e.to_string())),
+    }
+    for route in endpoint_routes.iter().rev() {
+        capture_error(route.delete().map_err(|error| error.to_string()));
     }
     capture_error(dns_teardown());
 
@@ -309,7 +317,7 @@ where
 pub fn into_cleanup_hook(
     setup_result: Result<(), String>,
     filtered_routes: Vec<Route>,
-    endpoint_routes: Vec<Route>,
+    endpoint_routes: Vec<EndpointRoute>,
     interface_name: String,
     dns_teardown: fn(&str) -> Result<(), String>,
 ) -> Result<CleanupHook, String> {
@@ -328,3 +336,6 @@ pub fn into_cleanup_hook(
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
 const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
+
+#[cfg(test)]
+mod route_tests;

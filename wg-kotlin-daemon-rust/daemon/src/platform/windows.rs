@@ -84,17 +84,17 @@ fn rule_comment(interface_name: &str) -> String {
 }
 
 const SET_NRPT_RULE_SCRIPT: &str = r#"
-$ErrorActionPreference = Stop
+$ErrorActionPreference = 'Stop'
 $nameServers = ($env:WG_KOTLIN_DNS_SERVERS -split "`n") | Where-Object { $_ -ne '' }
 Add-DnsClientNrptRule -Namespace $env:WG_KOTLIN_DNS_NAMESPACE -NameServers $nameServers -Comment $env:WG_KOTLIN_NRPT_COMMENT
 "#;
 
 const CLEAR_NRPT_RULES_SCRIPT: &str = r#"
-$ErrorActionPreference = Stop
+$ErrorActionPreference = 'Stop'
 Get-DnsClientNrptRule | Where-Object { $_.Comment -eq $env:WG_KOTLIN_NRPT_COMMENT } | Remove-DnsClientNrptRule -Force
 "#;
 
 const CLEAR_ALL_NRPT_RULES_SCRIPT: &str = r#"
-$ErrorActionPreference = Stop
+$ErrorActionPreference = 'Stop'
 Get-DnsClientNrptRule | Where-Object { $_.Comment -like "$env:WG_KOTLIN_NRPT_COMMENT_PREFIX*" } | Remove-DnsClientNrptRule -Force
 "#;

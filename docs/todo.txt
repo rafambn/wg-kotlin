@@ -13,11 +13,13 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
    DaemonProcess controla lançamento, sessões e encerramento forçado.
    Referência: docs/daemon-launching.md, daemon/src/owner.rs e ipc/.
 
-2. Corrigir o carregamento da DLL Wintun no Windows.
-   O daemon reutiliza uma wintun.dll pré-existente em um diretório temporário
-   gravável pelo usuário e a carrega com privilégios elevados. Usar um local
-   protegido e impedir substituição do arquivo antes do carregamento.
-   Referência: daemon/src/main.rs, prepare_wintun().
+2. Implementado: proteger o carregamento da DLL Wintun no Windows.
+   Extrair a DLL embutida em um diretório novo em Program Files, com proprietário
+   Administradores e ACL protegida para Administradores/SYSTEM. Não reutilizar
+   diretórios ou DLLs existentes. Manter handles contra renomeação da pasta e
+   escrita/exclusão da DLL enquanto o daemon e as sessões a utilizam. Falhar se
+   a preparação não ocorrer, sem buscar wintun.dll em outro local.
+   Referência: daemon/src/wintun.rs, main.rs e session.rs.
 
 3. Corrigir as rotas de exceção dos endpoints WireGuard.
    Preservar a interface física, o gateway e os atributos relevantes da rota

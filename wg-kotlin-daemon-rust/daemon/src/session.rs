@@ -1,19 +1,21 @@
 use crate::ip_util::parse_proto_cidr;
 use crate::platform::{self, CleanupHook};
+#[cfg(target_os = "windows")]
+use crate::wintun::WintunDll;
 use daemon_proto::pb::TunSessionConfig;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 #[cfg(target_os = "windows")]
-use std::sync::OnceLock;
+use std::sync::{OnceLock, Weak};
 use tun_rs::{DeviceBuilder, InterruptEvent, SyncDevice};
 
 #[cfg(target_os = "windows")]
-static WINTUN_DLL_PATH: OnceLock<String> = OnceLock::new();
+static WINTUN_DLL: OnceLock<Weak<WintunDll>> = OnceLock::new();
 
 #[cfg(target_os = "windows")]
-pub fn set_wintun_dll_path(path: String) -> Result<(), String> {
-    WINTUN_DLL_PATH.set(path).map_err(|_| "wintun DLL path already initialized".to_string())
+pub fn set_wintun_dll(dll: &Arc<WintunDll>) -> Result<(), String> {
+    WINTUN_DLL.set(Arc::downgrade(dll)).map_err(|_| "Wintun DLL already initialized".to_string())
 }
 
 pub struct SessionManager;
@@ -25,6 +27,9 @@ pub struct TunSession {
     interrupt: Arc<InterruptEvent>,
     closed: Arc<AtomicBool>,
     cleanup_hook: Arc<StdMutex<Option<CleanupHook>>>,
+    // Drop after the device so that the DLL stays protected until it unloads.
+    #[cfg(target_os = "windows")]
+    _wintun: Arc<WintunDll>,
 }
 
 impl SessionManager {
@@ -32,6 +37,9 @@ impl SessionManager {
         if !is_supported_interface_name(&config.interface_name) {
             return Err(format!("unsupported interface name '{}': expected utun[0-9]+", config.interface_name));
         }
+
+        #[cfg(target_os = "windows")]
+        let wintun = WINTUN_DLL.get().and_then(Weak::upgrade).ok_or("Wintun DLL is not initialized")?;
 
         platform::prepare_session_start().map_err(|error| format!("failed to prepare platform session: {error}"))?;
 
@@ -49,8 +57,8 @@ impl SessionManager {
         }
 
         #[cfg(target_os = "windows")]
-        if let Some(path) = WINTUN_DLL_PATH.get() {
-            builder = builder.wintun_file(path.clone());
+        {
+            builder = builder.wintun_file(wintun.path().to_str().ok_or("Wintun DLL path is not Unicode")?.to_owned());
         }
 
         let device = builder.build_sync().map_err(|error| format!("failed to create TUN device: {error}"))?;
@@ -73,6 +81,8 @@ impl SessionManager {
             interrupt: Arc::new(interrupt),
             closed: Arc::new(AtomicBool::new(false)),
             cleanup_hook: Arc::new(StdMutex::new(Some(cleanup_hook))),
+            #[cfg(target_os = "windows")]
+            _wintun: wintun,
         })
     }
 }

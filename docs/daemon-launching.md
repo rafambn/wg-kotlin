@@ -121,6 +121,21 @@ Reference: [SMAppService](https://developer.apple.com/documentation/servicemanag
 
 ## Windows
 
+The daemon extracts its embedded Wintun DLL into a fresh private directory under
+the Program Files known folder returned by Windows. Both directory and DLL are
+owned by Administrators, with a protected DACL granting access only to
+Administrators and SYSTEM. Existing paths are rejected, and filesystems without
+persistent ACLs are unsupported. The unelevated account that launched the daemon
+does not receive owner rights to change these permissions.
+
+Open handles prevent renaming the directory or writing, deleting, or replacing
+the DLL until the daemon and all sessions release it. Sessions fail if this
+protected DLL was not prepared. Normal cleanup removes the extracted files;
+forced process termination can leave protected files behind, which are never
+reused by subsequent launches. The elevated Windows tests in `wintun.rs` exercise
+file replacement, actual DLL loading, cleanup, and access through a linked
+unelevated UAC token without creating a TUN or installing a driver.
+
 The native launcher can use `ShellExecuteEx` with `runas` and
 `SEE_MASK_NOCLOSEPROCESS`. Retain the actual daemon handle with
 `PROCESS_TERMINATE` plus query/wait rights. Adapt it to `Process`; a PowerShell

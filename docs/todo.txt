@@ -57,10 +57,11 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
    endereço anterior, deixando somente o último IPv4 configurado.
    Referência: daemon/src/session.rs, SessionManager::start().
 
-7. Corrigir as reservas de sessão para nomes equivalentes no macOS.
-   Um nome como utun01 é reservado como solicitado, mas a interface real é
-   utun1. O encerramento remove a chave errada e deixa a reserva presa.
-   Normalizar os nomes ou usar a mesma chave durante todo o ciclo da sessão.
+7. Implementado: normalizar os nomes equivalentes de sessão no macOS.
+   Após validar o nome original, remover zeros à esquerda do índice antes
+   de reservar e criar a interface. utun01 passa a usar utun1 e utun000 usa
+   utun0, mantendo a mesma chave na reserva, nas falhas e no encerramento.
+   Nomes equivalentes são rejeitados como duplicados antes de criar a TUN.
    Referência: daemon/src/server.rs, active_sessions.
 
 8. Propagar o encerramento do daemon às sessões abertas.

@@ -6,3 +6,5 @@ pub mod platform;
 pub mod server;
 pub mod session;
 pub mod validation;
+#[cfg(windows)]
+pub mod wintun;

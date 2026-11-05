@@ -2,9 +2,9 @@ use anyhow::bail;
 use clap::Parser;
 #[cfg(unix)]
 use daemon::owner::allow_owner_signals;
-#[cfg(windows)]
-use daemon::session;
 use daemon::{ipc::LocalListener, logging, owner::OwnerProcess, platform, server::DaemonService};
+#[cfg(windows)]
+use daemon::{session, wintun::WintunDll};
 use serde_json::Value;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, watch};
@@ -22,19 +22,6 @@ struct Cli {
     log_path: Option<PathBuf>,
 }
 
-#[cfg(target_os = "windows")]
-fn prepare_wintun() -> Result<String, String> {
-    let dll_bytes = include_bytes!("../resources/wintun-x64.dll");
-
-    let tmp = std::env::temp_dir().join("wg-kotlin-daemon-wintun");
-    std::fs::create_dir_all(&tmp).map_err(|e| format!("failed to create wintun temp dir: {e}"))?;
-    let dll_path = tmp.join("wintun.dll");
-    if !dll_path.exists() {
-        std::fs::write(&dll_path, dll_bytes).map_err(|e| format!("failed to extract wintun DLL: {e}"))?;
-    }
-    Ok(dll_path.to_string_lossy().to_string())
-}
-
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     ensure_root()?;
@@ -47,10 +34,9 @@ fn main() -> anyhow::Result<()> {
 async fn run(cli: Cli, owner: Arc<OwnerProcess>) -> anyhow::Result<()> {
     platform::ensure_required_binaries(platform::required_binaries()).map_err(anyhow::Error::msg)?;
     #[cfg(windows)]
-    {
-        let path = prepare_wintun().map_err(anyhow::Error::msg)?;
-        session::set_wintun_dll_path(path).map_err(anyhow::Error::msg)?;
-    }
+    let wintun = Arc::new(WintunDll::prepare()?);
+    #[cfg(windows)]
+    session::set_wintun_dll(&wintun).map_err(anyhow::Error::msg)?;
     let log_path = cli.log_path.unwrap_or_else(|| std::env::current_exe().expect("missing executable path").with_file_name("vpn-daemon.jsonl"));
     let mut scribe = logging::create_daemon_scribe(&log_path)?;
     scribe.hire();

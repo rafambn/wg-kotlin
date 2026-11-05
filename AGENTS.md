@@ -1,5 +1,13 @@
 # Project decisions
 
+## Backward compatibility
+
+Backward compatibility is not required for APIs, protocols, or persisted data.
+Do not add compatibility layers, legacy paths, migrations, deprecated aliases,
+or reserved protocol fields solely to preserve older versions.
+This does not override explicit instructions to preserve an API or limit the
+scope of a change.
+
 ## Intentional daemon policies
 
 These behaviors are intentional project decisions. Preserve that intent when

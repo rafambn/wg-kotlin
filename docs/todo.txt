@@ -6,10 +6,12 @@ wg-kotlin-daemon-rust: lógica e segurança
 
 Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-rust.
 
-1. Permitir que somente o processo que lança o daemon inicie suas sessões.
-   Autenticar e autorizar o chamador antes de aceitar configurações. A escuta
-   em loopback atualmente permite acesso por qualquer processo local.
-   Referência: daemon/src/server.rs, session().
+1. Implementado: restringir sessões ao app que lança o daemon.
+   Named pipes no Windows e Unix domain sockets no Linux/macOS. O kernel
+   identifica o cliente de cada conexão; o daemon verifica PID e instância
+   viva do app antes de aceitar configurações. Sem segredo ou listener TCP.
+   DaemonProcess controla lançamento, sessões e encerramento forçado.
+   Referência: docs/daemon-launching.md, daemon/src/owner.rs e ipc/.
 
 2. Corrigir o carregamento da DLL Wintun no Windows.
    O daemon reutiliza uma wintun.dll pré-existente em um diretório temporário
@@ -49,9 +51,9 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
    Referência: daemon/src/server.rs, active_sessions.
 
 8. Propagar o encerramento do daemon às sessões abertas.
-   Ctrl+C inicia apenas o encerramento gracioso do Axum. Sessões gRPC abertas
-   podem mantê-lo esperando indefinidamente, sem liberar TUN, rotas e DNS.
-   Sinalizar as sessões e aguardar sua limpeza com prazo definido.
+   O novo transporte IPC cancela as conexões no encerramento e aguarda a
+   limpeza com prazo definido. Revalidar esse caminho com TUN, rotas e DNS
+   reais, incluindo falhas de limpeza e sessões sob backpressure.
    Referência: daemon/src/main.rs, shutdown_signal(), e daemon/src/server.rs,
    run_session_loop().
 

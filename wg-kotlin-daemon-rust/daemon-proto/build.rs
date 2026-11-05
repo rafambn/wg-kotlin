@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let proto_dir = PathBuf::from("../../daemon-protocol");
 
-    tonic_prost_build::configure().build_server(true).build_client(true).compile_protos(
+    tonic_prost_build::configure().build_server(false).build_client(false).compile_protos(
         &[
             proto_dir.join("daemon.proto"),
             proto_dir.join("tun_session_config.proto"),

@@ -118,13 +118,20 @@ pub fn run_command(
     let mut command = Command::new(program);
     command.args(arguments);
 
+    // The daemon uses the app's real UID and root's effective UID. Give child
+    // tools matching root UIDs so shells and network tools retain privileges.
+    #[cfg(unix)]
+    if unsafe { libc::geteuid() } == 0 {
+        use std::os::unix::process::CommandExt;
+        command.uid(0);
+    }
+
     for (key, value) in environment {
         command.env(key, value);
     }
 
-    if stdin.is_some() {
-        command.stdin(Stdio::piped());
-    }
+    // Child tools must not inherit the private launcher control pipe.
+    command.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() });
 
     let mut child = command
         .stdout(Stdio::piped())

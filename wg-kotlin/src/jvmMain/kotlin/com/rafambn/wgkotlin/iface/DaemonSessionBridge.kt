@@ -1,105 +1,84 @@
 package com.rafambn.wgkotlin.iface
 
+import com.rafambn.wgkotlin.daemon.IpcProtocol
+import com.rafambn.wgkotlin.daemon.LocalConnection
 import com.rafambn.wgkotlin.daemon.proto.ClientMessage
-import com.rafambn.wgkotlin.daemon.proto.Daemon
-import com.rafambn.wgkotlin.daemon.proto.Ip
 import com.rafambn.wgkotlin.daemon.proto.Packet
 import com.rafambn.wgkotlin.daemon.proto.ServerMessage
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
-import com.rafambn.wgkotlin.util.toAddressString
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.io.bytestring.ByteString
-import kotlinx.rpc.grpc.client.GrpcClient
-import kotlinx.rpc.withService
-import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
 
-class DaemonSessionBridge(
-    private val host: Ip,
-    private val port: Int,
-) : SessionBridge {
-
-    override fun openSession(
-        config: TunSessionConfig,
-        pipe: DuplexChannelPipe<ByteArray>,
-        onFailure: (Throwable) -> Unit,
-    ): AutoCloseable {
-        val grpcClient = GrpcClient(host.toAddressString(), port) {
-            credentials = plaintext()
-            keepAlive {
-                time = 30.seconds
-                timeout = 10.seconds
+/** One authenticated IPC connection owns one TUN session. */
+internal class DaemonSessionBridge : SessionBridge {
+    override fun openSession(config: TunSessionConfig, pipe: DuplexChannelPipe<ByteArray>, onFailure: (Throwable) -> Unit): AutoCloseable {
+        val activeDaemon = PlatformInterfaceFactory.requireDaemon()
+        check(activeDaemon.isAlive) { "Owned daemon has exited" }
+        val daemonPid = activeDaemon.pid
+        val endpoint = activeDaemon.endpoint
+        val connection = LocalConnection.connect(endpoint, daemonPid)
+        try {
+            IpcProtocol.awaitReady(connection, daemonPid)
+            connection.readTimeoutMillis = 30_000
+            IpcProtocol.writeClient(connection.output, ClientMessage { payload = ClientMessage.Payload.Config(config) })
+            when (val payload = IpcProtocol.readServer(connection.input).payload) {
+                is ServerMessage.Payload.Started -> check(payload.value.interfaceName.isNotBlank()) { "Missing started interface name" }
+                is ServerMessage.Payload.Error -> error("Daemon session failed (${payload.value.code}): ${payload.value.message}")
+                else -> error("Daemon did not accept the session")
+            }
+            connection.readTimeoutMillis = 0
+        } catch (error: Throwable) {
+            connection.close()
+            throw IllegalStateException("Daemon did not accept the IPC session", error)
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("wg-kotlin-ipc-session"))
+        val closed = AtomicBoolean()
+        fun close() {
+            if (closed.compareAndSet(false, true)) {
+                connection.close()
+                scope.cancel()
             }
         }
-        val service = grpcClient.withService<Daemon>()
-        val outgoingPackets = Channel<ByteArray>(capacity = DuplexChannelPipe.DEFAULT_CAPACITY)
-        val scope = CoroutineScope(
-            SupervisorJob() + Dispatchers.IO + CoroutineName("wg-kotlin-packet-rpc-bridge"),
-        )
-
-        scope.launch {
-            try {
-                val outgoingFlow = flow {
-                    emit(ClientMessage { payload = ClientMessage.Payload.Config(config) })
-                    outgoingPackets.receiveAsFlow().collect { packet ->
-                        emit(
-                            ClientMessage {
-                                payload = ClientMessage.Payload.OutgoingPacket(
-                                    Packet { data = packet.toProtoByteString() },
-                                )
-                            },
-                        )
-                    }
-                }
-
-                service.Session(outgoingFlow).collect { response ->
-                    when (val payload = response.payload) {
-                        is ServerMessage.Payload.IncomingPacket -> pipe.send(payload.value.data.toByteArray())
-                        is ServerMessage.Payload.Error -> throw IllegalStateException("Daemon session failed (${payload.value.code}): ${payload.value.message}")
-                        is ServerMessage.Payload.Started -> { }
-                        null -> throw IllegalStateException("Daemon returned empty session message payload")
-                    }
-                }
-            } catch (_: CancellationException) {
-            } catch (throwable: Throwable) {
-                onFailure(throwable)
+        fun fail(error: Throwable) {
+            if (closed.compareAndSet(false, true)) {
+                connection.close()
+                scope.cancel()
+                onFailure(error)
             }
         }
-
         scope.launch {
             try {
                 while (true) {
-                    outgoingPackets.send(pipe.receive())
+                    when (val payload = IpcProtocol.readServer(connection.input).payload) {
+                        is ServerMessage.Payload.IncomingPacket -> pipe.send(payload.value.data.toByteArray())
+                        is ServerMessage.Payload.Error -> error("Daemon session failed (${payload.value.code}): ${payload.value.message}")
+                        else -> error("Unexpected daemon session message")
+                    }
                 }
             } catch (_: CancellationException) {
-            } catch (throwable: Throwable) {
-                onFailure(throwable)
-            }
+            } catch (error: Throwable) { fail(error) }
         }
-
-        return AutoCloseable {
-            outgoingPackets.close()
-            scope.cancel()
-            grpcClient.shutdownNow()
-            runCatching { runBlocking { grpcClient.awaitTermination(CLOSE_TIMEOUT_MILLIS.milliseconds) } }
+        scope.launch {
+            try {
+                while (true) {
+                    val bytes = pipe.receive()
+                    require(bytes.size in 1..65_535) { "Invalid outgoing packet length" }
+                    IpcProtocol.writeClient(connection.output, ClientMessage {
+                        payload = ClientMessage.Payload.OutgoingPacket(Packet { data = ByteString(bytes) })
+                    })
+                }
+            } catch (_: CancellationException) {
+            } catch (error: Throwable) { fail(error) }
         }
-    }
-
-    private companion object {
-        const val CLOSE_TIMEOUT_MILLIS: Long = 5_000
+        return AutoCloseable { close() }
     }
 }
-
-private fun ByteArray.toProtoByteString(): ByteString = ByteString(this)

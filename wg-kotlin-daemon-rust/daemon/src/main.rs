@@ -1,27 +1,23 @@
-use anyhow::{Context, bail};
-use axum::{Router, response::IntoResponse, routing::get};
+use anyhow::bail;
 use clap::Parser;
-use daemon::{logging, platform, server};
-#[cfg(target_os = "windows")]
+#[cfg(unix)]
+use daemon::owner::allow_owner_signals;
+#[cfg(windows)]
 use daemon::session;
-use daemon_proto::pb::daemon_server::DaemonServer;
+use daemon::{ipc::LocalListener, logging, owner::OwnerProcess, platform, server::DaemonService};
 use serde_json::Value;
-use server::DaemonGrpcService;
-use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tower::ServiceExt;
+use std::{path::PathBuf, sync::Arc, time::Duration};
+use tokio::sync::{Mutex, watch};
 
 #[derive(Parser, Debug)]
 #[command(name = "wg-kotlin-daemon", version)]
 struct Cli {
-    #[arg(long, default_value = "127.0.0.1")]
-    host: String,
-
-    #[arg(long, default_value_t = 8787, value_parser = clap::value_parser!(u16).range(1..=65535))]
-    port: u16,
-
+    #[arg(long)]
+    endpoint: String,
+    #[arg(long)]
+    owner_pid: u32,
+    #[arg(long)]
+    owner_start_time: u64,
     #[arg(long, help = "Path to the JSONL log file. Defaults to <exe_dir>/vpn-daemon.jsonl")]
     log_path: Option<PathBuf>,
 }
@@ -39,84 +35,97 @@ fn prepare_wintun() -> Result<String, String> {
     Ok(dll_path.to_string_lossy().to_string())
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let bind_ip = resolve_host(&cli.host)?;
     ensure_root()?;
+    let owner = OwnerProcess::open(cli.owner_pid, cli.owner_start_time)?;
+    #[cfg(unix)]
+    allow_owner_signals(owner.uid)?;
+    tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(run(cli, Arc::new(owner)))
+}
+
+async fn run(cli: Cli, owner: Arc<OwnerProcess>) -> anyhow::Result<()> {
     platform::ensure_required_binaries(platform::required_binaries()).map_err(anyhow::Error::msg)?;
-
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     {
-        let wintun_path = prepare_wintun().map_err(anyhow::Error::msg)?;
-        session::set_wintun_dll_path(wintun_path).map_err(anyhow::Error::msg)?;
+        let path = prepare_wintun().map_err(anyhow::Error::msg)?;
+        session::set_wintun_dll_path(path).map_err(anyhow::Error::msg)?;
     }
-
-    let log_path = cli.log_path.unwrap_or_else(|| {
-        let mut dir =
-            std::env::current_exe().expect("failed to get executable path").parent().expect("executable has no parent directory").to_path_buf();
-        dir.push("vpn-daemon.jsonl");
-        dir
-    });
-
-    let scribe = logging::create_daemon_scribe(&log_path)?;
-    let scribe = Arc::new(Mutex::new(scribe));
-
-    {
-        let mut guard = scribe.lock().await;
-        guard.hire();
-        let mut scroll = guard.new_scroll(None);
-        scroll.insert("event".to_string(), Value::String("daemon_startup".to_string()));
-        scroll.insert("host".to_string(), Value::String(bind_ip.to_string()));
-        scroll.insert("port".to_string(), Value::Number((cli.port as u64).into()));
-        scroll.insert("pid".to_string(), Value::Number((std::process::id() as u64).into()));
-        guard.seal(scroll, true);
+    let log_path = cli.log_path.unwrap_or_else(|| std::env::current_exe().expect("missing executable path").with_file_name("vpn-daemon.jsonl"));
+    let mut scribe = logging::create_daemon_scribe(&log_path)?;
+    scribe.hire();
+    let service = DaemonService::new(Arc::new(Mutex::new(scribe)));
+    let mut listener = match LocalListener::bind(&cli.endpoint, &owner) {
+        Ok(listener) => listener,
+        Err(error) => {
+            service.seal_scroll("daemon_error", [("error".into(), Value::String(error.to_string()))], false).await;
+            service.retire_logs().await;
+            return Err(error.into());
+        }
+    };
+    service
+        .seal_scroll(
+            "daemon_startup",
+            [
+                ("endpoint".into(), Value::String(cli.endpoint)),
+                ("pid".into(), Value::from(std::process::id())),
+                ("owner_pid".into(), Value::from(owner.pid)),
+            ],
+            true,
+        )
+        .await;
+    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    let mut connections = tokio::task::JoinSet::new();
+    let mut monitor = tokio::time::interval(Duration::from_millis(100));
+    let signal = shutdown_signal();
+    tokio::pin!(signal);
+    let result: std::io::Result<()> = loop {
+        tokio::select! {
+            _ = &mut signal => break Ok(()),
+            _ = shutdown_rx.changed() => break Ok(()),
+            _ = monitor.tick() => { if !owner.is_alive() { break Ok(()); } },
+            Some(_) = connections.join_next(), if !connections.is_empty() => {},
+            connection = listener.accept() => {
+                let (stream, peer_pid) = match connection { Ok(value) => value, Err(error) => break Err(error) };
+                if !owner.authorizes(peer_pid) {
+                    service.seal_scroll("daemon_connection_rejected", [("peer_pid".into(), Value::from(peer_pid))], false).await;
+                    drop(stream);
+                    continue;
+                }
+                let service = service.clone();
+                let shutdown = shutdown_tx.clone();
+                let mut stopping = shutdown.subscribe();
+                connections.spawn(async move {
+                    tokio::select! {
+                        result = service.serve_connection(stream, shutdown) => {
+                            if let Err(error) = result {
+                                service.seal_scroll("daemon_connection_error", [("error".into(), Value::String(error.to_string()))], false).await;
+                            }
+                        },
+                        _ = stopping.changed() => {},
+                    }
+                });
+            }
+        }
+    };
+    let _ = shutdown_tx.send(true);
+    if let Err(error) = &result {
+        service.seal_scroll("daemon_error", [("error".into(), Value::String(error.to_string()))], false).await;
     }
-
-    let grpc_service = DaemonGrpcService::new(Arc::clone(&scribe));
-    let addr = SocketAddr::new(bind_ip, cli.port);
-
-    let grpc_svc = DaemonServer::new(grpc_service);
-    let fallback = grpc_svc.map_request(|req: axum::extract::Request| req.map(tonic::body::Body::new));
-
-    let app = Router::new().route("/version", get(version_handler)).fallback_service(fallback);
-
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    let server_result = axum::serve(listener, app.into_make_service()).with_graceful_shutdown(shutdown_signal()).await;
-
-    if let Err(error) = &server_result {
-        let guard = scribe.lock().await;
-        let mut scroll = guard.new_scroll(None);
-        scroll.insert("event".to_string(), Value::String("daemon_error".to_string()));
-        scroll.insert("error".to_string(), Value::String(error.to_string()));
-        guard.seal(scroll, false);
+    drop(listener);
+    let drained = tokio::time::timeout(Duration::from_secs(4), async {
+        while connections.join_next().await.is_some() {}
+        service.wait_for_sessions().await;
+    })
+    .await
+    .is_ok();
+    service.seal_scroll("daemon_shutdown", [("sessions_drained".into(), Value::Bool(drained))], result.is_ok() && drained).await;
+    service.retire_logs().await;
+    if !drained {
+        std::process::exit(1);
     }
-
-    {
-        let mut guard = scribe.lock().await;
-        let mut scroll = guard.new_scroll(None);
-        scroll.insert("event".to_string(), Value::String("daemon_shutdown".to_string()));
-        guard.seal(scroll, server_result.is_ok());
-        guard.retire().await;
-    }
-
-    server_result.context("daemon gRPC server failed")?;
+    result?;
     Ok(())
-}
-
-fn resolve_host(host: &str) -> anyhow::Result<IpAddr> {
-    let normalized = host.trim().trim_start_matches('[').trim_end_matches(']');
-    let ip = normalized.parse::<IpAddr>().with_context(|| format!("'{host}' is not a valid IP address"))?;
-
-    if !ip.is_loopback() {
-        bail!("daemon refuses to bind to non-loopback host '{host}'");
-    }
-
-    Ok(ip)
-}
-
-async fn version_handler() -> impl IntoResponse {
-    env!("CARGO_PKG_VERSION")
 }
 
 #[cfg(target_family = "unix")]
@@ -161,5 +170,11 @@ fn ensure_root() -> anyhow::Result<()> {
 }
 
 async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("failed to install SIGTERM handler");
+        tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {} }
+    }
+    #[cfg(not(unix))]
     let _ = tokio::signal::ctrl_c().await;
 }

@@ -26,6 +26,7 @@ macro_rules! field {
         $bytes[start..start + value.len()].copy_from_slice(&value);
     }};
 }
+pub(super) use field;
 
 impl EndpointRoute {
     pub fn lookup(destination: IpAddr) -> io::Result<Self> {
@@ -51,16 +52,7 @@ impl EndpointRoute {
         })
     }
 
-    pub fn replace(&self) -> io::Result<()> {
-        let _ = self.delete();
-        exchange(self.message(libc::RTM_ADD)?).map(|_| ())
-    }
-
-    pub fn delete(&self) -> io::Result<()> {
-        exchange(self.message(libc::RTM_DELETE)?).map(|_| ())
-    }
-
-    fn message(&self, operation: i32) -> io::Result<Vec<u8>> {
+    pub(super) fn message(&self, operation: i32) -> io::Result<Vec<u8>> {
         let mut payload = ip_address(self.destination);
         let mut addrs = libc::RTA_DST;
         let mut flags = libc::RTF_UP | libc::RTF_HOST | libc::RTF_STATIC;
@@ -115,7 +107,7 @@ impl EndpointRoute {
     }
 }
 
-fn ip_address(ip: IpAddr) -> Vec<u8> {
+pub(super) fn ip_address(ip: IpAddr) -> Vec<u8> {
     match ip {
         IpAddr::V4(ip) => {
             let mut bytes = vec![0; size_of::<libc::sockaddr_in>()];
@@ -134,7 +126,7 @@ fn ip_address(ip: IpAddr) -> Vec<u8> {
     }
 }
 
-fn link_address(index: u16) -> Vec<u8> {
+pub(super) fn link_address(index: u16) -> Vec<u8> {
     let mut bytes = vec![0; size_of::<libc::sockaddr_dl>()];
     bytes[0] = bytes.len() as u8;
     bytes[1] = libc::AF_LINK as u8;
@@ -142,12 +134,13 @@ fn link_address(index: u16) -> Vec<u8> {
     bytes
 }
 
-fn append(payload: &mut Vec<u8>, address: &[u8]) {
+pub(super) fn append(payload: &mut Vec<u8>, address: &[u8]) {
+    let start = payload.len();
     payload.extend_from_slice(address);
-    payload.resize(payload.len().next_multiple_of(4), 0);
+    payload.resize(start + address.len().max(4).next_multiple_of(4), 0);
 }
 
-fn header(bytes: &[u8]) -> io::Result<libc::rt_msghdr> {
+pub(super) fn header(bytes: &[u8]) -> io::Result<libc::rt_msghdr> {
     if bytes.len() < size_of::<libc::rt_msghdr>() {
         return Err(io::Error::other("truncated routing message"));
     }
@@ -155,7 +148,7 @@ fn header(bytes: &[u8]) -> io::Result<libc::rt_msghdr> {
     Ok(unsafe { std::ptr::read_unaligned(bytes.as_ptr().cast()) })
 }
 
-fn addresses(bytes: &[u8], header: &libc::rt_msghdr) -> io::Result<[Option<Vec<u8>>; libc::RTAX_MAX as usize]> {
+pub(super) fn addresses(bytes: &[u8], header: &libc::rt_msghdr) -> io::Result<[Option<Vec<u8>>; libc::RTAX_MAX as usize]> {
     let mut result = std::array::from_fn(|_| None);
     let mut offset = size_of::<libc::rt_msghdr>();
     for (index, slot) in result.iter_mut().enumerate() {
@@ -173,7 +166,7 @@ fn addresses(bytes: &[u8], header: &libc::rt_msghdr) -> io::Result<[Option<Vec<u
     Ok(result)
 }
 
-fn exchange(mut message: Vec<u8>) -> io::Result<Vec<u8>> {
+pub(super) fn exchange(mut message: Vec<u8>) -> io::Result<Vec<u8>> {
     let operation = message[offset_of!(libc::rt_msghdr, rtm_type)];
     let pid = unsafe { libc::getpid() };
     let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);

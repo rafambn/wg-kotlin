@@ -25,6 +25,9 @@ mod endpoint;
 mod endpoint;
 pub use endpoint::EndpointRoute;
 
+#[cfg(target_os = "macos")]
+mod routes_macos;
+
 pub type CleanupHook = Box<dyn FnOnce() -> Result<(), String> + Send + 'static>;
 
 pub fn required_binaries() -> &'static [&'static str] {
@@ -268,6 +271,7 @@ pub fn build_and_filter_routes(
     Ok((mgr, filtered_routes, endpoint_routes))
 }
 
+#[cfg(not(target_os = "macos"))]
 pub fn add_routes_with_predelete(mgr: &mut RouteManager, filtered_routes: &[Route], endpoint_routes: &[EndpointRoute]) -> Result<(), String> {
     for route in endpoint_routes {
         route.replace().map_err(|error| format!("failed to add endpoint route: {error}"))?;
@@ -279,6 +283,7 @@ pub fn add_routes_with_predelete(mgr: &mut RouteManager, filtered_routes: &[Rout
     Ok(())
 }
 
+#[cfg(not(target_os = "macos"))]
 fn cleanup_routes<F>(filtered_routes: &[Route], endpoint_routes: &[EndpointRoute], dns_teardown: F) -> Result<(), String>
 where
     F: FnOnce() -> Result<(), String>,
@@ -314,6 +319,7 @@ where
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 pub fn into_cleanup_hook(
     setup_result: Result<(), String>,
     filtered_routes: Vec<Route>,

@@ -1,17 +1,17 @@
-use crate::platform::{
-    CleanupHook, add_routes_with_predelete, build_and_filter_routes, into_cleanup_hook, ips_to_args, normalize_domains, run_command,
-};
-use daemon_proto::pb::TunSessionConfig;
 use super::EndpointRoute;
+use super::routes_macos::SessionRoutes;
+use crate::platform::{CleanupHook, build_and_filter_routes, ips_to_args, normalize_domains, run_command};
+use daemon_proto::pb::TunSessionConfig;
 
 pub fn configure_session(config: &TunSessionConfig, interface_name: &str, endpoint_routes: Vec<EndpointRoute>) -> Result<CleanupHook, String> {
-    let (mut mgr, filtered_routes, endpoint_routes) = build_and_filter_routes(config, interface_name, endpoint_routes)?;
+    let (_, filtered_routes, endpoint_routes) = build_and_filter_routes(config, interface_name, endpoint_routes)?;
+    let mut routes = SessionRoutes::new();
 
     let dns_servers = ips_to_args(config.dns.as_ref().map(|dns| &dns.servers[..]).unwrap_or(&[]));
     let dns_domains = normalize_domains(&config.dns.as_ref().map(|dns| dns.search_domains.clone()).unwrap_or_default());
 
     let setup_result = (|| -> Result<(), String> {
-        add_routes_with_predelete(&mut mgr, &filtered_routes, &endpoint_routes)?;
+        routes.install(&filtered_routes, &endpoint_routes).map_err(|error| format!("failed to configure routes: {error}"))?;
 
         clear_dns_entries(interface_name)?;
         if !dns_servers.is_empty() && !dns_domains.is_empty() {
@@ -47,7 +47,22 @@ pub fn configure_session(config: &TunSessionConfig, interface_name: &str, endpoi
         Ok(())
     })();
 
-    into_cleanup_hook(setup_result, filtered_routes, endpoint_routes, interface_name.to_string(), clear_dns_entries)
+    let cleanup_interface = interface_name.to_string();
+    let mut cleanup = move || {
+        let route_result = routes.restore();
+        let dns_result = clear_dns_entries(&cleanup_interface);
+        match (route_result, dns_result) {
+            (Ok(()), result) | (result, Ok(())) => result,
+            (Err(routes), Err(dns)) => Err(format!("{routes}; {dns}")),
+        }
+    };
+    match setup_result {
+        Ok(()) => Ok(Box::new(cleanup)),
+        Err(error) => match cleanup() {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => Err(format!("{error}; cleanup failed: {cleanup_error}")),
+        },
+    }
 }
 
 fn clear_dns_entries(interface_name: &str) -> Result<(), String> {

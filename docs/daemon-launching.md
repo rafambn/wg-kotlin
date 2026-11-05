@@ -128,6 +128,15 @@ signal ownership arrangement. Other processes of that UID can also send signals;
 this grants them no permission to create TUN sessions. Child DNS tools receive
 matching root UIDs and do not inherit the launcher's standard input.
 
+On macOS, route setup records the exact entries displaced by the session,
+including endpoint exceptions and the default route. Snapshots distinguish
+prefixes and interface scopes and retain the gateway, source address, interface,
+flags and metrics. Cleanup removes the session's changes and restores the
+previous entries, including after a route or DNS setup failure. Each session
+keeps its own list of created and replaced routes.
+Cleanup leaves detected external route changes untouched and
+reports the conflict while continuing with other routes and DNS.
+
 Reference: [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice),
 [LOCAL_PEERPID](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/un.h).
 

@@ -1,30 +1,42 @@
 package com.rafambn.wgkotlin
 
+import com.rafambn.wgkotlin.crypto.CryptoSessionManager
 import com.rafambn.wgkotlin.crypto.CryptoSessionManagerImpl
+import com.rafambn.wgkotlin.iface.InterfaceManager
 import com.rafambn.wgkotlin.iface.PlatformInterfaceFactory
 import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
+import com.rafambn.wgkotlin.network.SocketManager
 import com.rafambn.wgkotlin.network.SocketManagerImpl
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
+import kotlinx.coroutines.CancellationException
 
-class Vpn(
+class Vpn internal constructor(
     val interfaceName: String,
-    engine: Engine = Engine.BORINGTUN
+    private val cryptoSessionManager: CryptoSessionManager,
+    private val socketManager: SocketManager,
+    private val interfaceManager: InterfaceManager,
 ) {
+
+    constructor(
+        interfaceName: String,
+        engine: Engine = Engine.BORINGTUN,
+    ) : this(interfaceName, createRuntimeComponents(engine))
+
+    private constructor(
+        interfaceName: String,
+        components: VpnRuntimeComponents,
+    ) : this(
+        interfaceName = interfaceName,
+        cryptoSessionManager = components.cryptoSessionManager,
+        socketManager = components.socketManager,
+        interfaceManager = components.interfaceManager,
+    )
 
     companion object {
         const val DEFAULT_PORT: Int = 51820
     }
 
-    private val tunPipePair = DuplexChannelPipe.create<ByteArray>()
-    private val networkPipePair = DuplexChannelPipe.create<UdpDatagram>()
-    private val cryptoSessionManager = CryptoSessionManagerImpl(
-        tunPipe = tunPipePair.second,
-        networkPipe = networkPipePair.second,
-        engine = engine,
-    )
-    private val socketManager = SocketManagerImpl(networkPipe = networkPipePair.first)
-    private val interfaceManager = PlatformInterfaceFactory.create(tunPipePair.first)
     private var currentParsedConfiguration: ParsedVpnConfiguration? = null
     private var originalConfiguration: VpnConfiguration? = null
 
@@ -37,7 +49,8 @@ class Vpn(
         return interfaceManager.isRunning() && cryptoSessionManager.hasActiveSessions()
     }
 
-    fun open(configuration: VpnConfiguration) {
+    /** Starts the VPN and returns only after the daemon confirms that the TUN session is ready. */
+    suspend fun open(configuration: VpnConfiguration) {
         requireValidConfiguration(configuration)
         require(configuration.interfaceName == interfaceName) {
             "Configuration interface name `${configuration.interfaceName}` does not match this Vpn's interface name `$interfaceName`"
@@ -49,23 +62,30 @@ class Vpn(
         currentParsedConfiguration = parsed
         originalConfiguration = configuration
 
-        operation("reconcileSessions") {
-            cryptoSessionManager.reconcileSessions(parsed)
-        }
+        try {
+            operation("reconcileSessions") {
+                cryptoSessionManager.reconcileSessions(parsed)
+            }
 
-        operation("start") {
-            cryptoSessionManager.start { stop() }
-        }
+            operation("cryptoStart") {
+                cryptoSessionManager.start { stop() }
+            }
 
-        operation("socketStart") {
-            socketManager.start(
-                listenPort = configuration.listenPort ?: DEFAULT_PORT,
-                onFailure = { stop() },
-            )
-        }
+            operation("socketStart") {
+                socketManager.start(
+                    listenPort = configuration.listenPort ?: DEFAULT_PORT,
+                    onFailure = { stop() },
+                )
+            }
 
-        operation("start") {
-            interfaceManager.start(parsed.toTunSessionConfig()) { stop() }
+            suspendOperation("interfaceStart") {
+                interfaceManager.start(parsed.toTunSessionConfig()) { stop() }
+            }
+        } catch (startupFailure: Throwable) {
+            runCatching { stop() }
+                .exceptionOrNull()
+                ?.let(startupFailure::addSuppressed)
+            throw startupFailure
         }
     }
 
@@ -116,4 +136,37 @@ class Vpn(
             )
         }
     }
+
+    private suspend fun <T> suspendOperation(name: String, block: suspend () -> T): T {
+        return try {
+            block()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (throwable: Throwable) {
+            throw IllegalStateException(
+                "Operation `$name` failed: ${throwable.message ?: "unknown"}",
+                throwable,
+            )
+        }
+    }
+}
+
+private data class VpnRuntimeComponents(
+    val cryptoSessionManager: CryptoSessionManager,
+    val socketManager: SocketManager,
+    val interfaceManager: InterfaceManager,
+)
+
+private fun createRuntimeComponents(engine: Engine): VpnRuntimeComponents {
+    val tunPipePair = DuplexChannelPipe.create<ByteArray>()
+    val networkPipePair = DuplexChannelPipe.create<UdpDatagram>()
+    return VpnRuntimeComponents(
+        cryptoSessionManager = CryptoSessionManagerImpl(
+            tunPipe = tunPipePair.second,
+            networkPipe = networkPipePair.second,
+            engine = engine,
+        ),
+        socketManager = SocketManagerImpl(networkPipe = networkPipePair.first),
+        interfaceManager = PlatformInterfaceFactory.create(tunPipePair.first),
+    )
 }

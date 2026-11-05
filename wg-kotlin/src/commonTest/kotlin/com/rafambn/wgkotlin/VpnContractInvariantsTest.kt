@@ -1,5 +1,6 @@
 package com.rafambn.wgkotlin
 
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 
@@ -16,7 +17,7 @@ class VpnContractInvariantsTest {
     }
 
     @Test
-    fun rejectsDuplicatePeerPublicKeysOnOpen() {
+    fun rejectsDuplicatePeerPublicKeysOnOpen() = runTest {
         val duplicatedPeers = listOf(
             VpnPeer(publicKey = "peer-a", endpointAddress = "198.51.100.1", endpointPort = 51820),
             VpnPeer(publicKey = "peer-a", endpointAddress = "198.51.100.2", endpointPort = 51821),
@@ -36,7 +37,7 @@ class VpnContractInvariantsTest {
     }
 
     @Test
-    fun openRejectsMismatchedInterfaceName() {
+    fun openRejectsMismatchedInterfaceName() = runTest {
         val vpn = testVpn(interfaceName = "utun112")
 
         assertFailsWith<IllegalArgumentException> {

@@ -5,7 +5,7 @@ import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 interface InterfaceManager {
     fun isRunning(): Boolean
 
-    fun start(config: TunSessionConfig, onFailure: (Throwable) -> Unit = {})
+    suspend fun start(config: TunSessionConfig, onFailure: (Throwable) -> Unit = {})
 
     fun stop()
 

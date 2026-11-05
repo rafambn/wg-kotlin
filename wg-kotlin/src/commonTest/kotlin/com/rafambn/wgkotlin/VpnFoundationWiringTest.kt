@@ -1,5 +1,6 @@
 package com.rafambn.wgkotlin
 
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -13,7 +14,7 @@ class VpnFoundationWiringTest {
     private val peerKey = "6fX3drXr/7L0KleChX2NDSSSXWMQZnIcXtNCmieYw0I="
 
     @Test
-    fun inMemoryLifecycleStillWorks() {
+    fun inMemoryLifecycleStillWorks() = runTest {
         val vpn = testVpn(interfaceName = "utun120")
 
         assertFalse(vpn.isRunning())
@@ -34,7 +35,7 @@ class VpnFoundationWiringTest {
     }
 
     @Test
-    fun repeatedStartKeepsVpnRunning() {
+    fun repeatedStartKeepsVpnRunning() = runTest {
         val vpn = testVpn(interfaceName = "utun121")
 
         vpn.open(
@@ -58,7 +59,7 @@ class VpnFoundationWiringTest {
     }
 
     @Test
-    fun stopThenOpenWithNewConfigUpdatesConfiguration() {
+    fun stopThenOpenWithNewConfigUpdatesConfiguration() = runTest {
         val vpn = testVpn(interfaceName = "utun122")
 
         vpn.open(

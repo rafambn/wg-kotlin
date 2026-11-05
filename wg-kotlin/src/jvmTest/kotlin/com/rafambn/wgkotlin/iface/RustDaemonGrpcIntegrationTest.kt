@@ -5,6 +5,7 @@ import com.rafambn.wgkotlin.daemon.proto.Ip
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
+import kotlinx.coroutines.runBlocking
 import kotlinx.io.bytestring.ByteString
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -17,13 +18,13 @@ import kotlin.test.assertTrue
 
 class RustDaemonGrpcIntegrationTest {
     @Test
-    fun kotlinClientTalksToRustDaemonProcess() {
+    fun kotlinClientTalksToRustDaemonProcess() = runBlocking {
         if (System.getProperty(RUN_RUST_DAEMON_TEST_PROPERTY) != "true") {
-            return
+            return@runBlocking
         }
 
         if (!System.getProperty("os.name").lowercase().contains("linux")) {
-            return
+            return@runBlocking
         }
 
         val logPath = Files.createTempFile("wgkotlin-rust-daemon", ".log")

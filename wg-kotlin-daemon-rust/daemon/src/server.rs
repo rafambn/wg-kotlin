@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tonic::Status;
 
 #[derive(Clone)]
@@ -21,14 +21,21 @@ pub struct DaemonService {
 
 impl DaemonService {
     /// Only the IPC accept loop calls this, after kernel peer authorization.
-    pub async fn serve_connection<S>(&self, mut stream: S, shutdown: tokio::sync::watch::Sender<bool>) -> std::io::Result<()>
+    pub async fn serve_connection<S>(&self, mut stream: S, shutdown: watch::Sender<bool>) -> std::io::Result<()>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
         let ready =
             ServerMessage { payload: Some(ServerPayload::Ready(DaemonReady { protocol_version: PROTOCOL_VERSION, pid: std::process::id() })) };
-        tokio::time::timeout(Duration::from_secs(5), write_frame(&mut stream, &ready)).await??;
-        let first: Option<ClientMessage> = tokio::time::timeout(Duration::from_secs(5), read_frame(&mut stream)).await??;
+        let mut stopping = shutdown.subscribe();
+        let first: Option<ClientMessage> = tokio::select! {
+            biased;
+            _ = stopping.wait_for(|stopped| *stopped) => return Ok(()),
+            result = async {
+                tokio::time::timeout(Duration::from_secs(5), write_frame(&mut stream, &ready)).await??;
+                tokio::time::timeout(Duration::from_secs(5), read_frame(&mut stream)).await?
+            } => result?,
+        };
         let Some(first) = first else {
             return Ok(());
         }; // Readiness probe.
@@ -40,9 +47,15 @@ impl DaemonService {
         let (tx, rx) = mpsc::channel(PACKET_CHANNEL_CAPACITY);
         tx.send(Ok(first)).await.map_err(std::io::Error::other)?;
         let service = self.clone();
+        let mut read_shutdown = stopping.clone();
         let read = async move {
             loop {
-                match read_frame(&mut reader).await {
+                let result = tokio::select! {
+                    biased;
+                    _ = read_shutdown.wait_for(|stopped| *stopped) => return Ok(()),
+                    result = read_frame(&mut reader) => result,
+                };
+                match result {
                     Ok(Some(message)) => {
                         if tx.send(Ok(message)).await.is_err() {
                             return Ok::<_, std::io::Error>(());
@@ -57,18 +70,27 @@ impl DaemonService {
             }
         };
         let write = async move {
-            let mut responses = match service.session(rx).await {
-                Ok(responses) => responses,
-                Err(status) => {
-                    tokio::time::timeout(Duration::from_secs(5), write_frame(&mut writer, &error_message(&status))).await??;
-                    return Ok(());
-                }
-            };
-            while let Some(message) = responses.recv().await {
-                let message = message.unwrap_or_else(|status| error_message(&status));
-                tokio::time::timeout(Duration::from_secs(5), write_frame(&mut writer, &message)).await??;
+            // Let initialization transfer the session to its loop before
+            // cancelling socket writes; otherwise startup resources can leak.
+            let responses = service.session(rx, stopping.clone()).await;
+            tokio::select! {
+                biased;
+                _ = stopping.wait_for(|stopped| *stopped) => Ok(()),
+                result = async {
+                    let mut responses = match responses {
+                        Ok(responses) => responses,
+                        Err(status) => {
+                            tokio::time::timeout(Duration::from_secs(5), write_frame(&mut writer, &error_message(&status))).await??;
+                            return Ok(());
+                        }
+                    };
+                    while let Some(message) = responses.recv().await {
+                        let message = message.unwrap_or_else(|status| error_message(&status));
+                        tokio::time::timeout(Duration::from_secs(5), write_frame(&mut writer, &message)).await??;
+                    }
+                    Ok::<_, std::io::Error>(())
+                } => result,
             }
-            Ok::<_, std::io::Error>(())
         };
         tokio::try_join!(read, write)?;
         Ok(())
@@ -102,11 +124,12 @@ impl DaemonService {
         self,
         mut incoming: mpsc::Receiver<Result<ClientMessage, Status>>,
         session: TunSession,
-        interface_name: String,
+        mut shutdown: watch::Receiver<bool>,
         started_at: Instant,
         session_fields: Vec<(String, Value)>,
         tx: mpsc::Sender<Result<ServerMessage, Status>>,
     ) {
+        let interface_name = session.interface_name().to_string();
         let read_session = session.clone();
         let read_tx = tx.clone();
         let (stop_read_tx, mut stop_read_rx) = oneshot::channel();
@@ -143,6 +166,8 @@ impl DaemonService {
         let write_result = async {
             loop {
                 let next_message = tokio::select! {
+                    biased;
+                    _ = shutdown.wait_for(|stopped| *stopped) => return Ok(()),
                     _ = tx.closed() => return Ok(()),
                     read_done = &mut read_done_rx => {
                         return match read_done {
@@ -178,7 +203,10 @@ impl DaemonService {
         .await;
 
         let _ = stop_read_tx.send(());
-        let close_result = session.close();
+        // Route/DNS teardown is blocking; keep the daemon's shutdown timer free.
+        let close_result = tokio::task::spawn_blocking(move || session.close())
+            .await
+            .unwrap_or_else(|error| Err(format!("failed joining session cleanup: {error}")));
         let read_join_result = read_task.await;
 
         let mut success = true;
@@ -242,7 +270,11 @@ impl DaemonService {
     async fn session(
         &self,
         mut incoming: mpsc::Receiver<Result<ClientMessage, Status>>,
+        shutdown: watch::Receiver<bool>,
     ) -> Result<mpsc::Receiver<Result<ServerMessage, Status>>, Status> {
+        if *shutdown.borrow() {
+            return Err(Status::unavailable("daemon is shutting down"));
+        }
         let started_at = Instant::now();
         let first_message =
             incoming.recv().await.transpose()?.ok_or_else(|| Status::invalid_argument("first session message must contain config"))?;
@@ -314,8 +346,6 @@ impl DaemonService {
             }
         };
 
-        let interface_name = session.interface_name().to_string();
-
         let (tx, rx) = mpsc::channel::<Result<ServerMessage, Status>>(PACKET_CHANNEL_CAPACITY);
         let _ = tx
             .send(Ok(ServerMessage {
@@ -328,7 +358,7 @@ impl DaemonService {
 
         let service = self.clone();
         tokio::spawn(async move {
-            service.run_session_loop(incoming, session, interface_name, started_at, session_fields, tx).await;
+            service.run_session_loop(incoming, session, shutdown, started_at, session_fields, tx).await;
         });
 
         Ok(rx)
@@ -436,6 +466,45 @@ mod tests {
         assert!(rx.try_recv().is_err());
     }
 
+    #[tokio::test]
+    async fn shutdown_closes_idle_and_backpressured_connections() {
+        use tokio::io::AsyncReadExt;
+
+        for phase in ["before_ready", "idle", "blocked_error"] {
+            let mut scribe = Scribe::builder().build();
+            scribe.hire();
+            let service = DaemonService::new(Arc::new(Mutex::new(scribe)));
+            let (shutdown, _receiver) = watch::channel(false);
+            if phase == "before_ready" {
+                shutdown.send_replace(true);
+            }
+            let (mut client, stream) = tokio::io::duplex(1);
+            let connection_service = service.clone();
+            let connection_shutdown = shutdown.clone();
+            let mut connection = tokio::spawn(async move { connection_service.serve_connection(stream, connection_shutdown).await });
+            if phase != "before_ready" {
+                let ready = read_frame::<ServerMessage>(&mut client).await.unwrap().unwrap();
+                assert!(matches!(ready.payload, Some(ServerPayload::Ready(_))));
+                if phase == "blocked_error" {
+                    write_frame(&mut client, &ClientMessage { payload: Some(ClientPayload::Config(TunSessionConfig::default())) }).await.unwrap();
+                    // Read only one byte: the error frame cannot fit in this
+                    // stream, so its write remains blocked until shutdown.
+                    client.read_u8().await.unwrap();
+                }
+                shutdown.send(true).unwrap();
+            }
+            let result = tokio::time::timeout(Duration::from_secs(2), &mut connection).await;
+            if result.is_err() {
+                connection.abort();
+                let _ = connection.await;
+            }
+            drop(client);
+            service.retire_logs().await;
+            result.unwrap().unwrap().unwrap();
+            assert!(service.active_sessions.lock().await.is_empty());
+        }
+    }
+
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn equivalent_macos_names_share_the_reservation_even_at_capacity() {
@@ -444,6 +513,7 @@ mod tests {
         let mut scribe = Scribe::builder().build();
         scribe.hire();
         let service = DaemonService::new(Arc::new(Mutex::new(scribe)));
+        let (_shutdown_tx, shutdown) = watch::channel(false);
         // Fill the reservations so even an unfixed implementation cannot reach
         // TUN creation. An alias must be rejected as a duplicate, not capacity.
         service.active_sessions.lock().await.extend((0..MAX_ACTIVE_SESSIONS).map(|index| format!("utun{index}")));
@@ -461,7 +531,7 @@ mod tests {
             };
             let (tx, rx) = mpsc::channel(1);
             tx.send(Ok(ClientMessage { payload: Some(ClientPayload::Config(config)) })).await.unwrap();
-            let error = service.session(rx).await.unwrap_err();
+            let error = service.session(rx, shutdown.clone()).await.unwrap_err();
             assert_eq!(error.code(), expected_code, "{name}: {error}");
             assert_eq!(service.active_sessions.lock().await.len(), MAX_ACTIVE_SESSIONS);
         }

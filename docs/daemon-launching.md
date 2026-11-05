@@ -202,9 +202,18 @@ Failure to terminate is reported. Forced termination cannot run network cleanup
 and can leave its temporary Unix socket directory behind.
 
 The daemon monitors its owner and begins shutdown when that app exits. Shutdown
-stops accepting connections, cancels session connections, and gives session
-cleanup a bounded period. The client still retains independent force-kill control
-for a daemon whose application runtime is stuck.
+stops accepting connections and sends the same stop signal to the IPC handlers
+and session loops. In-progress initialization transfers its session to the loop
+before socket writes are cancelled. Route/DNS cleanup runs outside the async
+executor, and the daemon gives connections and sessions four seconds to drain.
+If that deadline expires, it records sessions_drained=false and exits with code
+1. The client retains independent force-kill control for a stuck daemon.
+
+Shutdown was exercised on Linux in an isolated container with two real TUNs,
+routes and systemd-resolved. The scenarios cover IPC shutdown, SIGTERM, owner
+exit, clients that stop reading, route/DNS cleanup failures, and an unresponsive
+resolver with a single async worker. Privileged macOS and Windows shutdown have
+not been exercised in this validation.
 
 Use the existing `Vpn(interfaceName, engine)` constructor and `open(configuration)`.
 `DaemonProcess.launch(...)` registers the first running daemon for JVM VPN sessions.

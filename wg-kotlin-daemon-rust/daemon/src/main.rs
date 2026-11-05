@@ -80,15 +80,9 @@ async fn run(cli: Cli, owner: Arc<OwnerProcess>) -> anyhow::Result<()> {
                 }
                 let service = service.clone();
                 let shutdown = shutdown_tx.clone();
-                let mut stopping = shutdown.subscribe();
                 connections.spawn(async move {
-                    tokio::select! {
-                        result = service.serve_connection(stream, shutdown) => {
-                            if let Err(error) = result {
-                                service.seal_scroll("daemon_connection_error", [("error".into(), Value::String(error.to_string()))], false).await;
-                            }
-                        },
-                        _ = stopping.changed() => {},
+                    if let Err(error) = service.serve_connection(stream, shutdown).await {
+                        service.seal_scroll("daemon_connection_error", [("error".into(), Value::String(error.to_string()))], false).await;
                     }
                 });
             }

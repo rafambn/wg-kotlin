@@ -64,10 +64,15 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
    Nomes equivalentes são rejeitados como duplicados antes de criar a TUN.
    Referência: daemon/src/server.rs, active_sessions.
 
-8. Propagar o encerramento do daemon às sessões abertas.
-   O novo transporte IPC cancela as conexões no encerramento e aguarda a
-   limpeza com prazo definido. Revalidar esse caminho com TUN, rotas e DNS
-   reais, incluindo falhas de limpeza e sessões sob backpressure.
+8. Implementado: propagar o encerramento diretamente às sessões abertas.
+   O mesmo sinal encerra o handshake, as operações de IPC e o loop da sessão,
+   sem cancelar a transferência da sessão durante a inicialização.
+   Executar o fechamento bloqueante fora do executor assíncrono para preservar
+   o prazo de limpeza de quatro segundos, inclusive com DNS travado.
+   Validado em Linux isolado com duas TUNs, rotas e systemd-resolved reais:
+   IPC, SIGTERM, saída do proprietário, respostas acumuladas, falhas de rotas
+   e DNS e expiração do prazo com um único worker assíncrono.
+   A execução privilegiada em macOS e Windows não foi validada nesta etapa.
    Referência: daemon/src/main.rs, shutdown_signal(), e daemon/src/server.rs,
    run_session_loop().
 

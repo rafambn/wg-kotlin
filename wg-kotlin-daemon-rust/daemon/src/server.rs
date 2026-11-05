@@ -109,6 +109,7 @@ impl DaemonService {
     ) {
         let read_session = session.clone();
         let read_tx = tx.clone();
+        let (stop_read_tx, mut stop_read_rx) = oneshot::channel();
         let (read_done_tx, mut read_done_rx) = oneshot::channel::<Option<String>>();
         let read_task = tokio::task::spawn_blocking(move || {
             let mut read_error_message: Option<String> = None;
@@ -119,7 +120,7 @@ impl DaemonService {
                             continue;
                         }
                         let message = ServerMessage { payload: Some(ServerPayload::IncomingPacket(Packet { data: packet_bytes })) };
-                        if read_tx.blocking_send(Ok(message)).is_err() {
+                        if !tokio::runtime::Handle::current().block_on(send_response(&read_tx, message, &mut stop_read_rx)) {
                             break;
                         }
                     }
@@ -129,7 +130,7 @@ impl DaemonService {
                     Err(error) => {
                         let read_error = format!("failed reading TUN packet: {error}");
                         let status = Status::internal(read_error.clone());
-                        let _ = read_tx.blocking_send(Ok(error_message(&status)));
+                        let _ = tokio::runtime::Handle::current().block_on(send_response(&read_tx, error_message(&status), &mut stop_read_rx));
                         read_error_message = Some(read_error);
                         break;
                     }
@@ -142,6 +143,7 @@ impl DaemonService {
         let write_result = async {
             loop {
                 let next_message = tokio::select! {
+                    _ = tx.closed() => return Ok(()),
                     read_done = &mut read_done_rx => {
                         return match read_done {
                             Ok(Some(error_message)) => Err(Status::internal(error_message)),
@@ -175,6 +177,7 @@ impl DaemonService {
         }
         .await;
 
+        let _ = stop_read_tx.send(());
         let close_result = session.close();
         let read_join_result = read_task.await;
 
@@ -183,8 +186,9 @@ impl DaemonService {
         let mut outcome = "closed";
         let mut error_type: Option<String> = None;
 
+        // A full response queue must not hold up the remaining cleanup.
         if let Err(status) = write_result {
-            let _ = tx.send(Ok(error_message(&status))).await;
+            let _ = tx.try_send(Ok(error_message(&status)));
             success = false;
             error_message_text = Some(status.message().to_string());
             error_type = Some(status.code().to_string());
@@ -193,7 +197,7 @@ impl DaemonService {
 
         if let Err(error) = close_result {
             let status = Status::internal(format!("failed closing TUN session: {error}"));
-            let _ = tx.send(Ok(error_message(&status))).await;
+            let _ = tx.try_send(Ok(error_message(&status)));
             success = false;
             error_type = Some("close_failed".to_string());
             outcome = "close_failed";
@@ -340,6 +344,14 @@ fn error_message(status: &Status) -> ServerMessage {
     ServerMessage { payload: Some(ServerPayload::Error(SessionError { code: status.code().to_string(), message: status.message().to_string() })) }
 }
 
+async fn send_response(tx: &mpsc::Sender<Result<ServerMessage, Status>>, message: ServerMessage, stop: &mut oneshot::Receiver<()>) -> bool {
+    tokio::select! {
+        biased;
+        _ = stop => false,
+        result = tx.send(Ok(message)) => result.is_ok(),
+    }
+}
+
 const MAX_PACKET_FRAME_SIZE: usize = 65535;
 const MAX_ACTIVE_SESSIONS: usize = 16;
 const PACKET_CHANNEL_CAPACITY: usize = 64;
@@ -360,4 +372,61 @@ fn session_config_fields(config: &TunSessionConfig) -> Vec<(String, Value)> {
         ("dns_domain_count".to_string(), Value::Number((dns_domain_count as u64).into())),
         ("mtu_configured".to_string(), Value::Bool(config.mtu != 0)),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::future::{Future, poll_fn};
+    use std::task::Poll;
+
+    #[tokio::test]
+    async fn blocked_reader_sends_stop_without_draining_the_response_queue() {
+        for message in [
+            ServerMessage { payload: Some(ServerPayload::IncomingPacket(Packet { data: vec![1] })) },
+            error_message(&Status::internal("TUN read failed")),
+        ] {
+            let (tx, rx) = mpsc::channel(1);
+            tx.try_send(Ok(ServerMessage::default())).unwrap();
+            let (stop_tx, mut stop_rx) = oneshot::channel();
+            let (waiting_tx, waiting_rx) = oneshot::channel();
+            let mut reader = tokio::task::spawn_blocking(move || {
+                tokio::runtime::Handle::current().block_on(async {
+                    let send = send_response(&tx, message, &mut stop_rx);
+                    tokio::pin!(send);
+                    poll_fn(|context| {
+                        assert!(send.as_mut().poll(context).is_pending());
+                        Poll::Ready(())
+                    })
+                    .await;
+                    let _ = waiting_tx.send(());
+                    send.await
+                })
+            });
+            let waiting = tokio::time::timeout(Duration::from_secs(2), waiting_rx).await;
+            let _ = stop_tx.send(());
+            let completed = tokio::time::timeout(Duration::from_secs(2), &mut reader).await;
+            // Release a failed implementation before asserting, so a blocked
+            // worker cannot hang the test runtime during shutdown.
+            drop(rx);
+            let result = match completed {
+                Ok(result) => result.unwrap(),
+                Err(error) => {
+                    let _ = reader.await;
+                    panic!("reader send did not stop: {error}");
+                }
+            };
+            waiting.unwrap().unwrap();
+            assert!(!result);
+        }
+    }
+
+    #[tokio::test]
+    async fn stopped_reader_does_not_enqueue_another_response() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let (stop_tx, mut stop_rx) = oneshot::channel();
+        stop_tx.send(()).unwrap();
+        assert!(!send_response(&tx, ServerMessage::default(), &mut stop_rx).await);
+        assert!(rx.try_recv().is_err());
+    }
 }

@@ -43,11 +43,12 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
    tentativas de restauração ou a limpeza de DNS.
    Referência: daemon/src/platform/routes_macos.rs e macos.rs.
 
-5. Tornar o envio de respostas cancelável no encerramento da sessão.
-   Se o cliente parar de ler e encerrar apenas o envio, blocking_send() pode
-   manter o leitor bloqueado enquanto o encerramento aguarda read_task.
-   Garantir a liberação do dispositivo e da reserva em active_sessions,
-   independentemente do consumo de respostas pelo cliente.
+5. Implementado: cancelar o envio de respostas no encerramento da sessão.
+   Sinalizar o cancelamento antes de fechar a TUN e aguardar read_task,
+   liberando o leitor mesmo quando a fila de respostas está cheia.
+   Encerrar também quando o receptor é descartado e enviar erros finais
+   sem esperar espaço na fila, permitindo liberar o dispositivo e a reserva
+   em active_sessions independentemente do consumo de respostas pelo cliente.
    Referência: daemon/src/server.rs, run_session_loop().
 
 6. Investigar como suportar múltiplas interfaces TUN.

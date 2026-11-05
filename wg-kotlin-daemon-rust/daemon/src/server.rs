@@ -259,6 +259,12 @@ impl DaemonService {
             return Err(Status::invalid_argument(error_message));
         }
 
+        #[cfg(target_os = "macos")]
+        let config = {
+            let index = config.interface_name[4..].trim_start_matches('0');
+            TunSessionConfig { interface_name: format!("utun{}", if index.is_empty() { "0" } else { index }), ..config }
+        };
+
         let mut duplicate_session = false;
         let mut session_limit_reached = false;
         {
@@ -428,5 +434,37 @@ mod tests {
         stop_tx.send(()).unwrap();
         assert!(!send_response(&tx, ServerMessage::default(), &mut stop_rx).await);
         assert!(rx.try_recv().is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn equivalent_macos_names_share_the_reservation_even_at_capacity() {
+        use daemon_proto::pb::{Cidr, Ip, ip};
+
+        let mut scribe = Scribe::builder().build();
+        scribe.hire();
+        let service = DaemonService::new(Arc::new(Mutex::new(scribe)));
+        // Fill the reservations so even an unfixed implementation cannot reach
+        // TUN creation. An alias must be rejected as a duplicate, not capacity.
+        service.active_sessions.lock().await.extend((0..MAX_ACTIVE_SESSIONS).map(|index| format!("utun{index}")));
+        for (name, expected_code) in [
+            ("utun01", tonic::Code::FailedPrecondition),
+            ("utun00000000001", tonic::Code::FailedPrecondition),
+            ("utun000", tonic::Code::FailedPrecondition),
+            ("utun00000000000", tonic::Code::FailedPrecondition),
+            ("utun000000000001", tonic::Code::InvalidArgument),
+        ] {
+            let config = TunSessionConfig {
+                interface_name: name.to_string(),
+                addresses: vec![Cidr { ip: Some(Ip { value: Some(ip::Value::V4(vec![10, 0, 0, 1])) }), prefix: 24 }],
+                ..Default::default()
+            };
+            let (tx, rx) = mpsc::channel(1);
+            tx.send(Ok(ClientMessage { payload: Some(ClientPayload::Config(config)) })).await.unwrap();
+            let error = service.session(rx).await.unwrap_err();
+            assert_eq!(error.code(), expected_code, "{name}: {error}");
+            assert_eq!(service.active_sessions.lock().await.len(), MAX_ACTIVE_SESSIONS);
+        }
+        service.retire_logs().await;
     }
 }

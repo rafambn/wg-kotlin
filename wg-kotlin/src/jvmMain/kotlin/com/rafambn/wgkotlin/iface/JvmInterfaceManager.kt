@@ -18,16 +18,25 @@ class JvmInterfaceManager(
     override fun start(config: TunSessionConfig, onFailure: (Throwable) -> Unit) {
         stop()
 
-        val bridge = sessionBridge.openSession(
-            config = config,
-            pipe = tunPipe,
-            onFailure = { throwable ->
-                runCatching { activeBridge?.close() }
-                activeBridge = null
-                currentConfig = null
-                onFailure(throwable)
-            },
-        )
+        val bridge = try {
+            sessionBridge.openSession(
+                config = config,
+                pipe = tunPipe,
+                onFailure = { throwable ->
+                    runCatching { activeBridge?.close() }
+                    activeBridge = null
+                    currentConfig = null
+                    onFailure(throwable)
+                },
+            )
+        } catch (error: Throwable) {
+            try {
+                onFailure(error)
+            } catch (cleanupError: Throwable) {
+                error.addSuppressed(cleanupError)
+            }
+            throw error
+        }
 
         activeBridge = bridge
         currentConfig = config

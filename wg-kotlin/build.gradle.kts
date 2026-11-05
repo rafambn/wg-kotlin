@@ -35,22 +35,12 @@ kotlin {
         }
 
         jvmMain.dependencies {
-            implementation(libs.kotlinx.rpc.grpc.client)
-            implementation(libs.kotlinx.rpc.grpc.krpc.client)
-            implementation(libs.kotlinx.rpc.grpc.krpc.serialization.protobuf)
-            implementation(libs.kotlinx.rpc.grpc.krpc.ktor.client)
-            implementation(libs.ktor.client.cio)
-            implementation(libs.ktor.client.websockets)
-            implementation(libs.grpc.netty.shaded)
+            implementation(libs.junixsocket.core)
+            implementation(libs.jna.platform)
         }
 
         jvmTest.dependencies {
             implementation(kotlin("test-junit5"))
-            implementation(libs.kotlinx.rpc.grpc.krpc.server)
-            implementation(libs.kotlinx.rpc.grpc.krpc.serialization.protobuf)
-            implementation(libs.kotlinx.rpc.grpc.krpc.ktor.server)
-            implementation(libs.ktor.server.netty)
-            implementation(libs.ktor.server.websockets)
         }
     }
 
@@ -60,8 +50,34 @@ rpc {
     protoc()
 }
 
+val ipcFixture = rootProject.layout.projectDirectory.file(
+    "wg-kotlin-daemon-rust/target/debug/examples/ipc_test_daemon" + if (System.getProperty("os.name").startsWith("Windows")) ".exe" else "",
+)
+val buildIpcFixture by tasks.registering(Exec::class) {
+    workingDir(rootProject.layout.projectDirectory)
+    commandLine("cargo", "build", "--manifest-path", "wg-kotlin-daemon-rust/daemon/Cargo.toml", "--example", "ipc_test_daemon")
+    inputs.dir(rootProject.layout.projectDirectory.dir("wg-kotlin-daemon-rust/daemon/src"))
+    inputs.dir(rootProject.layout.projectDirectory.dir("wg-kotlin-daemon-rust/daemon/examples"))
+    inputs.dir(rootProject.layout.projectDirectory.dir("wg-kotlin-daemon-rust/daemon-proto/src"))
+    inputs.dir(rootProject.layout.projectDirectory.dir("wg-kotlin-daemon-rust/scribe-rs/src"))
+    inputs.files(
+        rootProject.layout.projectDirectory.file("wg-kotlin-daemon-rust/daemon/Cargo.toml"),
+        rootProject.layout.projectDirectory.file("wg-kotlin-daemon-rust/daemon-proto/Cargo.toml"),
+        rootProject.layout.projectDirectory.file("wg-kotlin-daemon-rust/daemon-proto/build.rs"),
+        rootProject.layout.projectDirectory.file("wg-kotlin-daemon-rust/scribe-rs/Cargo.toml"),
+        rootProject.layout.projectDirectory.file("wg-kotlin-daemon-rust/Cargo.toml"),
+    )
+    inputs.dir(rootProject.layout.projectDirectory.dir("daemon-protocol"))
+    inputs.file(rootProject.layout.projectDirectory.file("wg-kotlin-daemon-rust/Cargo.lock"))
+    outputs.file(ipcFixture)
+}
+
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    dependsOn(buildIpcFixture)
+    systemProperty("wgkotlin.test.ipcDaemonExecutable", ipcFixture.asFile.absolutePath)
+    systemProperty("wgkotlin.test.classpath", classpath.asPath)
+    systemProperty("junit.jupiter.extensions.autodetection.enabled", "true")
 }
 
 //Publishing your Kotlin Multiplatform library to Maven Central

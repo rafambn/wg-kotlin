@@ -9,8 +9,12 @@ kotlinx-rpc-grpc = "0.11.0-grpc-188"
 ktor = "3.4.1"
 grpc = "1.80.0"
 protobuf-gradle-plugin = "0.9.5"
+jna = "5.18.1"
+junixsocket = "2.11.0"
 
 [libraries]
+jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
+junixsocket-core = { module = "com.kohlschutter.junixsocket:junixsocket-core", version.ref = "junixsocket" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }

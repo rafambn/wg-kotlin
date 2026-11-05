@@ -1,29 +1,31 @@
 package com.rafambn.wgkotlin.iface
 
-import com.rafambn.wgkotlin.daemon.proto.Ip
-import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
-import kotlinx.io.bytestring.ByteString
-import java.net.InetAddress
+import com.rafambn.wgkotlin.daemon.DaemonProcess
+import java.util.concurrent.atomic.AtomicReference
 
 actual object PlatformInterfaceFactory {
+    private val running = AtomicReference<DaemonProcess?>()
+
     actual fun create(tunPipe: DuplexChannelPipe<ByteArray>): InterfaceManager {
-        val hostStr = System.getProperty(
-            JvmInterfaceProperties.DAEMON_HOST,
-            JvmInterfaceProperties.DEFAULT_DAEMON_HOST,
-        )
-        val addr = InetAddress.getByName(hostStr)
-        val sessionBridge = DaemonSessionBridge(
-            host = Ip {
-                value = when (addr.address.size) {
-                    4 -> Ip.Value.V4(ByteString(addr.address))
-                    16 -> Ip.Value.V6(ByteString(addr.address))
-                    else -> error("unexpected address size: ${addr.address.size}")
-                }
-            },
-            port = System.getProperty(JvmInterfaceProperties.DAEMON_PORT)?.toIntOrNull()
-                ?: JvmInterfaceProperties.DEFAULT_DAEMON_PORT,
-        )
-        return JvmInterfaceManager(sessionBridge = sessionBridge, tunPipe = tunPipe)
+        return JvmInterfaceManager(sessionBridge = DaemonSessionBridge(), tunPipe = tunPipe)
+    }
+
+    internal fun requireDaemon(): DaemonProcess {
+        val daemon = running.get()
+        check(daemon != null && daemon.isAlive) { "Launch DaemonProcess before opening a VPN" }
+        return daemon
+    }
+
+    internal fun registerDaemon(daemon: DaemonProcess) {
+        while (true) {
+            val current = running.get()
+            if (current?.isAlive == true) return
+            if (running.compareAndSet(current, daemon)) return
+        }
+    }
+
+    internal fun unregisterDaemon(daemon: DaemonProcess) {
+        running.compareAndSet(daemon, null)
     }
 }

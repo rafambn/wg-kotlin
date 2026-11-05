@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  WG-Kotlin provides a small Kotlin API for opening WireGuard userspace VPN sessions. Crypto and key helpers are backed by BoringTun through UniFFI, while privileged TUN, route, and DNS work is handled by a localhost Rust daemon.
+  WG-Kotlin provides a small Kotlin API for opening WireGuard userspace VPN sessions. Crypto and key helpers are backed by BoringTun through UniFFI, while privileged TUN, route, and DNS work is handled by a local Rust daemon.
 </p>
 
 ## Project Status
@@ -30,10 +30,10 @@
 
 ## Key Features
 
-- **Small Kotlin API**: Create a `Vpn`, pass a `VpnConfiguration`, then query `information()` or call `stop()`.
+- **Small Kotlin API**: Launch an owned daemon, create a `Vpn`, then open, inspect, or stop its session.
 - **BoringTun Runtime**: WireGuard key generation and peer sessions are backed by Rust BoringTun bindings.
 - **Native Daemon**: TUN packet I/O, route installation, and DNS configuration run in a standalone Rust process.
-- **gRPC Protocol**: Kotlin and Rust share daemon messages through generated protobuf contracts.
+- **Local IPC**: One named-pipe or Unix-socket connection per TUN, using protobuf messages and OS process authentication.
 - **Runtime Snapshots**: Interface state includes addresses, DNS, MTU, original configuration, and peer stats.
 - **Cross-Platform Daemon Adapters**: Linux, macOS, and Windows route/DNS adapters live in the Rust daemon.
 
@@ -70,18 +70,34 @@ Build the daemon:
 cargo build --manifest-path wg-kotlin-daemon-rust/daemon/Cargo.toml --release
 ```
 
-Run the daemon with the privileges required by your OS network stack:
+The application supplies the privileged launcher. The library verifies OS peer
+identity, opens local IPC sessions, and controls daemon termination:
 
-```shell
-wg-kotlin-daemon-rust/target/release/wg-kotlin-daemon --host 127.0.0.1 --port 8787
+```kotlin
+import com.rafambn.wgkotlin.daemon.DaemonProcess
+
+// Linux desktop example. The system polkit agent handles the permission dialog.
+val daemon = DaemonProcess.launch { arguments ->
+    ProcessBuilder(listOf("pkexec", "/absolute/path/wg-kotlin-daemon") + arguments)
+        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+        .redirectError(ProcessBuilder.Redirect.INHERIT)
+        .start()
+}
 ```
 
-The JVM client uses `127.0.0.1:8787` by default. Override it with system properties:
+`DaemonProcess.launch(...)` registers the daemon used by `Vpn(...)`; it does not
+create VPN objects. Keep the existing `Vpn(interfaceName, engine)` and
+`vpn.open(configuration)` API.
 
-```shell
--Dwgkotlin.daemon.host=127.0.0.1
--Dwgkotlin.daemon.port=8787
-```
+Each daemon has one endpoint: a named pipe on Windows or a Unix domain socket on
+Linux/macOS. Each TUN owns an independent connection to that endpoint. The daemon
+checks the app's kernel-reported PID and live process identity before accepting
+configuration. The client verifies the daemon's identity too. There is no bearer
+secret or TCP listener.
+
+For macOS and Windows, supply an app-specific native launcher returning control
+of the actual daemon process. Standard streams need not survive elevation.
+See the [launcher contract and platform integration](docs/daemon-launching.md).
 
 ## Usage
 
@@ -129,6 +145,12 @@ vpn.open(
 val information = vpn.information()
 
 vpn.stop()
+
+// Close all VPN sessions first. Requests daemon shutdown, then forces exit
+// after five seconds if necessary.
+daemon.close()
+
+// For an unresponsive daemon, daemon.kill() forces OS termination directly.
 ```
 
 ## Runtime Notes
@@ -136,7 +158,9 @@ vpn.stop()
 - Interface names must match `utun[0-9]+`, even on Linux and Windows.
 - Linux daemon startup requires `resolvectl` in `PATH`, even when a session does not configure DNS.
 - Linux route handling uses host route replacement/deletion semantics; callers should understand the routing impact of requested routes.
-- The daemon binds only to loopback addresses.
+- The daemon accepts only local IPC connections from its owning app instance.
+- Linux requires kernel 5.3+ for pidfd-based owner lifetime tracking.
+- On macOS/Linux the daemon retains effective UID 0 and sets its real UID to the app's UID so the app can force termination. Windows launchers must retain a handle with termination rights.
 - Default WireGuard listen port is `51820` when `listenPort` is not set.
 
 ## Development

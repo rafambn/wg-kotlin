@@ -7,14 +7,11 @@ import "tun_session_config.proto";
 option java_multiple_files = true;
 option java_package = "com.rafambn.wgkotlin.daemon.proto";
 
-service Daemon {
-    rpc Session(stream ClientMessage) returns (stream ServerMessage);
-}
-
 message ClientMessage {
     oneof payload {
         TunSessionConfig config = 1;
         Packet outgoing_packet = 2;
+        bool shutdown = 4;
     }
 }
 
@@ -23,7 +20,13 @@ message ServerMessage {
         SessionStarted started = 1;
         Packet incoming_packet = 2;
         SessionError error = 3;
+        DaemonReady ready = 4;
     }
+}
+
+message DaemonReady {
+    uint32 protocol_version = 1;
+    uint32 pid = 2;
 }
 
 message Packet {

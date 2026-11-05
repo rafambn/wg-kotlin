@@ -1,6 +1,7 @@
 use crate::ip_util::{parse_proto_cidr, parse_proto_ip, proto_ip_to_string};
 use daemon_proto::pb::{Ip, TunSessionConfig};
 use route_manager::{Route, RouteManager};
+use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::net::IpAddr as StdIpAddr;
 use std::process::{Command, Stdio};
@@ -93,23 +94,13 @@ pub fn ips_to_args(values: &[Ip]) -> Vec<String> {
 
 pub fn normalize_domains(values: &[String]) -> Vec<String> {
     let mut normalized = Vec::<String>::new();
-
+    let mut seen = HashSet::new();
     for value in values {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let domain = trimmed.trim_start_matches('.').to_string();
-        if domain.is_empty() {
-            continue;
-        }
-
-        if !normalized.iter().any(|existing| existing == &domain) {
-            normalized.push(domain);
+        let domain = value.trim().trim_start_matches('.');
+        if !domain.is_empty() && seen.insert(domain) {
+            normalized.push(domain.to_string());
         }
     }
-
     normalized
 }
 

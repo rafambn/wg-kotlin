@@ -1,8 +1,8 @@
+use super::EndpointRoute;
 use crate::platform::{
     CleanupHook, add_routes_with_predelete, build_and_filter_routes, into_cleanup_hook, ips_to_args, normalize_domains, run_command,
 };
 use daemon_proto::pb::TunSessionConfig;
-use super::EndpointRoute;
 use std::sync::{Mutex, OnceLock};
 
 const NRPT_COMMENT_PREFIX: &str = "kmpvpn-daemon:";
@@ -21,20 +21,18 @@ pub fn configure_session(config: &TunSessionConfig, interface_name: &str, endpoi
 
         clear_nrpt_rules(interface_name)?;
         if !dns_domains.is_empty() && !dns_servers.is_empty() {
-            for domain in &dns_domains {
-                run_command(
-                    "set-nrpt-rule",
-                    "powershell",
-                    &vec!["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), SET_NRPT_RULE_SCRIPT.to_string()],
-                    None,
-                    &vec![
-                        ("WG_KOTLIN_DNS_NAMESPACE".to_string(), domain.to_string()),
-                        ("WG_KOTLIN_DNS_SERVERS".to_string(), dns_servers.join("\n")),
-                        ("WG_KOTLIN_NRPT_COMMENT".to_string(), rule_comment(interface_name)),
-                    ],
-                    &[],
-                )?;
-            }
+            run_command(
+                "set-nrpt-rules",
+                "powershell",
+                &vec!["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), SET_NRPT_RULE_SCRIPT.to_string()],
+                None,
+                &vec![
+                    ("WG_KOTLIN_DNS_NAMESPACES".to_string(), dns_domains.join("\n")),
+                    ("WG_KOTLIN_DNS_SERVERS".to_string(), dns_servers.join("\n")),
+                    ("WG_KOTLIN_NRPT_COMMENT".to_string(), rule_comment(interface_name)),
+                ],
+                &[],
+            )?;
         }
         Ok(())
     })();
@@ -86,7 +84,10 @@ fn rule_comment(interface_name: &str) -> String {
 const SET_NRPT_RULE_SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
 $nameServers = ($env:WG_KOTLIN_DNS_SERVERS -split "`n") | Where-Object { $_ -ne '' }
-Add-DnsClientNrptRule -Namespace $env:WG_KOTLIN_DNS_NAMESPACE -NameServers $nameServers -Comment $env:WG_KOTLIN_NRPT_COMMENT
+$namespaces = ($env:WG_KOTLIN_DNS_NAMESPACES -split "`n") | Where-Object { $_ -ne '' }
+foreach ($namespace in $namespaces) {
+    Add-DnsClientNrptRule -Namespace $namespace -NameServers $nameServers -Comment $env:WG_KOTLIN_NRPT_COMMENT
+}
 "#;
 
 const CLEAR_NRPT_RULES_SCRIPT: &str = r#"

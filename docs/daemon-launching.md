@@ -189,6 +189,14 @@ or `Error`. Config must arrive within five seconds, and each server write has a
 five-second deadline. `open()` waits for `Started` and reports initialization
 failures synchronously. Peer authorization uses OS process identity.
 
+DNS configuration accepts at most 64 servers and 64 search domains. Each domain
+entry is limited to 253 bytes before trimming or deduplication, and duplicates
+count toward the input limit. Normalization preserves the first occurrence's
+order. Windows creates the per-domain NRPT rules in one PowerShell invocation.
+Session initialization runs on a blocking worker so OS and DNS operations do not
+occupy async executor threads. Its owning task completes cleanup even when the
+client disconnects before receiving Started.
+
 An independent, authorized control connection can send `ClientMessage.shutdown`,
 field 4, after readiness. Shutdown is not accepted inside an existing TUN session.
 
@@ -203,9 +211,10 @@ and can leave its temporary Unix socket directory behind.
 
 The daemon monitors its owner and begins shutdown when that app exits. Shutdown
 stops accepting connections and sends the same stop signal to the IPC handlers
-and session loops. In-progress initialization transfers its session to the loop
-before socket writes are cancelled. Route/DNS cleanup runs outside the async
-executor, and the daemon gives connections and sessions four seconds to drain.
+and session loops. Initialization keeps its own task through teardown, so
+cancelling socket writes cannot abandon an in-progress blocking worker.
+Route/DNS cleanup also runs outside the async executor, and the daemon gives
+connections and sessions four seconds to drain.
 If that deadline expires, it records sessions_drained=false and exits with code
 1. The client retains independent force-kill control for a stuck daemon.
 

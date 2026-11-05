@@ -76,6 +76,18 @@ process to remain alive and checks the protocol's readiness identity as well.
 The application and its trusted launcher must preserve the supplied owner binding;
 a PID declared by an arbitrary connecting client is never accepted as proof.
 
+Before creating a TUN and assigning its addresses, the daemon resolves the
+existing egress routes to its WireGuard peer endpoints. The endpoint host routes
+preserve the prior egress path, including an existing VPN. Linux queries the
+kernel with RTM_GETROUTE/FIB_MATCH/LOOKUP_TABLE for the owner's real UID and UDP traffic, so
+existing policy rules select the route; native netlink messages preserve routing
+attributes such as onlink and full table IDs, while excluding dead multipath
+nexthops. macOS requests the route's interface and source address during lookup,
+then explicitly transmits the original interface in RTA_IFP and rtm_index
+when installing the exception. Windows uses GetBestRoute2. Missing routes and
+lookup errors fail session startup. The endpoint exceptions are installed before
+the requested VPN routes; no additional Linux routing tables are created.
+
 ## Linux desktop
 
 A graphical polkit agent can provide the elevation dialog:

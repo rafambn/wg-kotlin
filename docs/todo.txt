@@ -76,11 +76,10 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
    Referência: daemon/src/main.rs, shutdown_signal(), e daemon/src/server.rs,
    run_session_loop().
 
-9. Corrigir o tratamento de erros dos scripts DNS no Windows.
-    As três atribuições usam $ErrorActionPreference = Stop sem aspas, tentando
-    executar Stop como comando. Usar $ErrorActionPreference = 'Stop' para que
-    falhas interrompam o script e sejam propagadas ao Rust, evitando reportar
-    limpeza concluída enquanto regras NRPT antigas permanecem instaladas.
+9. Implementado: interromper os scripts DNS do Windows em caso de erro.
+    As três atribuições usam $ErrorActionPreference = 'Stop', como valor literal.
+    Falhas na criação, na limpeza por interface e na limpeza inicial de regras
+    NRPT interrompem o script e são propagadas ao Rust pelo status do processo.
     Referência: daemon/src/platform/windows.rs, scripts de configuração e limpeza.
 
 10. Limitar a quantidade de domínios DNS e isolar operações bloqueantes.

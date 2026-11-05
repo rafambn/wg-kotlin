@@ -1,3 +1,160 @@
 ISSUES AND TASKS
 
 -Maybe implement daemon in native
+
+wg-kotlin-daemon-rust: lógica e segurança
+
+Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-rust.
+
+1. Permitir que somente o processo que lança o daemon inicie suas sessões.
+   Autenticar e autorizar o chamador antes de aceitar configurações. A escuta
+   em loopback atualmente permite acesso por qualquer processo local.
+   Referência: daemon/src/server.rs, session().
+
+2. Corrigir o carregamento da DLL Wintun no Windows.
+   O daemon reutiliza uma wintun.dll pré-existente em um diretório temporário
+   gravável pelo usuário e a carrega com privilégios elevados. Usar um local
+   protegido e impedir substituição do arquivo antes do carregamento.
+   Referência: daemon/src/main.rs, prepare_wintun().
+
+3. Corrigir as rotas de exceção dos endpoints WireGuard.
+   Preservar a interface física, o gateway e os atributos relevantes da rota
+   original. Atualmente as rotas /32 e /128 apontam para a própria TUN,
+   capturando o tráfego UDP WireGuard e impedindo o handshake.
+   Referência: daemon/src/platform/mod.rs, build_and_filter_routes().
+
+4. Corrigir a exclusão e a restauração de rotas no macOS.
+   A exclusão antes da adição pode remover rotas do sistema, inclusive a rota
+   padrão, sem restaurá-las no encerramento ou em falhas. Registrar as rotas
+   criadas ou substituídas e restaurar o estado anterior.
+   Referência: daemon/src/platform/mod.rs, add_routes_with_predelete() e cleanup_routes().
+
+5. Tornar o envio de respostas cancelável no encerramento da sessão.
+   Se o cliente parar de ler e encerrar apenas o envio, blocking_send() pode
+   manter o leitor bloqueado enquanto o encerramento aguarda read_task.
+   Garantir a liberação do dispositivo e da reserva em active_sessions,
+   independentemente do consumo de respostas pelo cliente.
+   Referência: daemon/src/server.rs, run_session_loop().
+
+6. Investigar como suportar múltiplas interfaces TUN.
+   Definir como distribuir os endereços entre elas e tratar múltiplos IPv4.
+   Atualmente chamadas sucessivas a DeviceBuilder::ipv4() sobrescrevem o
+   endereço anterior, deixando somente o último IPv4 configurado.
+   Referência: daemon/src/session.rs, SessionManager::start().
+
+7. Corrigir as reservas de sessão para nomes equivalentes no macOS.
+   Um nome como utun01 é reservado como solicitado, mas a interface real é
+   utun1. O encerramento remove a chave errada e deixa a reserva presa.
+   Normalizar os nomes ou usar a mesma chave durante todo o ciclo da sessão.
+   Referência: daemon/src/server.rs, active_sessions.
+
+8. Propagar o encerramento do daemon às sessões abertas.
+   Ctrl+C inicia apenas o encerramento gracioso do Axum. Sessões gRPC abertas
+   podem mantê-lo esperando indefinidamente, sem liberar TUN, rotas e DNS.
+   Sinalizar as sessões e aguardar sua limpeza com prazo definido.
+   Referência: daemon/src/main.rs, shutdown_signal(), e daemon/src/server.rs,
+   run_session_loop().
+
+9. Corrigir o tratamento de erros dos scripts DNS no Windows.
+    As três atribuições usam $ErrorActionPreference = Stop sem aspas, tentando
+    executar Stop como comando. Usar $ErrorActionPreference = 'Stop' para que
+    falhas interrompam o script e sejam propagadas ao Rust, evitando reportar
+    limpeza concluída enquanto regras NRPT antigas permanecem instaladas.
+    Referência: daemon/src/platform/windows.rs, scripts de configuração e limpeza.
+
+10. Limitar a quantidade de domínios DNS e isolar operações bloqueantes.
+    A validação aceita milhares de domínios, a normalização tem custo
+    quadrático e o Windows inicia um PowerShell sequencial para cada domínio.
+    Essas operações ocorrem na thread assíncrona do RPC e podem prejudicar
+    outras sessões. Aplicar limites antes do processamento e executar as
+    operações bloqueantes fora das threads do executor assíncrono.
+    Referência: daemon/src/validation.rs, validate_dns(), daemon/src/platform/mod.rs,
+    normalize_domains(), e daemon/src/platform/windows.rs, configure_session().
+
+11. Preservar sub-redes no filtro de rotas dos endpoints.
+    O filtro compara somente o IP, sem verificar o prefixo. Um endpoint
+    203.0.113.0 com AllowedIPs 203.0.113.0/24 faz a sub-rede inteira desaparecer
+    da lista de rotas, permitindo que o restante da rede siga a rota física.
+    Excluir somente rotas de host equivalentes ao endpoint.
+    Referência: daemon/src/platform/mod.rs, build_and_filter_routes().
+
+12. Aplicar o timeout dos subprocessos também à escrita em stdin.
+    run_command() faz write_all() antes de iniciar o cronômetro e antes de
+    drenar stdout e stderr. Se o processo não consumir a entrada, a escrita
+    pode bloquear indefinidamente sem acionar o timeout. Também há risco de
+    deadlock se o processo preencher sua saída enquanto recebe a entrada.
+    Supervisionar entrada, saída e término simultaneamente sob um prazo único,
+    encerrando e coletando o processo nos caminhos de erro.
+    Referência: daemon/src/platform/mod.rs, run_command().
+
+13. Impedir que uma instância remova as regras DNS de outra no Windows.
+    clear_stale_nrpt_rules_once() remove todas as regras com o prefixo
+    kmpvpn-daemon:, sem identificar a instância proprietária ou verificar se
+    ela continua ativa. Ao iniciar uma sessão em um segundo daemon, mesmo
+    usando outra porta e outra interface, as regras da primeira instância
+    podem ser removidas. Identificar a propriedade e a atividade das regras
+    ou garantir uma única instância antes de executar a limpeza global.
+    Referência: daemon/src/platform/windows.rs, clear_stale_nrpt_rules_once()
+    e CLEAR_ALL_NRPT_RULES_SCRIPT.
+
+14. Desfazer a inicialização quando o RPC for cancelado antes de iniciar o loop.
+    Após reservar o nome e configurar a sessão, o handler aguarda o mutex do
+    logger antes de iniciar run_session_loop(). Se o cliente cancelar nesse
+    intervalo, a reserva permanece em active_sessions e close() não é chamado.
+    TunSession também não executa o cleanup_hook ao ser descartada, deixando
+    efeitos externos como DNS sem limpeza. Usar um guard de inicialização que
+    reverta a reserva e a configuração até transferir a sessão ao seu responsável.
+    Referência: daemon/src/server.rs, session(), e daemon/src/session.rs, TunSession.
+
+15. Limitar o conteúdo de entradas inválidas registrado nos logs.
+    session_config_fields() copia interface_name antes da validação e registra
+    o valor completo mesmo quando ele excede o limite de 15 caracteres.
+    Um RPC rejeitado com um nome de 3 MiB gerou um registro de mais de 3 MiB,
+    sem criar sessão nem consumir o limite de active_sessions. Repetições podem
+    encher o disco e pressionar a fila de logs, que não tem limite de tamanho.
+    Registrar o tamanho e uma amostra limitada dos valores rejeitados e limitar
+    o armazenamento e a fila de logs.
+    Referência: daemon/src/server.rs, session_config_fields() e rejeição de config,
+    daemon/src/logging.rs, FileSaver, e scribe-rs/src/scribe.rs, hire().
+
+16. Validar o limite numérico do índice de interface no macOS.
+    utun4294967295 passa na validação, mas tun-rs 2.8.3 converte o sufixo em
+    u32 e soma 1 sem verificar overflow. Com checagem de overflow ocorre panic,
+    contornando o tratamento de Err e deixando a reserva da sessão presa.
+    Em release padrão, o valor resulta em zero e solicita uma interface
+    automática, contrariando o nome pedido. Validar a faixa suportada antes
+    da reserva, usando conversão e adição verificadas.
+    Referência: daemon/src/validation.rs, validate_interface_name(), e tun-rs 2.8.3,
+    src/platform/macos/tuntap.rs, criação do índice de controle.
+
+17. Detectar falhas internas do scutil na configuração e limpeza de DNS no macOS.
+    scutil pode informar erros por stdout e terminar com código zero.
+    run_command() considera esse status suficiente, e as chamadas de configuração
+    e remoção descartam o texto retornado. Assim, a sessão pode ser anunciada
+    como iniciada sem aplicar DNS, ou a limpeza pode ser registrada como sucesso
+    sem remover as entradas. Verificar os resultados e as pós-condições das
+    operações, preferencialmente usando a API SystemConfiguration. Distinguir
+    entradas já ausentes de falhas reais durante a limpeza.
+    Referência: daemon/src/platform/macos.rs, configure_session() e clear_dns_entries(),
+    e daemon/src/platform/mod.rs, run_command().
+
+18. Melhorar o direcionamento e o contexto dos logs do daemon.
+    Permitir configurar os destinos, como arquivo JSONL, stdout e stderr,
+    aproveitando os Savers já suportados pelo Scribe. Definir filtros por nível
+    e componente e incluir timestamp, component e session_id estável para
+    acompanhar uma sessão e distinguir seus eventos dos eventos do processo.
+    Definir o diretório padrão apropriado ao sistema e preservar --log-path
+    como opção explícita. Garantir que uma falha no destino possa ser relatada
+    em stderr sem recursão nem impedir a limpeza das sessões. Coordenar com
+    o item 15 os limites de fila, tamanho e retenção dos registros.
+    Referência: daemon/src/main.rs, daemon/src/logging.rs, daemon/src/server.rs
+    e scribe-rs/src/scribe.rs, ScribeBuilder::saver().
+
+Registro do ciclo de revisão Astra, 2026-11-04
+
+- Rodada 1: acrescentou o item 17, sobre erros internos do scutil.
+- Rodada 2: sem novos achados comprováveis distintos dos 17 itens registrados.
+- Ciclo encerrado ao atingir uma rodada sem novos achados.
+- Escopo: fontes de daemon, daemon-proto e scribe-rs, com consulta ao Cargo.lock
+  e aos trechos relevantes das dependências. Não houve auditoria integral de
+  todas as dependências transitivas nem reprodução privilegiada de TUN, rotas e DNS.

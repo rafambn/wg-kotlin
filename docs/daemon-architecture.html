@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Funcionamento do wg-kotlin-daemon-rust</title>
+<style>
+:root { color-scheme: light dark; --flow: var(--chart-1, Highlight); --packet: var(--chart-2, LinkText); --cleanup: var(--chart-3, GrayText); --logging: var(--chart-4, LinkText); }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: transparent; }
+body { color: var(--foreground, CanvasText); font: 14px/1.5 var(--font-sans, system-ui); }
+button { font: inherit; cursor: pointer; }
+.intro { margin: 0 0 12px; color: var(--muted-foreground, GrayText); font-size: 12px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.tabs button { padding: 8px 12px; border: 1px solid var(--border, GrayText); border-radius: var(--radius, 10px); background: transparent; color: var(--muted-foreground, GrayText); }
+.tabs button[aria-selected="true"] { color: var(--primary-foreground, HighlightText); background: var(--primary, Highlight); border-color: var(--primary, Highlight); }
+.tabs button:focus-visible { outline: 2px solid var(--ring, Highlight); outline-offset: 3px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--muted-foreground, GrayText); font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sample { width: 22px; border-top: 2px solid; }
+.flow { color: var(--flow); }
+.packet { color: var(--packet); }
+.cleanup { color: var(--cleanup); }
+.logging { color: var(--logging); }
+.sample.cleanup { border-top-style: dashed; }
+.sample.logging { border-top-style: dotted; }
+.canvas { overflow-x: auto; margin-top: 12px; }
+svg { display: block; width: 100%; min-width: 700px; height: auto; }
+.group rect { fill: var(--muted, Canvas); fill-opacity: .35; stroke: var(--border, GrayText); stroke-dasharray: 5 5; rx: 14px; }
+.group text { fill: var(--muted-foreground, GrayText); font-size: 12px; font-weight: 600; }
+.edge { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.edge.flow { stroke: var(--flow); }
+.edge.packet { stroke: var(--packet); }
+.edge.cleanup { stroke: var(--cleanup); stroke-dasharray: 6 5; }
+.edge.logging { stroke: var(--logging); stroke-dasharray: 2 5; }
+.edge-label rect { fill: var(--background, Canvas); rx: 4px; }
+.edge-label text { fill: var(--muted-foreground, GrayText); font-size: 11px; }
+.node { cursor: pointer; outline: none; }
+.node rect { fill: var(--card, Canvas); stroke: var(--border, GrayText); stroke-width: 1.5; rx: 12px; }
+.node .title { fill: var(--foreground, CanvasText); font: 600 15px var(--font-mono, monospace); }
+.node .sub { fill: var(--muted-foreground, GrayText); font-size: 12px; }
+.node .tag { fill: var(--muted-foreground, GrayText); font-size: 10px; font-weight: 600; letter-spacing: .6px; }
+.node.selected rect, .node:focus-visible rect { stroke: var(--primary, Highlight); stroke-width: 2.5; }
+.node:hover rect { stroke: var(--primary, Highlight); }
+.detail { margin-top: 14px; padding: 16px; border-radius: var(--radius, 12px); background: var(--card, Canvas); }
+.detail strong { font: 600 14px var(--font-mono, monospace); overflow-wrap: anywhere; }
+.detail p { margin: 8px 0; }
+.detail code { color: var(--muted-foreground, GrayText); font: 11px/1.6 var(--font-mono, monospace); overflow-wrap: anywhere; }
+.foot { color: var(--muted-foreground, GrayText); font-size: 12px; margin: 12px 0 0; }
+@media (prefers-reduced-motion: no-preference) { .node rect { transition: stroke .15s; } }
+@media print { .tabs button:not([aria-selected="true"]) { display: none; } svg { min-width: 0; } .canvas { overflow: visible; } }
+</style>
+</head>
+<body>
+<p class="intro">wg-kotlin-daemon-rust · implementação atual · selecione um bloco para ver seu papel e os arquivos de origem</p>
+<div class="tabs" role="tablist" aria-label="Visões do funcionamento do daemon">
+  <button role="tab" id="tab-overview" aria-selected="true" aria-controls="panel" tabindex="0" data-view="overview">Componentes</button>
+  <button role="tab" id="tab-session" aria-selected="false" aria-controls="panel" tabindex="-1" data-view="session">Abrir sessão</button>
+  <button role="tab" id="tab-packets" aria-selected="false" aria-controls="panel" tabindex="-1" data-view="packets">Pacotes</button>
+  <button role="tab" id="tab-stop" aria-selected="false" aria-controls="panel" tabindex="-1" data-view="stop">Encerramento</button>
+  <button role="tab" id="tab-platforms" aria-selected="false" aria-controls="panel" tabindex="-1" data-view="platforms">Plataformas</button>
+  <button role="tab" id="tab-logs" aria-selected="false" aria-controls="panel" tabindex="-1" data-view="logs">Logs</button>
+</div>
+<div class="legend" aria-label="Tipos de conexão">
+  <span><i class="sample flow"></i>Chamada / sequência</span>
+  <span><i class="sample packet"></i>Pacotes IP</span>
+  <span><i class="sample cleanup"></i>Erro / encerramento</span>
+  <span><i class="sample logging"></i>Registro de eventos</span>
+</div>
+<section id="panel" role="tabpanel" aria-labelledby="tab-overview">
+  <div class="canvas"><svg id="diagram" role="img" aria-labelledby="diagram-title diagram-desc"></svg></div>
+  <aside class="detail" aria-live="polite" aria-atomic="true">
+    <strong id="detail-title"></strong>
+    <p id="detail-text"></p>
+    <code id="detail-source"></code>
+  </aside>
+  <p class="foot" id="foot"></p>
+</section>
+<noscript>Ative JavaScript para navegar pelo grafo. Os componentes principais são main.rs → server.rs → session.rs → platform/, com daemon-proto nos contratos e scribe-rs nos logs.</noscript>
+<script>
+'use strict';
+const NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('diagram');
+const root = 'wg-kotlin-daemon-rust/';
+const details = {
+  client: ['Cliente gRPC externo', 'Abre um stream bidirecional Session. A primeira mensagem contém TunSessionConfig; as seguintes carregam OutgoingPacket. Recebe Started, IncomingPacket ou Error. O daemon troca pacotes IP com esse cliente.', 'daemon-proto/src/lib.rs · contratos gerados de daemon-protocol/daemon.proto'],
+  main: ['main.rs · inicialização do processo', 'Lê host, porta e log-path pela CLI. Aceita somente IP de loopback, exige root ou Administrador e verifica os programas necessários. No Windows, prepara a DLL Wintun. Inicia Scribe e publica HTTP GET /version e o serviço gRPC no mesmo listener TCP, por padrão 127.0.0.1:8787.', 'daemon/src/main.rs · main(), resolve_host(), ensure_root(), prepare_wintun()'],
+  service: ['DaemonGrpcService · entrada das sessões', 'O Router do Axum encaminha gRPC ao DaemonServer gerado por tonic. O serviço valida a configuração, reserva a interface, inicia TunSession e cria a tarefa que mantém o stream. Compartilha Scribe e active_sessions por Arc<Mutex<...>>. A implementação atual não autentica o chamador.', 'daemon/src/main.rs · daemon/src/server.rs · DaemonGrpcService'],
+  proto: ['daemon-proto · contratos gerados', 'O build usa protoc vendorizado e tonic/prost para gerar ClientMessage, ServerMessage, TunSessionConfig, cliente e servidor gRPC. O código Rust inclui esses contratos com tonic::include_proto!. O schema compartilhado é a entrada de geração, fora deste workspace Cargo.', 'daemon-proto/build.rs · daemon-proto/src/lib.rs'],
+  manager: ['SessionManager::start()', 'Prepara a plataforma, monta DeviceBuilder com nome utun, endereços e MTU e cria SyncDevice. No Unix, ativa modo não bloqueante. Cria InterruptEvent, aplica rotas e DNS e devolve TunSession com o hook de limpeza.', 'daemon/src/session.rs · SessionManager::start()'],
+  tun: ['TunSession · dispositivo TUN', 'Agrupa o SyncDevice de tun-rs, InterruptEvent, indicador closed e CleanupHook em referências compartilhadas. read_packet() usa recv_intr(); write_packet() usa send_intr(). O descritor nativo é liberado quando as últimas referências ao dispositivo são descartadas.', 'daemon/src/session.rs · TunSession, read_packet(), write_packet(), close()'],
+  platform: ['platform · configuração e limpeza', 'Seleciona linux.rs, macos.rs ou windows.rs em compilação. As plataformas usam RouteManager para rotas e comandos do sistema para DNS. configure_session() retorna uma closure FnOnce que tenta remover as rotas e desfazer o DNS ao fechar a sessão.', 'daemon/src/platform/mod.rs · configure_session(), into_cleanup_hook()'],
+  logger: ['Scribe + FileSaver', 'O daemon cria eventos estruturados com contexto e resultado. Scribe enfileira os registros para uma tarefa consumidora; FileSaver serializa cada registro em JSON, acrescenta uma linha ao arquivo e executa flush.', 'daemon/src/logging.rs · scribe-rs/src/scribe.rs'],
+  file: ['Arquivo JSONL', 'Destino de todos os eventos do processo. O caminho padrão é vpn-daemon.jsonl no diretório do executável; --log-path permite escolher outro arquivo. Cada linha contém success e data, incluindo scroll_id, serviço, versão, sistema e arquitetura.', 'daemon/src/main.rs · daemon/src/logging.rs · FileSaver'],
+  os: ['Sistema operacional', 'O sistema entrega à TUN os pacotes enviados pelas rotas configuradas. Pacotes escritos na TUN entram na pilha IP como recebidos pela interface virtual. O daemon também altera as tabelas de rotas e a configuração DNS do sistema.', 'daemon/src/session.rs · daemon/src/platform/'],
+  config: ['Primeira mensagem · TunSessionConfig', 'session() aguarda a primeira mensagem e exige o payload Config. Os campos são interface_name, mtu, addresses, peer_allowed_ips, peer_endpoints e dns. Um pacote ou payload ausente nessa posição produz InvalidArgument.', 'daemon/src/server.rs · session(), extract_config() · daemon-proto/src/lib.rs'],
+  validate: ['validation::validate_config()', 'Exige nome utun seguido de dígitos e até 15 caracteres, pelo menos um endereço, CIDRs e DNS válidos. Limita a 64 endereços, 256 rotas e 64 servidores DNS. MTU diferente de zero deve estar entre 576 e 65535, ou ao menos 1280 com IPv6. DNS deve fornecer servidores e domínios juntos.', 'daemon/src/validation.rs · validate_config()'],
+  invalid: ['Configuração rejeitada', 'A validação devolve um erro. O handler registra daemon_session com outcome rejected e encerra o RPC com InvalidArgument. O dispositivo TUN ainda não foi criado.', 'daemon/src/server.rs · tratamento de validate_config()'],
+  reserve: ['Reserva em active_sessions', 'Sob mutex, verifica se o nome solicitado já está reservado e se há menos de 16 sessões. Quando há espaço, insere o nome antes de chamar SessionManager::start(). A reserva também cobre uma inicialização em andamento.', 'daemon/src/server.rs · active_sessions, MAX_ACTIVE_SESSIONS'],
+  denied: ['Interface ocupada ou limite atingido', 'Uma interface já reservada resulta em FailedPrecondition. O limite de 16 sessões resulta em ResourceExhausted. Ambos os casos são registrados como rejected e encerram o RPC antes de criar a TUN.', 'daemon/src/server.rs · duplicate_session, session_limit_reached'],
+  startFail: ['Falha ao iniciar a sessão', 'Um Err de SessionManager::start() faz o handler remover a reserva pelo nome solicitado, registrar start_failed e devolver FailedPrecondition. Se a plataforma chegou a aplicar parte da configuração, seu caminho de erro tenta desfazê-la antes de devolver o erro.', 'daemon/src/server.rs · SessionManager::start() · daemon/src/platform/mod.rs'],
+  rollback: ['Rollback de configuração parcial', 'into_cleanup_hook() recebe o resultado da configuração. Em caso de erro, chama cleanup_routes() e o teardown DNS antes de devolver a falha. Se a limpeza também falhar, acrescenta esse erro ao erro original.', 'daemon/src/platform/mod.rs · into_cleanup_hook(), cleanup_routes()'],
+  started: ['Started · resposta inicial', 'Com TunSession criada, o handler cria mpsc com capacidade de 64 mensagens e coloca SessionStarted com o nome real da interface na fila. Em seguida registra daemon_session_started, inicia run_session_loop() com tokio::spawn e devolve ReceiverStream ao cliente.', 'daemon/src/server.rs · session(), PACKET_CHANNEL_CAPACITY'],
+  loop: ['run_session_loop()', 'Mantém um leitor bloqueante da TUN e um loop que recebe mensagens do cliente. tokio::select! aguarda uma nova mensagem ou o oneshot que informa o término do leitor. EOF, erro ou uma segunda Config encerra o loop e inicia close().', 'daemon/src/server.rs · run_session_loop()'],
+  outgoing: ['ClientMessage::OutgoingPacket', 'O loop recebe Packet.data do cliente. Ignora buffers vazios ou maiores que 65535 bytes; os demais são escritos na TUN. Uma segunda Config no stream é um erro InvalidArgument. Payload ausente é ignorado.', 'daemon/src/server.rs · ClientPayload::OutgoingPacket, MAX_PACKET_FRAME_SIZE'],
+  write: ['TunSession::write_packet()', 'Executa send_intr() no SyncDevice com o InterruptEvent da sessão. O pacote entra na pilha IP do sistema pela TUN. Essa chamada síncrona é feita dentro do loop assíncrono que recebe o stream.', 'daemon/src/session.rs · write_packet() · daemon/src/server.rs'],
+  reader: ['Leitor TUN · spawn_blocking', 'A tarefa bloqueante chama read_packet(), que usa um buffer de 65536 bytes e recv_intr(). Descarta quadros vazios ou maiores que 65535 bytes. Para os demais, monta ServerMessage::IncomingPacket e usa blocking_send() na fila de saída.', 'daemon/src/server.rs · read_task · daemon/src/session.rs · read_packet()'],
+  incoming: ['Fila de saída · IncomingPacket', 'mpsc armazena até 64 ServerMessages, incluindo Started, IncomingPacket e Error. ReceiverStream expõe a fila como resposta gRPC. Quando ela enche, blocking_send() bloqueia o leitor até haver espaço ou o receptor ser descartado.', 'daemon/src/server.rs · mpsc::channel(), ReceiverStream'],
+  eof: ['Fim ou falha do stream do cliente', 'incoming.message() devolvendo None termina normalmente. Erros de leitura gRPC, falha ao escrever na TUN ou uma segunda Config encerram o loop com erro. O resultado é preservado para o registro final e eventual SessionError.', 'daemon/src/server.rs · write_result'],
+  readDone: ['read_done · oneshot', 'O leitor envia Option<String> ao terminar. Interrupted encerra a leitura sem erro; outras falhas produzem uma mensagem Error e carregam a descrição pelo oneshot. O loop principal observa esse sinal em tokio::select!.', 'daemon/src/server.rs · read_done_tx, read_done_rx'],
+  close: ['TunSession::close()', 'AtomicBool::swap torna close() uma operação de execução única. Na primeira chamada, dispara InterruptEvent e retira o CleanupHook do mutex para executá-lo. Essa função não remove a reserva de active_sessions nem aguarda o read_task.', 'daemon/src/session.rs · close()'],
+  interrupt: ['InterruptEvent::trigger()', 'Sinaliza às operações recv_intr() e send_intr() que a sessão está sendo fechada. Um recv_intr() interrompido faz o leitor sair do loop. A sinalização atua na E/S da TUN; não cancela um blocking_send() preso na fila gRPC.', 'daemon/src/session.rs · close(), read_packet(), write_packet()'],
+  cleanup: ['CleanupHook · rotas e DNS', 'O hook executa cleanup_routes(). Tenta remover as rotas em ordem inversa e chama o teardown DNS da plataforma, acumulando falhas em vez de desistir na primeira. Também é usado para tentar desfazer uma configuração parcialmente aplicada.', 'daemon/src/platform/mod.rs · CleanupHook, cleanup_routes(), into_cleanup_hook()'],
+  join: ['Aguardar o leitor', 'Depois de close(), run_session_loop() aguarda read_task.await. Isso garante que o leitor saiu antes de liberar a reserva. O await não tem prazo próprio; falha de join é registrada como read_task_failed.', 'daemon/src/server.rs · close_result, read_join_result'],
+  release: ['Liberar a reserva', 'Após aguardar o leitor, remove o nome real da interface de active_sessions. A TUN ainda pode ter referências vivas na tarefa; o descarte final acontece quando essas referências deixam de existir.', 'daemon/src/server.rs · sessions.remove(&interface_name)'],
+  summary: ['Resultado da sessão', 'Preserva erros de stream, fechamento e join. Quando necessário, envia ServerMessage::Error. Registra outcome, duração e contexto nos eventos daemon_session e daemon_session_stopped.', 'daemon/src/server.rs · final de run_session_loop()'],
+  done: ['Fim da tarefa e do stream', 'Ao terminar run_session_loop(), seus senders mpsc e suas referências à sessão são descartados. Sem senders, ReceiverStream termina após consumir a fila; sem referências ao dispositivo, o descritor nativo da TUN é fechado.', 'daemon/src/server.rs · run_session_loop() · daemon/src/session.rs · campos Arc'],
+  shutdown: ['Ctrl+C · encerramento do processo', 'shutdown_signal() observa Ctrl+C e aciona o encerramento gracioso do Axum. O servidor para de aceitar conexões e espera as existentes. O código atual não propaga esse sinal aos loops das sessões. Quando o servidor retorna, main registra daemon_shutdown e aguarda Scribe::retire().', 'daemon/src/main.rs · shutdown_signal(), with_graceful_shutdown()'],
+  routes: ['Rotas · route_manager', 'Constrói rotas a partir de peer_allowed_ips e rotas de host para peer_endpoints. Consulta find_route(), filtra destinos e executa delete() antes de add(). Na implementação atual, as rotas de endpoint também recebem o nome da TUN. Essas operações usam a biblioteca route_manager, sem passar por run_command().', 'daemon/src/platform/mod.rs · build_and_filter_routes(), add_routes_with_predelete()'],
+  table: ['Tabela de rotas do sistema', 'RouteManager consulta e altera as rotas do sistema operacional. As rotas selecionadas são capturadas no hook de limpeza. Falhas ao adicionar rotas retornam erro ao caminho de configuração da sessão.', 'daemon/src/platform/mod.rs · RouteManager'],
+  linux: ['Linux · resolvectl', 'Depois de instalar rotas, executa resolvectl revert na interface. Com servidores e domínios, aplica resolvectl dns e resolvectl domain, prefixando os domínios com ~ para roteamento DNS. O teardown executa revert novamente.', 'daemon/src/platform/linux.rs · configure_session(), revert_dns()'],
+  macos: ['macOS · scutil', 'Remove as entradas State:/Network/Interface/<nome>/DNS e a entrada raiz da interface. Depois configura ServerAddresses, SupplementalMatchDomains e UserDefinedName via stdin do scutil. O teardown remove as duas entradas.', 'daemon/src/platform/macos.rs · configure_session(), clear_dns_entries()'],
+  windows: ['Windows · PowerShell / NRPT', 'Antes de criar a primeira TUN do processo, tenta remover regras NRPT antigas com o prefixo kmpvpn-daemon:. Na configuração, remove regras da interface e cria uma regra para cada domínio, com servidores e comentário enviados por variáveis de ambiente. O teardown remove as regras pelo comentário.', 'daemon/src/platform/windows.rs · prepare_session_start() em platform/mod.rs'],
+  command: ['run_command() · comandos DNS', 'Executa resolvectl, scutil ou PowerShell com argumentos e ambiente. Se houver stdin, escreve a entrada antes de iniciar as threads leitoras e o cronômetro. Captura até 1 MiB por saída, consulta try_wait() a cada 25 ms e tenta encerrar o filho após 20 s. Status zero é tratado como sucesso.', 'daemon/src/platform/mod.rs · run_command(), read_capped()'],
+  hookReady: ['Hook pronto ou rollback', 'Se a configuração terminar com sucesso, uma closure captura rotas e nome da interface para executar a limpeza futura. Se ocorrer erro, a limpeza é tentada imediatamente e a sessão não é anunciada como Started.', 'daemon/src/platform/mod.rs · into_cleanup_hook()'],
+  mainEvents: ['Eventos do processo', 'main emite daemon_startup antes de abrir o listener. Depois do servidor, emite daemon_error quando aplicável e daemon_shutdown. Os eventos incluem host, porta, PID ou descrição do erro, conforme o caso.', 'daemon/src/main.rs · criação e selagem dos scrolls'],
+  sessionEvents: ['Eventos das sessões', 'DaemonGrpcService emite daemon_session_started, daemon_session e daemon_session_stopped. Rejeições e falhas de início também geram daemon_session. Os campos incluem interface, contagens da configuração, duração, outcome e descrição de falhas.', 'daemon/src/server.rs · seal_scroll(), session_config_fields()'],
+  context: ['Contexto de cada registro', 'create_daemon_scribe() define service, version, os e arch como imprint. new_scroll() adiciona scroll_id e copia o imprint. seal() guarda success junto aos dados; header e footer de Margin são pontos opcionais da biblioteca.', 'daemon/src/logging.rs · scribe-rs/src/scribe.rs · scribe-rs/src/scroll.rs'],
+  scribe: ['Scribe · new_scroll() e seal()', 'O código do daemon monta um mapa JSON de campos e sela o evento com o resultado. Scribe clona o registro selado para enfileirá-lo. O Arc<Mutex<Scribe>> compartilhado coordena o acesso feito pelas tarefas do servidor.', 'scribe-rs/src/scribe.rs · daemon/src/server.rs · seal_scroll()'],
+  logQueue: ['Fila de logs · mpsc unbounded', 'hire() cria um canal sem limite de quantidade e inicia uma tarefa Tokio. Essa tarefa recebe os registros na ordem da fila e chama save() de cada Saver configurado. O FileSaver é o destino instalado pelo daemon.', 'scribe-rs/src/scribe.rs · hire(), enqueue()'],
+  saver: ['FileSaver::save()', 'Serializa SealedScroll em JSON, obtém o mutex do BufWriter, acrescenta uma linha ao arquivo e executa flush(). Essas operações de arquivo são síncronas. Falhas são impressas em stderr pelo próprio saver.', 'daemon/src/logging.rs · FileSaver::save()'],
+  retire: ['Scribe::retire()', 'Retira e descarta o sender de Scribe e aguarda a tarefa consumidora. Sem novos registros, ela drena o canal, termina e permite que retire() retorne. main chama esse método depois de registrar o encerramento do daemon.', 'scribe-rs/src/scribe.rs · retire() · daemon/src/main.rs'],
+};
+const graphs = {
+  overview: {
+    height: 810, selected: 'service', title: 'Componentes do daemon Rust',
+    description: 'Um cliente externo abre Session no servidor Axum e tonic. DaemonGrpcService usa daemon-proto, SessionManager e Scribe. SessionManager cria a TUN e aplica a configuração da plataforma. O sistema operacional troca pacotes pela TUN e recebe a configuração de rotas e DNS.',
+    groups: [[8, 116, 804, 538, 'Processo wg-kotlin-daemon · root / Administrador']],
+    nodes: [
+      ['client', 260, 8, 300, 82, 'Cliente gRPC', ['Session · configuração + IP'], 'FORA DO PROCESSO'],
+      ['main', 20, 158, 210, 100, 'Inicializar processo', ['CLI · loopback · privilégios', 'Scribe · listener TCP'], 'MAIN.RS'],
+      ['service', 260, 158, 300, 100, 'DaemonGrpcService', ['Axum + tonic · TCP loopback', 'GET /version · Session'], 'MAIN.RS + SERVER.RS'],
+      ['proto', 20, 340, 232, 100, 'daemon-proto', ['mensagens e serviço gerados', 'tonic / prost'], 'CONTRATOS RUST'],
+      ['manager', 294, 340, 232, 100, 'SessionManager', ['cria TunSession', 'nome · endereços · MTU'], 'SESSION.RS'],
+      ['logger', 568, 340, 232, 100, 'Scribe + FileSaver', ['eventos estruturados', 'fila + arquivo'], 'LOGGING.RS + SCRIBE-RS'],
+      ['tun', 20, 522, 232, 100, 'TunSession', ['SyncDevice + InterruptEvent', 'E/S via tun-rs'], 'DISPOSITIVO COMPARTILHADO'],
+      ['platform', 294, 522, 232, 100, 'platform', ['rotas + DNS por sistema', 'devolve CleanupHook'], 'CONFIGURAÇÃO DE REDE'],
+      ['file', 568, 522, 232, 100, 'vpn-daemon.jsonl', ['um JSON por evento', 'caminho configurável'], 'ARQUIVO'],
+      ['os', 150, 716, 520, 82, 'Sistema operacional', ['interface virtual · pilha IP · rotas · DNS'], 'FORA DO PROCESSO'],
+    ],
+    edges: [
+      ['flow', 'M410 90 V158', 'gRPC bidirecional', 410, 126, true],
+      ['flow', 'M230 208 H260', '', 0, 0],
+      ['flow', 'M300 258 V294 H136 V340', 'usa contratos', 170, 294],
+      ['flow', 'M410 258 V340', 'inicia sessão', 410, 302],
+      ['logging', 'M560 208 H684 V340', 'registra eventos', 684, 300],
+      ['flow', 'M294 390 H274 V492 H136 V522', 'cria TUN', 182, 492],
+      ['flow', 'M410 440 V522', 'configura', 410, 484],
+      ['logging', 'M684 440 V522', 'append + flush', 684, 484],
+      ['packet', 'M136 622 V757 H150', 'IP', 105, 682, true],
+      ['flow', 'M410 622 V716', 'rotas + DNS', 410, 670],
+    ],
+    foot: 'As abas detalham o fluxo atual. O daemon recebe configuração e pacotes IP; o cliente externo executa a criptografia WireGuard e o transporte UDP.',
+  },
+  session: {
+    height: 932, selected: 'config', title: 'Abertura de uma sessão TUN',
+    description: 'A primeira mensagem deve ser Config. O serviço valida os campos e reserva uma das 16 sessões. SessionManager cria a TUN, configura a plataforma e retorna o dispositivo. O servidor enfileira Started e inicia o loop. Falhas devolvem status gRPC e tentam desfazer a configuração parcial.',
+    groups: [],
+    nodes: [
+      ['config', 294, 12, 232, 82, 'Config inicial', ['primeira ClientMessage'], 'STREAM SESSION'],
+      ['validate', 294, 148, 232, 100, 'Validar campos', ['nome · CIDRs · MTU · DNS', 'limites da configuração'], 'VALIDATION.RS'],
+      ['invalid', 568, 148, 232, 100, 'InvalidArgument', ['registra rejected', 'encerra o RPC'], 'CONFIGURAÇÃO INVÁLIDA'],
+      ['reserve', 294, 286, 232, 100, 'Reservar interface', ['active_sessions · mutex', 'limite de 16 sessões'], 'SERVER.RS'],
+      ['denied', 568, 286, 232, 100, 'Rejeitar sessão', ['interface já reservada', 'ou limite atingido'], 'SEM CRIAR DISPOSITIVO'],
+      ['manager', 294, 424, 232, 100, 'Criar TUN', ['DeviceBuilder → SyncDevice', 'cria InterruptEvent'], 'SESSIONMANAGER::START'],
+      ['startFail', 20, 424, 232, 100, 'Falha no início', ['remove a reserva', 'FailedPrecondition'], 'RETORNO DE ERRO'],
+      ['platform', 294, 562, 232, 100, 'Aplicar rotas e DNS', ['configuração por plataforma', 'prepara CleanupHook'], 'PLATFORM/'],
+      ['rollback', 20, 562, 232, 100, 'Tentar rollback', ['desfaz rotas e DNS', 'agrega falhas de limpeza'], 'CONFIGURAÇÃO PARCIAL'],
+      ['started', 294, 700, 232, 100, 'Enfileirar Started', ['nome real da interface', 'registra sessão iniciada'], 'MPSC COM CAPACIDADE 64'],
+      ['loop', 294, 838, 232, 82, 'Iniciar loop', ['tokio::spawn → ReceiverStream'], 'TROCA DE PACOTES'],
+    ],
+    edges: [
+      ['flow', 'M410 94 V148', '', 0, 0],
+      ['cleanup', 'M526 198 H568', '', 0, 0],
+      ['flow', 'M410 248 V286', 'válida', 443, 268],
+      ['cleanup', 'M526 336 H568', '', 0, 0],
+      ['flow', 'M410 386 V424', 'reservada', 452, 406],
+      ['cleanup', 'M294 474 H252', '', 0, 0],
+      ['flow', 'M410 524 V562', '', 0, 0],
+      ['cleanup', 'M294 612 H252', '', 0, 0],
+      ['cleanup', 'M136 562 V524', '', 0, 0],
+      ['flow', 'M410 662 V700', 'sucesso', 447, 681],
+      ['flow', 'M410 800 V838', '', 0, 0],
+    ],
+    foot: 'SessionManager::start() inclui a configuração da plataforma. Started é enfileirado antes do registro de início e do spawn do loop. O fluxo representa o código atual, incluindo a espera pelo logger nessa etapa.',
+  },
+  packets: {
+    height: 802, selected: 'reader', title: 'Fluxo de pacotes IP nos dois sentidos',
+    description: 'Do cliente para o sistema: OutgoingPacket é recebido pelo loop e escrito por send_intr na TUN. Do sistema para o cliente: recv_intr lê a TUN numa tarefa bloqueante e enfileira IncomingPacket para ReceiverStream. O protocolo usa os nomes outgoing e incoming do ponto de vista do cliente gRPC.',
+    groups: [[18, 136, 784, 492, 'Daemon · duas tarefas por sessão']],
+    nodes: [
+      ['client', 245, 8, 330, 82, 'Cliente gRPC', ['envia e recebe pacotes IP'], 'FORA DO PROCESSO'],
+      ['outgoing', 38, 186, 330, 100, 'OutgoingPacket', ['incoming.message() · tokio::select!', 'valida tamanho do buffer'], 'LOOP ASSÍNCRONO'],
+      ['incoming', 452, 186, 330, 100, 'IncomingPacket', ['mpsc · até 64 mensagens', 'ReceiverStream → resposta gRPC'], 'FILA DE RESPOSTAS'],
+      ['write', 38, 354, 330, 100, 'write_packet()', ['send_intr(data, interrupt)', 'cliente → pilha IP do sistema'], 'CHAMADA SÍNCRONA NO LOOP'],
+      ['reader', 452, 354, 330, 100, 'read_packet()', ['recv_intr(buffer, interrupt)', 'pilha IP do sistema → cliente'], 'TOKIO::SPAWN_BLOCKING'],
+      ['tun', 245, 530, 330, 82, 'TunSession / SyncDevice', ['um dispositivo TUN compartilhado'], 'ARC + INTERRUPTEVENT'],
+      ['os', 245, 708, 330, 82, 'Pilha IP do sistema', ['pacotes capturados pelas rotas'], 'SISTEMA OPERACIONAL'],
+    ],
+    edges: [
+      ['packet', 'M245 49 H203 V186', 'cliente → daemon', 203, 116],
+      ['packet', 'M617 186 V49 H575', 'daemon → cliente', 617, 116],
+      ['packet', 'M203 286 V354', 'Packet.data', 203, 322],
+      ['packet', 'M617 354 V286', 'blocking_send()', 617, 322],
+      ['packet', 'M203 454 V490 H325 V530', 'escreve IP', 203, 490],
+      ['packet', 'M495 530 V490 H617 V454', 'lê IP', 617, 490],
+      ['packet', 'M410 612 V708', 'pacotes IP', 465, 660, true],
+    ],
+    foot: 'OutgoingPacket entra pela rede do cliente e é escrito na TUN. IncomingPacket sai da TUN e volta ao cliente. Quadros vazios ou acima de 65535 bytes são descartados. O leitor avisa seu término por um oneshot separado.',
+  },
+  stop: {
+    height: 904, selected: 'close', title: 'Encerramento e liberação de uma sessão',
+    description: 'O loop termina por EOF, erro no stream ou fim do leitor. Executa close, dispara o interrupt, tenta remover rotas e DNS, aguarda o leitor e libera a reserva. Depois envia erros quando necessário, registra o resultado e termina a tarefa. Ctrl+C atua separadamente no servidor Axum.',
+    groups: [],
+    nodes: [
+      ['loop', 294, 8, 232, 82, 'Sessão em execução', ['loop de mensagens + leitor'], 'RUN_SESSION_LOOP'],
+      ['eof', 20, 142, 232, 100, 'Fim / erro do cliente', ['EOF · gRPC · escrita', 'segunda Config'], 'WRITE_RESULT'],
+      ['readDone', 568, 142, 232, 100, 'Leitor terminou', ['oneshot<Option<String>>', 'interrupção ou falha TUN'], 'READ_DONE'],
+      ['close', 294, 292, 232, 82, 'close()', ['AtomicBool · executa uma vez'], 'TUNSESSION'],
+      ['shutdown', 20, 442, 232, 100, 'Ctrl+C / Axum', ['para novas conexões', 'aguarda conexões existentes'], 'ENCERRAMENTO DO PROCESSO'],
+      ['interrupt', 294, 442, 232, 100, 'Disparar interrupt', ['sinaliza a E/S da TUN', 'faz recv_intr() retornar'], 'INTERRUPTEVENT'],
+      ['cleanup', 568, 442, 232, 100, 'Executar limpeza', ['remove rotas', 'desfaz DNS da plataforma'], 'CLEANUPHOOK'],
+      ['join', 568, 610, 232, 82, 'Aguardar read_task', ['read_task.await'], 'JOIN DO LEITOR'],
+      ['release', 20, 610, 232, 82, 'Liberar reserva', ['active_sessions.remove()'], 'MUTEX DO SERVIÇO'],
+      ['summary', 20, 778, 232, 100, 'Registrar resultado', ['envia Error se necessário', 'session + session_stopped'], 'OUTCOME + DURAÇÃO'],
+      ['done', 294, 778, 232, 100, 'Terminar tarefa', ['descarta senders e Arcs', 'fim do stream e do dispositivo'], 'ÚLTIMAS REFERÊNCIAS'],
+    ],
+    edges: [
+      ['cleanup', 'M294 49 H136 V142', '', 0, 0],
+      ['cleanup', 'M526 49 H684 V142', '', 0, 0],
+      ['cleanup', 'M136 242 V268 H350 V292', '', 0, 0],
+      ['cleanup', 'M684 242 V268 H470 V292', '', 0, 0],
+      ['cleanup', 'M410 374 V442', '', 0, 0],
+      ['cleanup', 'M526 492 H568', '', 0, 0],
+      ['cleanup', 'M684 542 V610', '', 0, 0],
+      ['cleanup', 'M568 651 H252', 'após o leitor sair', 410, 651],
+      ['logging', 'M136 692 V778', 'monta resultado', 136, 736],
+      ['cleanup', 'M252 828 H294', '', 0, 0],
+    ],
+    foot: 'Ctrl+C não envia cancelamento aos loops das sessões no código atual. close() interrompe a E/S e executa o hook; o descritor da TUN é liberado pelo descarte das últimas referências, no fim da tarefa.',
+  },
+  platforms: {
+    height: 822, selected: 'routes', title: 'Configuração de rede por plataforma',
+    description: 'Após criar a TUN, configure_session instala rotas por RouteManager e seleciona o adaptador DNS da plataforma. Linux usa resolvectl, macOS usa scutil e Windows usa PowerShell com regras NRPT. O resultado devolve um CleanupHook ou executa rollback.',
+    groups: [],
+    nodes: [
+      ['platform', 294, 8, 232, 82, 'configure_session()', ['configuração + nome real TUN'], 'APÓS CRIAR O DISPOSITIVO'],
+      ['routes', 294, 164, 232, 100, 'Montar e aplicar rotas', ['AllowedIPs + endpoints', 'delete() antes de add()'], 'ROUTE_MANAGER'],
+      ['table', 20, 164, 232, 100, 'Tabela de rotas', ['consulta / adição / remoção', 'API da biblioteca'], 'SISTEMA OPERACIONAL'],
+      ['linux', 20, 352, 232, 100, 'Linux', ['resolvectl dns / domain', 'limpeza com revert'], 'DNS POR INTERFACE'],
+      ['macos', 294, 352, 232, 100, 'macOS', ['scutil via stdin', 'entradas no Dynamic Store'], 'DNS SUPLEMENTAR'],
+      ['windows', 568, 352, 232, 100, 'Windows', ['PowerShell · regras NRPT', 'uma regra por domínio'], 'DNS POR NAMESPACE'],
+      ['command', 294, 548, 232, 100, 'run_command()', ['stdin · stdout · stderr', 'supervisão do subprocesso'], 'COMANDOS DNS'],
+      ['hookReady', 294, 728, 232, 82, 'Resultado do setup', ['CleanupHook ou rollback'], 'RETORNO A SESSIONMANAGER'],
+    ],
+    edges: [
+      ['flow', 'M410 90 V164', 'rotas', 445, 127],
+      ['flow', 'M294 214 H252', '', 0, 0],
+      ['flow', 'M350 264 V310 H136 V352', '', 0, 0],
+      ['flow', 'M410 264 V352', 'depois, DNS', 410, 308],
+      ['flow', 'M470 264 V310 H684 V352', '', 0, 0],
+      ['flow', 'M136 452 V500 H350 V548', '', 0, 0],
+      ['flow', 'M410 452 V548', 'executa comando', 410, 500],
+      ['flow', 'M684 452 V500 H470 V548', '', 0, 0],
+      ['cleanup', 'M410 648 V728', 'resultado + limpeza', 410, 688],
+    ],
+    foot: 'A plataforma é selecionada por cfg(target_os). No Windows, a preparação inicial de NRPT ocorre antes de criar a TUN. RouteManager altera rotas diretamente; run_command() é usado para DNS.',
+  },
+  logs: {
+    height: 864, selected: 'scribe', title: 'Fluxo dos logs estruturados',
+    description: 'Eventos do processo e das sessões recebem metadados e são selados pelo Scribe. Uma fila sem limite alimenta a tarefa que chama FileSaver, serializa JSON e acrescenta linhas ao arquivo. No encerramento, retire descarta o sender e aguarda a fila ser consumida.',
+    groups: [],
+    nodes: [
+      ['mainEvents', 20, 8, 232, 100, 'Eventos do processo', ['startup · error · shutdown', 'host · porta · PID'], 'MAIN.RS'],
+      ['sessionEvents', 294, 8, 232, 100, 'Eventos das sessões', ['started · resultado · stopped', 'interface · duração · outcome'], 'SERVER.RS'],
+      ['context', 568, 8, 232, 100, 'Contexto comum', ['service · version · os · arch', 'scroll_id + success'], 'IMPRINT + SCROLL'],
+      ['scribe', 294, 238, 232, 100, 'Scribe', ['new_scroll() → seal()', 'Arc<Mutex<Scribe>> no daemon'], 'MONTAGEM DO REGISTRO'],
+      ['logQueue', 294, 414, 232, 100, 'Fila de logs', ['mpsc::unbounded_channel', 'tarefa Tokio consumidora'], 'HIRE()'],
+      ['saver', 294, 590, 232, 100, 'FileSaver::save()', ['JSON + linha + flush', 'BufWriter protegido por mutex'], 'E/S SÍNCRONA'],
+      ['retire', 568, 590, 232, 100, 'retire()', ['descarta o sender', 'aguarda o consumidor'], 'APÓS DAEMON_SHUTDOWN'],
+      ['file', 294, 766, 232, 82, 'vpn-daemon.jsonl', ['ou caminho em --log-path'], 'SAÍDA EM DISCO'],
+    ],
+    edges: [
+      ['logging', 'M136 108 V180 H350 V238', '', 0, 0],
+      ['logging', 'M410 108 V238', 'campos do evento', 410, 180],
+      ['logging', 'M684 108 V180 H470 V238', '', 0, 0],
+      ['logging', 'M410 338 V414', 'SealedScroll', 410, 378],
+      ['logging', 'M410 514 V590', 'Saver::save()', 410, 554],
+      ['logging', 'M410 690 V766', 'append + flush', 410, 730],
+      ['cleanup', 'M684 590 V464 H526', 'fecha e drena', 684, 534],
+    ],
+    foot: 'O arquivo contém um JSON por linha. Os scrolls descrevem o processo e a sessão, incluindo contagens e resultado; o loop de pacotes não registra um evento por pacote.',
+  },
+};
+let selected;
+let currentView = 'overview';
+function element(tag, attributes = {}, text) {
+  const node = document.createElementNS(NS, tag);
+  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+function choose(id) {
+  selected = id;
+  const [title, description, source] = details[id];
+  document.getElementById('detail-title').textContent = title;
+  document.getElementById('detail-text').textContent = description;
+  document.getElementById('detail-source').textContent = source.replace(/(^| · )((?:daemon|daemon-proto|scribe-rs)\/)/g, '$1' + root + '$2');
+  svg.querySelectorAll('.node').forEach(node => node.classList.toggle('selected', node.dataset.id === id));
+}
+function draw(view) {
+  currentView = view;
+  const graph = graphs[view];
+  svg.replaceChildren();
+  svg.setAttribute('viewBox', `0 0 820 ${graph.height}`);
+  svg.append(element('title', {id: 'diagram-title'}, graph.title), element('desc', {id: 'diagram-desc'}, graph.description));
+  const definitions = element('defs');
+  for (const [kind, color] of [['flow', 'var(--flow)'], ['packet', 'var(--packet)'], ['cleanup', 'var(--cleanup)'], ['logging', 'var(--logging)']]) {
+    const marker = element('marker', {id: `arrow-${kind}`, viewBox: '0 0 8 8', refX: '7', refY: '4', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse'});
+    marker.append(element('path', {d: 'M0 0 L8 4 L0 8 Z', fill: color}));
+    definitions.append(marker);
+  }
+  svg.append(definitions);
+  for (const [x, y, width, height, title] of graph.groups) {
+    const group = element('g', {class: 'group'});
+    group.append(element('rect', {x, y, width, height}), element('text', {x: x + 16, y: y + 26}, title));
+    svg.append(group);
+  }
+  for (const [kind, path, , , , bidirectional] of graph.edges) {
+    const attributes = {class: `edge ${kind}`, d: path, 'marker-end': `url(#arrow-${kind})`};
+    if (bidirectional) attributes['marker-start'] = `url(#arrow-${kind})`;
+    svg.append(element('path', attributes));
+  }
+  const labels = [];
+  for (const [, , label, x, y] of graph.edges) {
+    if (!label) continue;
+    const group = element('g', {class: 'edge-label'});
+    const text = element('text', {x, y: y + 3, 'text-anchor': 'middle'}, label);
+    const background = element('rect', {x, y: y - 12, width: 0, height: 21});
+    group.append(background, text);
+    svg.append(group);
+    labels.push([background, text, x]);
+  }
+  for (const [id, x, y, width, height, title, lines, tag] of graph.nodes) {
+    const group = element('g', {class: 'node', role: 'button', tabindex: '0', 'aria-label': `Detalhes de ${details[id][0]}`, 'data-id': id});
+    group.append(element('rect', {x, y, width, height}), element('text', {class: 'tag', x: x + 16, y: y + 20}, tag), element('text', {class: 'title', x: x + 16, y: y + 43}, title));
+    lines.forEach((line, index) => group.append(element('text', {class: 'sub', x: x + 16, y: y + 64 + index * 18}, line)));
+    group.addEventListener('click', () => choose(id));
+    group.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(id); }
+    });
+    svg.append(group);
+  }
+  for (const [background, text, x] of labels) {
+    const width = text.getComputedTextLength() + 12;
+    background.setAttribute('x', x - width / 2);
+    background.setAttribute('width', width);
+  }
+  document.querySelectorAll('[data-view]').forEach(button => {
+    const active = button.dataset.view === view;
+    button.setAttribute('aria-selected', String(active));
+    button.tabIndex = active ? 0 : -1;
+  });
+  document.getElementById('panel').setAttribute('aria-labelledby', `tab-${view}`);
+  document.getElementById('foot').textContent = graph.foot;
+  choose(graph.selected);
+}
+const tabs = [...document.querySelectorAll('[data-view]')];
+tabs.forEach((button, index) => {
+  button.addEventListener('click', () => draw(button.dataset.view));
+  button.addEventListener('keydown', event => {
+    let next;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = tabs.length - 1;
+    if (next === undefined) return;
+    event.preventDefault();
+    tabs[next].focus();
+    draw(tabs[next].dataset.view);
+  });
+});
+draw(currentView);
+</script>
+</body>
+</html>

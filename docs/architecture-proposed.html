@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arquitetura proposta para wg-kotlin</title>
+<style>
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: transparent; }
+body { color: var(--foreground, CanvasText); font: 14px/1.5 var(--font-sans, system-ui); }
+button, a { -webkit-tap-highlight-color: transparent; }
+button { font: inherit; cursor: pointer; }
+.intro { margin: 0 0 12px; color: var(--muted-foreground, GrayText); font-size: 13px; }
+.intro strong { color: var(--foreground, CanvasText); font-weight: 600; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.tabs button { padding: 8px 14px; border: 1px solid var(--border, GrayText); border-radius: var(--radius, 10px); background: transparent; color: var(--muted-foreground, GrayText); }
+.tabs button[aria-selected="true"] { color: var(--primary-foreground, HighlightText); background: var(--primary, Highlight); border-color: var(--primary, Highlight); }
+.tabs button:focus-visible, a:focus-visible { outline: 2px solid var(--ring, Highlight); outline-offset: 3px; }
+.legend { display: flex; gap: 10px 16px; flex-wrap: wrap; color: var(--muted-foreground, GrayText); font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sample { width: 22px; border-top: 2px solid; }
+.control.sample { border-top-style: dashed; }
+.control { color: var(--chart-3, GrayText); }
+.local { color: var(--muted-foreground, GrayText); }
+.ip { color: var(--chart-1, Highlight); }
+.wire { color: var(--chart-2, Highlight); }
+.canvas { overflow-x: auto; margin-top: 10px; }
+svg { display: block; width: 100%; min-width: 660px; height: auto; }
+.group rect { fill: var(--muted, Canvas); fill-opacity: .3; stroke: var(--border, GrayText); stroke-dasharray: 5 5; rx: 14px; }
+.group text { fill: var(--muted-foreground, GrayText); font-size: 12px; font-weight: 600; }
+.edge { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.edge.control { stroke: var(--chart-3, GrayText); stroke-dasharray: 5 5; }
+.edge.local { stroke: var(--muted-foreground, GrayText); }
+.edge.ip { stroke: var(--chart-1, Highlight); }
+.edge.wire { stroke: var(--chart-2, Highlight); }
+.edge-label rect { fill: var(--background, Canvas); rx: 4px; }
+.edge-label text { fill: var(--muted-foreground, GrayText); font-size: 12px; }
+.node { cursor: pointer; outline: none; }
+.node rect { fill: var(--card, Canvas); stroke: var(--border, GrayText); stroke-width: 1.5; rx: 12px; }
+.node.core rect { stroke: var(--chart-2, Highlight); stroke-width: 2; }
+.node .title { fill: var(--foreground, CanvasText); font: 600 14px var(--font-mono, monospace); }
+.node .sub { fill: var(--muted-foreground, GrayText); font-size: 13px; }
+.node .tag { fill: var(--muted-foreground, GrayText); font-size: 10px; font-weight: 600; letter-spacing: .5px; }
+.node.selected rect, .node:focus-visible rect { stroke: var(--primary, Highlight); stroke-width: 2.5; }
+.node:hover rect { stroke: var(--primary, Highlight); }
+.detail { margin-top: 12px; padding: 16px; border-radius: var(--radius, 12px); background: var(--card, Canvas); }
+.detail strong { font-family: var(--font-mono, monospace); font-size: 14px; overflow-wrap: anywhere; }
+.detail p { margin: 7px 0 9px; }
+.detail small { color: var(--muted-foreground, GrayText); display: block; }
+.foot, .sources { color: var(--muted-foreground, GrayText); font-size: 12px; margin: 12px 0 0; }
+.sources a { color: var(--muted-foreground, GrayText); text-underline-offset: 3px; }
+@media (prefers-reduced-motion: no-preference) { .node rect { transition: stroke .15s; } }
+</style>
+</head>
+<body>
+<p class="intro"><strong>Proposta, ainda não implementada.</strong> O mesmo núcleo Rust, com integração própria para cada plataforma.</p>
+<div class="tabs" role="tablist" aria-label="Visão da arquitetura proposta">
+  <button role="tab" id="tab-modules" aria-selected="true" aria-controls="diagram-panel" tabindex="0" data-view="modules">Módulos</button>
+  <button role="tab" id="tab-desktop" aria-selected="false" aria-controls="diagram-panel" tabindex="-1" data-view="desktop">Desktop</button>
+  <button role="tab" id="tab-android" aria-selected="false" aria-controls="diagram-panel" tabindex="-1" data-view="android">Android</button>
+  <button role="tab" id="tab-ios" aria-selected="false" aria-controls="diagram-panel" tabindex="-1" data-view="ios">iOS</button>
+</div>
+<div class="legend" aria-label="Legenda das conexões">
+  <span><i class="sample control"></i>Controle / ciclo de vida</span>
+  <span><i class="sample local"></i>Chamada local / dependência</span>
+  <span><i class="sample ip"></i>Pacotes IP</span>
+  <span><i class="sample wire"></i>Mensagens WireGuard</span>
+</div>
+<div id="diagram-panel" role="tabpanel" aria-labelledby="tab-modules">
+  <div class="canvas"><svg id="diagram" role="group" aria-labelledby="diagram-title diagram-desc"></svg></div>
+  <aside class="detail" aria-live="polite" aria-atomic="true">
+    <strong id="detail-title"></strong>
+    <p id="detail-text"></p>
+    <small id="detail-note"></small>
+  </aside>
+  <p class="foot" id="foot"></p>
+  <p class="sources" id="sources"></p>
+</div>
+<script>
+'use strict';
+const NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('diagram');
+const initialView = 'modules';
+let selected = 'core';
+const details = {
+  ui: ['UI Kotlin / Compose', 'Telas, edição de configurações e apresentação do estado da conexão. A UI chama o SDK e pode ser compartilhada entre desktop, Android e iOS.', 'A UI não é proprietária do motor. Fechar uma tela não deve encerrar o túnel.'],
+  sdk: ['wg-kotlin', 'SDK Kotlin Multiplatform com configuração, comandos e estado observável. Escolhe a integração de controle de cada plataforma e mantém seus modelos separados dos tipos gerados pelo gRPC.', 'Evolução do módulo atual. Peers, timers e o processamento dos pacotes passam para wg-core.'],
+  desktop: ['daemon desktop', 'O daemon existente passa a executar wg-core diretamente como biblioteca Rust. Continua responsável pelo TUN, pelas rotas, DNS, MTU e pelo ciclo de vida da sessão. daemon-proto e scribe-rs continuam auxiliares.', 'O gRPC passa a transportar configuração, comandos, estado e estatísticas. O tráfego IP permanece no daemon.'],
+  android: ['VpnService · Android', 'Um serviço Kotlin cria a interface VPN com Builder.establish(), controla o ciclo de vida e entrega o descritor TUN ao motor. Os sockets UDP do motor precisam passar por VpnService.protect().', 'O serviço mantém a posse do motor e dos recursos. A UI e o serviço podem compartilhar o processo Android.'],
+  ios: ['PacketTunnelProvider · iOS', 'Uma extensão NEPacketTunnelProvider inicia e encerra o túnel e aplica as configurações de rede. Um pequeno host, por exemplo em Swift, integra o motor Rust ao NetworkExtension.', 'O motor roda no processo da extensão. O app Kotlin controla a VPN pelas APIs do sistema. São necessários o target de extensão e o entitlement correspondente.'],
+  bindings: ['bindings UniFFI / Gobley', 'Uma ponte fina entre o código de plataforma e wg-core. Expõe início, parada, configuração, estatísticas e eventos. Gera Kotlin via Gobley e pode gerar Swift via UniFFI para a extensão iOS.', 'Evolução de wg-kotlin-uniffi-boringtun. O crate wg-core não depende de UniFFI; o daemon o utiliza diretamente.'],
+  core: ['wg-core · Rust compartilhado', 'Reúne sessões dos peers, handshakes, timers, seleção por AllowedIPs, validação da origem recebida e processamento UDP. Usa BoringTun como motor do protocolo e recebe a integração de pacotes da plataforma.', 'Novo crate Rust. Cada plataforma executa sua própria instância. A migração precisa preservar e testar as regras do protocolo.'],
+  boringtun: ['BoringTun', 'Continua implementando o protocolo WireGuard: handshake, criptografia, proteção contra replay, cookies e timers por peer. wg-core coordena essas sessões e aplica as regras de roteamento e autorização.', 'Dependência mantida. A proposta reorganiza o código ao redor dela.'],
+  app: ['Aplicativo · UI + wg-kotlin', 'Envia comandos e recebe estado. No desktop usa gRPC local; no Android controla o serviço; no iOS usa NETunnelProviderManager e as APIs de comunicação com a extensão.', 'O controle da VPN fica separado do processamento contínuo dos pacotes.'],
+  tunDesktop: ['Interface TUN · desktop', 'O daemon cria a interface e configura endereços, rotas, DNS e MTU. O motor lê e escreve pacotes IP pelo descritor da interface.', 'A interface pertence ao sistema operacional. O adaptador desktop fica responsável pela posse e pelo fechamento do descritor.'],
+  tunAndroid: ['Interface VPN · Android', 'Builder.establish() cria a interface virtual e retorna um ParcelFileDescriptor. O adaptador entrega um descritor ao Rust com regras explícitas de posse e fechamento.', 'O motor pode processar os pacotes pelo descritor, sem enviar cada pacote ao Kotlin.'],
+  tunIos: ['Interface VPN · iOS', 'O sistema direciona os pacotes da interface virtual para o packetFlow da extensão. O adaptador usa a API pública do NetworkExtension para receber e devolver esses pacotes.', 'A integração iOS usa packetFlow. O desenho do core não pressupõe um descritor TUN disponível em todas as plataformas.'],
+  packetFlow: ['packetFlow + ponte UniFFI', 'O adaptador da extensão lê lotes com readPackets e os entrega ao core. Na volta, recebe os pacotes IP decifrados e usa writePackets para devolvê-los ao sistema.', 'Os pacotes ainda cruzam a fronteira Swift/Rust nesta integração. Lotes podem reduzir a quantidade de chamadas. Não passa pela UI Kotlin.'],
+  udpDesktop: ['UDP · desktop', 'Sockets usados pelo motor para enviar e receber mensagens WireGuard. O adaptador de rede garante que o endpoint remoto continue acessível fora do próprio túnel.', 'Os sockets e o processamento dos pacotes ficam no processo do daemon.'],
+  udpAndroid: ['UDP · Android', 'Sockets usados pelo motor Rust, integrados à rede Android. O adaptador chama VpnService.protect() antes do tráfego para evitar que as mensagens do túnel sejam capturadas pela própria VPN.', 'A operação protect() continua dependendo da integração com VpnService, mesmo com o motor em Rust.'],
+  udpIos: ['UDP · iOS', 'Transporte do motor integrado ao contexto de rede da extensão e às regras de roteamento do NetworkExtension. Não usa o gRPC do daemon desktop.', 'A prova de integração iOS precisa validar o transporte UDP, o ciclo de vida e as mudanças de rede no aparelho.'],
+  peer: ['Peer WireGuard remoto', 'A outra ponta do túnel recebe e envia mensagens WireGuard por UDP. O protocolo na rede continua o mesmo nas três plataformas.', 'As setas dos pacotes representam envio e recebimento.'],
+};
+const refs = {
+  android: ['Android · VpnService', 'https://developer.android.com/develop/connectivity/vpn'],
+  ios: ['Apple · NEPacketTunnelProvider', 'https://developer.apple.com/documentation/networkextension/nepackettunnelprovider'],
+  flow: ['Apple · NEPacketTunnelFlow', 'https://developer.apple.com/documentation/networkextension/nepackettunnelflow'],
+  compose: ['Kotlin · Compose Multiplatform', 'https://kotlinlang.org/docs/multiplatform/compose-multiplatform-and-jetpack-compose.html'],
+};
+const graphs = {
+  modules: {
+    height: 940,
+    title: 'Módulos propostos e integrações por plataforma',
+    description: 'A UI usa o SDK wg-kotlin. O SDK controla o daemon desktop, o VpnService Android ou a extensão iOS. O daemon chama wg-core diretamente em Rust. Android e iOS usam bindings UniFFI. Todas as plataformas reutilizam a mesma biblioteca wg-core, que depende de BoringTun.',
+    groups: [],
+    nodes: [
+      ['ui', 190, 8, 380, 76, 'UI Kotlin / Compose', ['telas e interação com o usuário'], 'APLICATIVO'],
+      ['sdk', 190, 140, 380, 88, 'wg-kotlin', ['configuração · comandos · estado'], 'SDK KOTLIN MULTIPLATFORM'],
+      ['desktop', 14, 322, 230, 100, 'daemon desktop', ['TUN · rotas · DNS · MTU', 'executa o motor no daemon'], 'RUST · PROCESSO'],
+      ['android', 264, 322, 230, 100, 'VpnService', ['permissão · interface VPN', 'protect() · ciclo de vida'], 'KOTLIN · SERVIÇO'],
+      ['ios', 514, 322, 230, 100, 'PacketTunnelProvider', ['NetworkExtension', 'configuração · ciclo de vida'], 'SWIFT · EXTENSÃO'],
+      ['bindings', 264, 510, 480, 88, 'bindings UniFFI / Gobley', ['ponte do código de plataforma para wg-core'], 'EVOLUÇÃO DO WRAPPER ATUAL'],
+      ['core', 14, 682, 730, 110, 'wg-core', ['peers · AllowedIPs · handshakes · timers · UDP', 'integração de pacotes por descritor ou por lotes'], 'NOVO · BIBLIOTECA RUST COMPARTILHADA'],
+      ['boringtun', 264, 854, 230, 74, 'BoringTun', ['protocolo WireGuard'], 'DEPENDÊNCIA MANTIDA'],
+    ],
+    edges: [
+      ['local', 'M380 84 V140', 'API Kotlin', 440, 112],
+      ['control', 'M270 228 V272 H129 V322', 'gRPC local', 129, 285, true],
+      ['control', 'M380 228 V322', 'serviço Android', 380, 276, true],
+      ['control', 'M490 228 V272 H629 V322', 'APIs de VPN do iOS', 629, 285, true],
+      ['local', 'M129 422 V682', 'Rust direto', 129, 550],
+      ['local', 'M379 422 V510', 'Kotlin', 379, 466],
+      ['local', 'M629 422 V510', 'Swift', 629, 466],
+      ['local', 'M504 598 V682', 'chamadas locais', 504, 640],
+      ['local', 'M379 792 V854', 'dependência Rust', 379, 824],
+    ],
+    foot: 'Selecione um bloco para ver sua responsabilidade. Desktop, Android e iOS são alternativas: cada plataforma executa sua própria instância de wg-core. Os nomes dos novos módulos são sugestões.',
+    sources: ['compose', 'android', 'ios'],
+  },
+  desktop: {
+    height: 802,
+    title: 'Desktop: pacotes processados no daemon Rust',
+    description: 'O aplicativo controla o daemon por gRPC. Dentro do processo do daemon, wg-core troca pacotes IP com o TUN, usa BoringTun e troca mensagens WireGuard pelos sockets UDP. O gRPC não transporta os pacotes IP.',
+    groups: [[246, 132, 500, 470, 'Processo do daemon Rust']],
+    nodes: [
+      ['app', 266, 8, 460, 80, 'Aplicativo · UI + wg-kotlin', ['configuração · comandos · estado'], 'PROCESSO DO APLICATIVO'],
+      ['desktop', 266, 176, 460, 88, 'daemon desktop', ['ciclo de vida · TUN · rotas · DNS · MTU'], 'HOST DO MOTOR'],
+      ['tunDesktop', 14, 342, 194, 100, 'Interface TUN', ['pacotes IP', 'da máquina'], 'SISTEMA OPERACIONAL'],
+      ['core', 266, 342, 230, 100, 'wg-core', ['peers · AllowedIPs', 'handshakes · timers'], 'RUST'],
+      ['udpDesktop', 544, 342, 182, 100, 'UDP', ['mensagens', 'WireGuard'], 'SOCKETS DO MOTOR'],
+      ['boringtun', 266, 514, 230, 74, 'BoringTun', ['protocolo WireGuard'], 'RUST'],
+      ['peer', 544, 692, 182, 98, 'Peer remoto', ['WireGuard', 'pela rede'], 'OUTRA PONTA'],
+    ],
+    edges: [
+      ['control', 'M496 88 V176', 'gRPC local · controle e estado', 496, 119, true],
+      ['control', 'M266 220 H111 V342', 'configura TUN', 111, 286],
+      ['control', 'M381 264 V342', 'inicia / encerra', 381, 302],
+      ['ip', 'M208 392 H266', 'IP', 237, 374, true],
+      ['wire', 'M496 392 H544', 'WG', 520, 374, true],
+      ['local', 'M381 442 V514', 'Rust direto', 381, 479],
+      ['wire', 'M635 442 V692', 'UDP', 661, 641, true],
+    ],
+    foot: 'A mudança principal está no caminho dos pacotes: TUN, criptografia e UDP passam a ser processados pelo daemon. O aplicativo recebe estado e envia comandos por gRPC.',
+    sources: [],
+  },
+  android: {
+    height: 902,
+    title: 'Android: VpnService controla o motor Rust',
+    description: 'O aplicativo controla o VpnService. O serviço usa UniFFI para iniciar wg-core e entrega o descritor da interface VPN. Os pacotes IP passam entre essa interface e o core Rust; mensagens WireGuard usam sockets UDP protegidos pelo serviço.',
+    groups: [[246, 132, 500, 600, 'VpnService · motor e biblioteca nativa']],
+    nodes: [
+      ['app', 266, 8, 460, 80, 'Aplicativo · UI + wg-kotlin', ['solicita conexão e observa o estado'], 'KOTLIN / COMPOSE'],
+      ['android', 266, 176, 460, 88, 'VpnService', ['Builder.establish() · protect() · ciclo de vida'], 'INTEGRAÇÃO KOTLIN COM O ANDROID'],
+      ['bindings', 266, 322, 460, 76, 'bindings UniFFI / Gobley', ['start · stop · configuração · eventos'], 'CHAMADAS KOTLIN → RUST'],
+      ['tunAndroid', 14, 478, 194, 104, 'Interface VPN', ['descritor TUN', 'criado pelo serviço'], 'SISTEMA ANDROID'],
+      ['core', 266, 478, 230, 104, 'wg-core', ['peers · AllowedIPs', 'handshakes · timers'], 'BIBLIOTECA RUST'],
+      ['udpAndroid', 544, 478, 182, 104, 'UDP', ['socket protegido', 'por protect()'], 'SOCKETS DO MOTOR'],
+      ['boringtun', 266, 646, 230, 74, 'BoringTun', ['protocolo WireGuard'], 'RUST'],
+      ['peer', 544, 792, 182, 98, 'Peer remoto', ['WireGuard', 'pela rede'], 'OUTRA PONTA'],
+    ],
+    edges: [
+      ['control', 'M496 88 V176', 'controle do serviço', 496, 119, true],
+      ['control', 'M266 220 H111 V478', 'cria interface', 111, 350],
+      ['control', 'M496 264 V322', 'comandos / estado', 496, 294, true],
+      ['local', 'M381 398 V478', 'UniFFI', 381, 438, true],
+      ['ip', 'M208 530 H266', 'IP', 237, 512, true],
+      ['wire', 'M496 530 H544', 'WG', 520, 512, true],
+      ['local', 'M381 582 V646', 'Rust direto', 381, 614],
+      ['wire', 'M635 582 V792', 'UDP', 661, 762, true],
+    ],
+    foot: 'O Kotlin do serviço continua necessário para as APIs Android. Os pacotes podem ser processados pelo descritor no Rust. O serviço pode compartilhar o processo com a UI, mas mantém a posse do motor.',
+    sources: ['android'],
+  },
+  ios: {
+    height: 902,
+    title: 'iOS: o motor Rust roda na extensão VPN',
+    description: 'O aplicativo Kotlin solicita a VPN pelas APIs do sistema. Uma extensão NEPacketTunnelProvider executa o motor. NEPacketTunnelFlow entrega pacotes IP em lotes ao adaptador Swift, que os encaminha por UniFFI para wg-core. As respostas percorrem o caminho inverso.',
+    groups: [[246, 132, 500, 600, 'Extensão VPN · processo separado']],
+    nodes: [
+      ['app', 266, 8, 460, 80, 'Aplicativo · UI + wg-kotlin', ['NETunnelProviderManager · controle e estado'], 'KOTLIN / COMPOSE'],
+      ['ios', 266, 176, 460, 88, 'PacketTunnelProvider', ['startTunnel · stopTunnel · configura a rede'], 'EXTENSÃO NETWORKEXTENSION · HOST SWIFT'],
+      ['tunIos', 14, 322, 194, 76, 'Interface VPN', ['pacotes IP do iOS'], 'SISTEMA IOS'],
+      ['packetFlow', 266, 322, 460, 76, 'packetFlow + ponte UniFFI', ['readPackets / writePackets · lotes de IP'], 'ADAPTADOR DA EXTENSÃO'],
+      ['core', 266, 478, 230, 104, 'wg-core', ['peers · AllowedIPs', 'handshakes · timers'], 'BIBLIOTECA RUST'],
+      ['udpIos', 544, 478, 182, 104, 'UDP', ['integrado à rede', 'da extensão'], 'TRANSPORTE DO MOTOR'],
+      ['boringtun', 266, 646, 230, 74, 'BoringTun', ['protocolo WireGuard'], 'RUST'],
+      ['peer', 544, 792, 182, 98, 'Peer remoto', ['WireGuard', 'pela rede'], 'OUTRA PONTA'],
+    ],
+    edges: [
+      ['control', 'M496 88 V176', 'controle pelas APIs do sistema', 496, 119, true],
+      ['control', 'M496 264 V322', 'ciclo de vida', 496, 294],
+      ['ip', 'M208 360 H266', 'IP', 237, 342, true],
+      ['ip', 'M381 398 V478', 'lotes IP · UniFFI', 381, 438, true],
+      ['wire', 'M496 530 H544', 'WG', 520, 512, true],
+      ['local', 'M381 582 V646', 'Rust direto', 381, 614],
+      ['wire', 'M635 582 V792', 'UDP', 661, 762, true],
+    ],
+    foot: 'No iOS, os pacotes passam pela API pública packetFlow e pela ponte da extensão. O core aceita esse adaptador, sem exigir um descritor TUN. O daemon e o gRPC desktop ficam fora desse caminho.',
+    sources: ['ios', 'flow'],
+  },
+};
+function el(tag, attrs, text) {
+  const item = document.createElementNS(NS, tag);
+  for (const [key, value] of Object.entries(attrs || {})) item.setAttribute(key, value);
+  if (text !== undefined) item.textContent = text;
+  return item;
+}
+function choose(id) {
+  selected = id;
+  const [title, text, note] = details[id];
+  document.getElementById('detail-title').textContent = title;
+  document.getElementById('detail-text').textContent = text;
+  document.getElementById('detail-note').textContent = note;
+  svg.querySelectorAll('.node').forEach(function (node) {
+    const active = node.dataset.id === id;
+    node.classList.toggle('selected', active);
+    node.setAttribute('aria-pressed', String(active));
+  });
+}
+function draw(view) {
+  const graph = graphs[view];
+  svg.replaceChildren();
+  svg.setAttribute('viewBox', '0 0 760 ' + graph.height);
+  svg.dataset.view = view;
+  svg.append(el('title', {id: 'diagram-title'}, graph.title), el('desc', {id: 'diagram-desc'}, graph.description));
+  const defs = el('defs');
+  for (const [kind, color] of [
+    ['control', 'var(--chart-3, GrayText)'],
+    ['local', 'var(--muted-foreground, GrayText)'],
+    ['ip', 'var(--chart-1, Highlight)'],
+    ['wire', 'var(--chart-2, Highlight)'],
+  ]) {
+    const marker = el('marker', {id: 'arrow-' + kind, viewBox: '0 0 8 8', refX: '7', refY: '4', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse'});
+    marker.append(el('path', {d: 'M0 0 L8 4 L0 8 Z', fill: color}));
+    defs.append(marker);
+  }
+  svg.append(defs);
+  for (const [x, y, w, h, title] of graph.groups) {
+    const group = el('g', {class: 'group'});
+    group.append(el('rect', {x: x, y: y, width: w, height: h}), el('text', {x: x + 16, y: y + 25}, title));
+    svg.append(group);
+  }
+  for (const [kind, path, label, x, y, bidirectional] of graph.edges) {
+    const attrs = {class: 'edge ' + kind, d: path, 'marker-end': 'url(#arrow-' + kind + ')'};
+    if (bidirectional) attrs['marker-start'] = 'url(#arrow-' + kind + ')';
+    svg.append(el('path', attrs));
+  }
+  for (const [kind, path, label, x, y] of graph.edges) {
+    const group = el('g', {class: 'edge-label'});
+    const text = el('text', {x: x, y: y + 2, 'text-anchor': 'middle'}, label);
+    group.append(text);
+    svg.append(group);
+    const width = text.getComputedTextLength() + 14;
+    group.prepend(el('rect', {x: x - width / 2, y: y - 13, width: width, height: 21}));
+  }
+  for (const [id, x, y, w, h, title, lines, tag] of graph.nodes) {
+    const group = el('g', {class: 'node' + (id === 'core' ? ' core' : ''), role: 'button', tabindex: '0', 'aria-label': 'Detalhes de ' + details[id][0], 'aria-pressed': 'false', 'data-id': id});
+    group.append(el('rect', {x: x, y: y, width: w, height: h}));
+    group.append(el('text', {class: 'tag', x: x + 14, y: y + 19}, tag));
+    group.append(el('text', {class: 'title', x: x + 14, y: y + 42}, title));
+    lines.forEach(function (line, index) {
+      group.append(el('text', {class: 'sub', x: x + 14, y: y + 63 + index * 18}, line));
+    });
+    group.addEventListener('click', function () { choose(id); });
+    group.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        choose(id);
+      }
+    });
+    svg.append(group);
+  }
+  document.querySelectorAll('[data-view]').forEach(function (button) {
+    const active = button.dataset.view === view;
+    button.setAttribute('aria-selected', String(active));
+    button.tabIndex = active ? 0 : -1;
+  });
+  document.getElementById('diagram-panel').setAttribute('aria-labelledby', 'tab-' + view);
+  document.getElementById('foot').textContent = graph.foot;
+  const sources = document.getElementById('sources');
+  sources.replaceChildren();
+  if (graph.sources.length) {
+    sources.append(document.createTextNode('Referências: '));
+    graph.sources.forEach(function (id, index) {
+      if (index) sources.append(document.createTextNode(' · '));
+      const link = document.createElement('a');
+      link.textContent = refs[id][0];
+      link.href = refs[id][1];
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      sources.append(link);
+    });
+  }
+  if (!graph.nodes.some(function (node) { return node[0] === selected; })) selected = 'core';
+  choose(selected);
+}
+const tabs = Array.from(document.querySelectorAll('[data-view]'));
+tabs.forEach(function (button, index) {
+  button.addEventListener('click', function () { draw(button.dataset.view); });
+  button.addEventListener('keydown', function (event) {
+    let next;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    draw(tabs[next].dataset.view);
+    tabs[next].focus();
+  });
+});
+draw(initialView);
+</script>
+</body>
+</html>

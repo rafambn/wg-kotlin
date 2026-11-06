@@ -1,12 +1,13 @@
 use anyhow::bail;
 use clap::Parser;
+use daemon::logging::{LogComponent, LogLevel, LogOptions};
 #[cfg(unix)]
 use daemon::owner::allow_owner_signals;
 use daemon::{ipc::LocalListener, logging, owner::OwnerProcess, platform, server::DaemonService};
 #[cfg(windows)]
 use daemon::{session, wintun::WintunDll};
 use serde_json::Value;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{Mutex, watch};
 
 #[derive(Parser, Debug)]
@@ -18,11 +19,21 @@ struct Cli {
     owner_pid: u32,
     #[arg(long)]
     owner_start_time: u64,
-    #[arg(long, help = "Path to the JSONL log file. Defaults to <exe_dir>/vpn-daemon.jsonl")]
-    log_path: Option<PathBuf>,
+    #[command(flatten)]
+    logging: LogOptions,
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> std::process::ExitCode {
+    match run_main() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            logging::report_fatal_error(format!("{error:#}"));
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     ensure_root()?;
     let owner = OwnerProcess::open(cli.owner_pid, cli.owner_start_time)?;
@@ -37,20 +48,23 @@ async fn run(cli: Cli, owner: Arc<OwnerProcess>) -> anyhow::Result<()> {
     let wintun = Arc::new(WintunDll::prepare()?);
     #[cfg(windows)]
     session::set_wintun_dll(&wintun).map_err(anyhow::Error::msg)?;
-    let log_path = cli.log_path.unwrap_or_else(|| std::env::current_exe().expect("missing executable path").with_file_name("vpn-daemon.jsonl"));
-    let mut scribe = logging::create_daemon_scribe(&log_path)?;
+    let mut scribe = logging::create_daemon_scribe(&cli.logging);
     scribe.hire();
     let service = DaemonService::new(Arc::new(Mutex::new(scribe)));
     let mut listener = match LocalListener::bind(&cli.endpoint, &owner) {
         Ok(listener) => listener,
         Err(error) => {
-            service.seal_scroll("daemon_error", [("error".into(), Value::String(error.to_string()))], false).await;
+            service
+                .seal_scroll(LogComponent::Daemon, LogLevel::Error, "daemon_error", [("error".into(), Value::String(error.to_string()))], false)
+                .await;
             service.retire_logs().await;
             return Err(error.into());
         }
     };
     service
         .seal_scroll(
+            LogComponent::Daemon,
+            LogLevel::Info,
             "daemon_startup",
             [
                 ("endpoint".into(), Value::String(cli.endpoint)),
@@ -74,15 +88,16 @@ async fn run(cli: Cli, owner: Arc<OwnerProcess>) -> anyhow::Result<()> {
             connection = listener.accept() => {
                 let (stream, peer_pid) = match connection { Ok(value) => value, Err(error) => break Err(error) };
                 if !owner.authorizes(peer_pid) {
-                    service.seal_scroll("daemon_connection_rejected", [("peer_pid".into(), Value::from(peer_pid))], false).await;
+                    service.seal_scroll(LogComponent::Ipc, LogLevel::Warn, "daemon_connection_rejected", [("peer_pid".into(), Value::from(peer_pid))], false).await;
                     drop(stream);
                     continue;
                 }
+                service.seal_scroll(LogComponent::Ipc, LogLevel::Debug, "daemon_connection_accepted", [("peer_pid".into(), Value::from(peer_pid))], true).await;
                 let service = service.clone();
                 let shutdown = shutdown_tx.clone();
                 connections.spawn(async move {
                     if let Err(error) = service.serve_connection(stream, shutdown).await {
-                        service.seal_scroll("daemon_connection_error", [("error".into(), Value::String(error.to_string()))], false).await;
+                        service.seal_scroll(LogComponent::Ipc, LogLevel::Error, "daemon_connection_error", [("error".into(), Value::String(error.to_string()))], false).await;
                     }
                 });
             }
@@ -90,7 +105,7 @@ async fn run(cli: Cli, owner: Arc<OwnerProcess>) -> anyhow::Result<()> {
     };
     let _ = shutdown_tx.send(true);
     if let Err(error) = &result {
-        service.seal_scroll("daemon_error", [("error".into(), Value::String(error.to_string()))], false).await;
+        service.seal_scroll(LogComponent::Daemon, LogLevel::Error, "daemon_error", [("error".into(), Value::String(error.to_string()))], false).await;
     }
     drop(listener);
     let drained = tokio::time::timeout(Duration::from_secs(4), async {
@@ -99,7 +114,16 @@ async fn run(cli: Cli, owner: Arc<OwnerProcess>) -> anyhow::Result<()> {
     })
     .await
     .is_ok();
-    service.seal_scroll("daemon_shutdown", [("sessions_drained".into(), Value::Bool(drained))], result.is_ok() && drained).await;
+    let success = result.is_ok() && drained;
+    service
+        .seal_scroll(
+            LogComponent::Daemon,
+            if success { LogLevel::Info } else { LogLevel::Error },
+            "daemon_shutdown",
+            [("sessions_drained".into(), Value::Bool(drained))],
+            success,
+        )
+        .await;
     service.retire_logs().await;
     if !drained {
         std::process::exit(1);

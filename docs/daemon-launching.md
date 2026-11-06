@@ -189,6 +189,45 @@ Reference: [named pipe access controls](https://learn.microsoft.com/en-us/window
 [client PID](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeclientprocessid),
 [server PID](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid).
 
+## Logs
+
+The daemon emits Scribe Scrolls as JSONL. Select one or more destinations with
+`--log-target file,stdout,stderr`; repeating the option also works. The default
+target is `file`. `--log-path` selects its explicit path and is ignored when the
+file target is disabled. Missing parent directories are created.
+
+Default file locations:
+
+| System | Path |
+| --- | --- |
+| Linux | `/var/log/wg-kotlin/daemon.jsonl` |
+| macOS | `/Library/Logs/wg-kotlin/daemon.jsonl` |
+| Windows | `<ProgramData>/wg-kotlin/logs/daemon.jsonl`, using the Windows known folder |
+
+`--log-level` sets the minimum severity: `trace`, `debug`, `info`, `warn`, or
+`error`. The default is `info`. `--log-component daemon,ipc,session` restricts
+output to the selected components; omitting it includes all components.
+Logging diagnostics use the `logging` component. Filters run before enqueueing.
+For example, `--log-target file,stderr --log-level debug` retains accepted IPC
+connections as well as lifecycle events.
+
+Each record includes `timestamp` as Unix epoch milliseconds, `level`, `component`,
+and `pid`. Session events carry a UUID `session_id` shared by startup, summary,
+and stop records. Reusing an interface creates a new session ID. `scroll_id`
+identifies each individual record. Process events have no session ID.
+
+If a file or stdout write fails, stderr receives a `daemon_log_error` Scroll and
+the original record. Diagnostics include the source event, Scroll ID, and session
+ID when available, and bypass normal filters. Stderr is the terminal fallback;
+its write errors do not reenter the logger. If no requested destination can be
+opened, subsequent records also go to stderr.
+
+Savers run on a dedicated thread. Shutdown waits at most 500 ms for logs to drain,
+then allows up to 100 ms for a timeout diagnostic. A blocked output does not keep
+the runtime alive or prevent session cleanup. Records still pending at exit can
+be lost. Fatal process errors also use Scrolls on stderr and have a 100 ms
+reporting deadline, so a full stderr pipe cannot hold the process open.
+
 ## Framed protobuf protocol
 
 Each message is a four-byte unsigned big-endian length followed by protobuf bytes.

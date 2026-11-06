@@ -1,4 +1,5 @@
 use crate::ipc::{PROTOCOL_VERSION, read_frame, write_frame};
+use crate::logging::{self, LogComponent, LogLevel};
 use crate::session::{SessionManager, TunSession};
 use crate::validation;
 use daemon_proto::pb::client_message::Payload as ClientPayload;
@@ -100,13 +101,22 @@ impl DaemonService {
         Self { scribe, active_sessions: Arc::new(Mutex::new(HashSet::new())) }
     }
 
-    pub async fn seal_scroll(&self, event: &str, fields: impl IntoIterator<Item = (String, Value)>, success: bool) {
+    pub async fn seal_scroll(
+        &self,
+        component: LogComponent,
+        level: LogLevel,
+        event: &str,
+        fields: impl IntoIterator<Item = (String, Value)>,
+        success: bool,
+    ) {
         let scribe = self.scribe.lock().await;
         let mut scroll = scribe.new_scroll(None);
         scroll.insert("event".to_string(), Value::String(event.to_string()));
         for (key, value) in fields {
             scroll.insert(key, value);
         }
+        scroll.insert("component".to_string(), Value::from(component.as_str()));
+        scroll.insert("level".to_string(), Value::from(level.as_str()));
         scribe.seal(scroll, success);
     }
 
@@ -117,7 +127,7 @@ impl DaemonService {
     }
 
     pub async fn retire_logs(&self) {
-        self.scribe.lock().await.retire().await;
+        logging::retire_scribe(&self.scribe).await;
     }
 
     async fn run_session_loop(
@@ -243,7 +253,7 @@ impl DaemonService {
             }
         }
 
-        let mut fields = session_fields;
+        let mut fields = session_fields.clone();
         fields.push(("interface".to_string(), Value::String(interface_name.clone())));
         fields.push(("outcome".to_string(), Value::String(outcome.to_string())));
         fields.push(("duration_ms".to_string(), Value::Number((started_at.elapsed().as_millis() as u64).into())));
@@ -254,14 +264,13 @@ impl DaemonService {
             fields.push(("error".to_string(), Value::String(error_message_text.clone())));
         }
 
-        self.seal_scroll("daemon_session", fields, success).await;
+        let level = if success { LogLevel::Info } else { LogLevel::Error };
+        self.seal_scroll(LogComponent::Session, level, "daemon_session", fields, success).await;
 
-        self.seal_scroll(
-            "daemon_session_stopped",
-            vec![("interface".to_string(), Value::String(interface_name.clone())), ("outcome".to_string(), Value::String(outcome.to_string()))],
-            success,
-        )
-        .await;
+        let mut stopped_fields = session_fields;
+        stopped_fields.push(("interface".to_string(), Value::String(interface_name.clone())));
+        stopped_fields.push(("outcome".to_string(), Value::String(outcome.to_string())));
+        self.seal_scroll(LogComponent::Session, level, "daemon_session_stopped", stopped_fields, success).await;
         self.active_sessions.lock().await.remove(&interface_name);
     }
 }
@@ -287,7 +296,7 @@ impl DaemonService {
             fields.push(("error".to_string(), Value::String(error_message.clone())));
             fields.push(("error_type".to_string(), Value::String("invalid_argument".to_string())));
             fields.push(("duration_ms".to_string(), Value::Number((started_at.elapsed().as_millis() as u64).into())));
-            self.seal_scroll("daemon_session", fields, false).await;
+            self.seal_scroll(LogComponent::Session, LogLevel::Warn, "daemon_session", fields, false).await;
             return Err(Status::invalid_argument(error_message));
         }
 
@@ -317,7 +326,7 @@ impl DaemonService {
             fields.push(("error".to_string(), Value::String(error_message.clone())));
             fields.push(("error_type".to_string(), Value::String("failed_precondition".to_string())));
             fields.push(("duration_ms".to_string(), Value::Number((started_at.elapsed().as_millis() as u64).into())));
-            self.seal_scroll("daemon_session", fields, false).await;
+            self.seal_scroll(LogComponent::Session, LogLevel::Warn, "daemon_session", fields, false).await;
             return Err(Status::failed_precondition(error_message));
         }
 
@@ -328,7 +337,7 @@ impl DaemonService {
             fields.push(("error".to_string(), Value::String(error_message.clone())));
             fields.push(("error_type".to_string(), Value::String("resource_exhausted".to_string())));
             fields.push(("duration_ms".to_string(), Value::Number((started_at.elapsed().as_millis() as u64).into())));
-            self.seal_scroll("daemon_session", fields, false).await;
+            self.seal_scroll(LogComponent::Session, LogLevel::Warn, "daemon_session", fields, false).await;
             return Err(Status::resource_exhausted(error_message));
         }
 
@@ -353,7 +362,7 @@ impl DaemonService {
                     fields.push(("error".to_string(), Value::String(error_message.clone())));
                     fields.push(("error_type".to_string(), Value::String("start_failed".to_string())));
                     fields.push(("duration_ms".to_string(), Value::Number((started_at.elapsed().as_millis() as u64).into())));
-                    service.seal_scroll("daemon_session", fields, false).await;
+                    service.seal_scroll(LogComponent::Session, LogLevel::Error, "daemon_session", fields, false).await;
                     service.active_sessions.lock().await.remove(&interface_name);
                     let _ = tx.try_send(Err(Status::failed_precondition(error_message)));
                     return;
@@ -366,7 +375,7 @@ impl DaemonService {
                 .await;
             let mut started_fields = session_fields.clone();
             started_fields.push(("interface".to_string(), Value::String(session.interface_name().to_string())));
-            service.seal_scroll("daemon_session_started", started_fields, true).await;
+            service.seal_scroll(LogComponent::Session, LogLevel::Info, "daemon_session_started", started_fields, true).await;
             service.run_session_loop(incoming, session, shutdown, started_at, session_fields, tx).await;
         });
 
@@ -408,6 +417,7 @@ fn session_config_fields(config: &TunSessionConfig) -> Vec<(String, Value)> {
     };
 
     vec![
+        ("session_id".to_string(), Value::from(scribe_rs::scroll::new_scroll_id())),
         ("requested_interface".to_string(), Value::String(config.interface_name.clone())),
         ("platform".to_string(), Value::String(std::env::consts::OS.to_string())),
         ("address_count".to_string(), Value::Number((config.addresses.len() as u64).into())),

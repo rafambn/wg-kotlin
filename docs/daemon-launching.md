@@ -137,8 +137,16 @@ keeps its own list of created and replaced routes.
 Cleanup leaves detected external route changes untouched and
 reports the conflict while continuing with other routes and DNS.
 
+DNS configuration uses SystemConfiguration directly. It checks native error
+codes, writes both resolver entries with SCDynamicStoreSetMultiple, and reads
+them back to verify the saved values. Cleanup accepts absent keys, verifies
+removal, and attempts both entries even if one fails. DNS failures propagate
+through startup rollback and session cleanup. The scutil executable is no
+longer required.
+
 Reference: [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice),
-[LOCAL_PEERPID](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/un.h).
+[LOCAL_PEERPID](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/un.h),
+[SCDynamicStore](https://developer.apple.com/documentation/systemconfiguration/scdynamicstore-gb2).
 
 ## Windows
 

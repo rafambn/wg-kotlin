@@ -92,11 +92,11 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
     Referência: daemon/src/validation.rs, validate_dns(), daemon/src/platform/mod.rs,
     normalize_domains(), e daemon/src/platform/windows.rs, configure_session().
 
-11. Preservar sub-redes no filtro de rotas dos endpoints.
-    O filtro compara somente o IP, sem verificar o prefixo. Um endpoint
-    203.0.113.0 com AllowedIPs 203.0.113.0/24 faz a sub-rede inteira desaparecer
-    da lista de rotas, permitindo que o restante da rede siga a rota física.
-    Excluir somente rotas de host equivalentes ao endpoint.
+11. Implementado: preservar sub-redes no filtro de rotas dos endpoints.
+    Excluir somente rotas de host /32 no IPv4 e /128 no IPv6 cujo destino
+    seja igual ao endpoint. Preservar sub-redes, rotas padrão e rotas de outros
+    hosts, mesmo quando o endereço base da rede coincide com o endpoint.
+    O filtro é compartilhado por Linux, macOS e Windows.
     Referência: daemon/src/platform/mod.rs, build_and_filter_routes().
 
 12. Aplicar o timeout dos subprocessos também à escrita em stdin.

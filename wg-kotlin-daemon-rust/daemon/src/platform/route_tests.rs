@@ -18,6 +18,44 @@ fn malformed_endpoint_is_rejected_before_startup() {
     assert!(resolve_endpoint_routes(&config).unwrap_err().contains("invalid peer endpoint"));
 }
 
+#[test]
+fn endpoint_filter_preserves_subnets_and_other_hosts() {
+    use daemon_proto::pb::{Cidr, ip};
+    use std::net::IpAddr;
+
+    let proto_ip = |value: IpAddr| Ip {
+        value: Some(match value {
+            IpAddr::V4(address) => ip::Value::V4(address.octets().to_vec()),
+            IpAddr::V6(address) => ip::Value::V6(address.octets().to_vec()),
+        }),
+    };
+    for (endpoint, other_host, prefix) in [
+        ("203.0.113.0", "203.0.113.1", 24),
+        ("2001:db8::", "2001:db8::1", 64),
+        ("0.0.0.0", "0.0.0.1", 0),
+        ("::", "::1", 0),
+    ] {
+        let endpoint: IpAddr = endpoint.parse().unwrap();
+        let other_host: IpAddr = other_host.parse().unwrap();
+        let host_prefix = if endpoint.is_ipv4() { 32 } else { 128 };
+        let mut config = TunSessionConfig {
+            peer_endpoints: vec![proto_ip(endpoint)],
+            peer_allowed_ips: [(endpoint, prefix), (endpoint, host_prefix), (other_host, host_prefix)]
+                .into_iter()
+                .map(|(address, prefix)| Cidr { ip: Some(proto_ip(address)), prefix })
+                .collect(),
+            ..Default::default()
+        };
+        let (_, routes, _) = super::build_and_filter_routes(&config, "utun0", vec![]).unwrap();
+        let destinations: Vec<_> = routes.iter().map(|route| (route.destination(), route.prefix())).collect();
+        assert_eq!(destinations, [(endpoint, prefix as u8), (other_host, host_prefix as u8)]);
+
+        config.peer_endpoints.clear();
+        let (_, routes, _) = super::build_and_filter_routes(&config, "utun0", vec![]).unwrap();
+        assert_eq!(routes.len(), 3);
+    }
+}
+
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;

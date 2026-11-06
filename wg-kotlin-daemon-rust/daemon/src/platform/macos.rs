@@ -1,6 +1,7 @@
 use super::EndpointRoute;
+use super::dns_macos::{clear_dns_entries, set_dns_entries};
 use super::routes_macos::SessionRoutes;
-use crate::platform::{CleanupHook, build_and_filter_routes, ips_to_args, normalize_domains, run_command};
+use crate::platform::{CleanupHook, build_and_filter_routes, ips_to_args, normalize_domains};
 use daemon_proto::pb::TunSessionConfig;
 
 pub fn configure_session(config: &TunSessionConfig, interface_name: &str, endpoint_routes: Vec<EndpointRoute>) -> Result<CleanupHook, String> {
@@ -15,34 +16,7 @@ pub fn configure_session(config: &TunSessionConfig, interface_name: &str, endpoi
 
         clear_dns_entries(interface_name)?;
         if !dns_servers.is_empty() && !dns_domains.is_empty() {
-            let resolver_path = resolver_path(interface_name);
-            let resolver_root_path = resolver_root_path(interface_name);
-
-            run_command(
-                "set-dns",
-                "scutil",
-                &Vec::new(),
-                Some(
-                    format!(
-                        "d.init\nd.add ServerAddresses * {}\nd.add SupplementalMatchDomains * {}\nset {}\nquit\n",
-                        dns_servers.join(" "),
-                        dns_domains.join(" "),
-                        resolver_path,
-                    )
-                    .as_str(),
-                ),
-                &[],
-                &[],
-            )?;
-
-            run_command(
-                "set-dns-root",
-                "scutil",
-                &Vec::new(),
-                Some(format!("d.init\nd.add UserDefinedName {}\nset {}\nquit\n", interface_name, resolver_root_path,).as_str()),
-                &[],
-                &[],
-            )?;
+            set_dns_entries(interface_name, &dns_servers, &dns_domains)?;
         }
         Ok(())
     })();
@@ -63,18 +37,4 @@ pub fn configure_session(config: &TunSessionConfig, interface_name: &str, endpoi
             Err(cleanup_error) => Err(format!("{error}; cleanup failed: {cleanup_error}")),
         },
     }
-}
-
-fn clear_dns_entries(interface_name: &str) -> Result<(), String> {
-    let payload = format!("remove {}\nremove {}\nquit\n", resolver_path(interface_name), resolver_root_path(interface_name));
-
-    run_command("clear-dns", "scutil", &Vec::new(), Some(payload.as_str()), &[], &[]).map(|_| ())
-}
-
-fn resolver_path(interface_name: &str) -> String {
-    format!("State:/Network/Interface/{interface_name}/DNS")
-}
-
-fn resolver_root_path(interface_name: &str) -> String {
-    format!("State:/Network/Interface/{interface_name}")
 }

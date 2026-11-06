@@ -204,6 +204,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
+ "core-foundation",
  "daemon-proto",
  "libc",
  "netlink-packet-core",
@@ -213,6 +214,7 @@ dependencies = [
  "route_manager",
  "scribe-rs",
  "serde_json",
+ "system-configuration-sys",
  "tokio",
  "tokio-stream",
  "tonic",

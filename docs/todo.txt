@@ -142,16 +142,14 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
     Referência: daemon/src/validation.rs, validate_interface_name(), e tun-rs 2.8.3,
     src/platform/macos/tuntap.rs, criação do índice de controle.
 
-17. Detectar falhas internas do scutil na configuração e limpeza de DNS no macOS.
-    scutil pode informar erros por stdout e terminar com código zero.
-    run_command() considera esse status suficiente, e as chamadas de configuração
-    e remoção descartam o texto retornado. Assim, a sessão pode ser anunciada
-    como iniciada sem aplicar DNS, ou a limpeza pode ser registrada como sucesso
-    sem remover as entradas. Verificar os resultados e as pós-condições das
-    operações, preferencialmente usando a API SystemConfiguration. Distinguir
-    entradas já ausentes de falhas reais durante a limpeza.
-    Referência: daemon/src/platform/macos.rs, configure_session() e clear_dns_entries(),
-    e daemon/src/platform/mod.rs, run_command().
+17. Implementado: verificar a configuração e a limpeza de DNS no macOS.
+    Usar a API SystemConfiguration em vez do scutil. Verificar o retorno e o
+    SCError de cada operação e conferir os valores salvos por SetMultiple.
+    Aceitar chaves já ausentes durante a limpeza, confirmar a remoção e tentar
+    as duas entradas mesmo quando uma falha. Propagar falhas ao startup e ao
+    fechamento, preservando a restauração de rotas e o rollback existentes.
+    O daemon não depende mais do executável scutil no macOS.
+    Referência: daemon/src/platform/dns_macos.rs e macos.rs.
 
 18. Melhorar o direcionamento e o contexto dos logs do daemon.
     Permitir configurar os destinos, como arquivo JSONL, stdout e stderr,

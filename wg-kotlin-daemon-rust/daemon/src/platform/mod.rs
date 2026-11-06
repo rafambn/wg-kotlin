@@ -28,6 +28,8 @@ pub use endpoint::EndpointRoute;
 
 #[cfg(target_os = "macos")]
 mod routes_macos;
+#[cfg(target_os = "macos")]
+mod dns_macos;
 
 pub type CleanupHook = Box<dyn FnOnce() -> Result<(), String> + Send + 'static>;
 
@@ -39,7 +41,7 @@ pub fn required_binaries() -> &'static [&'static str] {
 
     #[cfg(target_os = "macos")]
     {
-        return &["scutil"];
+        return &[];
     }
 
     #[cfg(target_os = "windows")]

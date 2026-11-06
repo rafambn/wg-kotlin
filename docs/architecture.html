@@ -73,7 +73,6 @@ const details = {
   protocol: ['daemon-protocol', 'Diretório compartilhado de arquivos .proto. Gera os tipos Kotlin usados por wg-kotlin e os tipos/serviço Rust de daemon-proto.', 'daemon-protocol/*.proto · wg-kotlin/src/commonMain/proto → ../../../daemon-protocol'],
   daemon: ['wg-kotlin-daemon-rust/daemon', 'Processo separado com privilégios de administrador. Expõe a sessão IPC, cria o TUN e configura endereços, MTU, rotas e DNS.', 'wg-kotlin-daemon-rust/daemon/Cargo.toml · src/main.rs · src/server.rs · src/session.rs'],
   proto: ['wg-kotlin-daemon-rust/daemon-proto', 'Crate dos contratos e do serviço protobuf gerados a partir dos .proto compartilhados, usando tonic/prost.', 'wg-kotlin-daemon-rust/daemon-proto/build.rs · src/lib.rs'],
-  scribe: ['wg-kotlin-daemon-rust/scribe-rs', 'Biblioteca de logs do daemon. Cria e sela scrolls com os eventos e o contexto das operações.', 'wg-kotlin-daemon-rust/scribe-rs/Cargo.toml · src/scribe.rs'],
   tun: ['Interface TUN / sistema operacional', 'Conecta os pacotes IP da máquina à VPN. O daemon lê e escreve nessa interface por tun-rs e gerencia a configuração de rede.', 'wg-kotlin-daemon-rust/daemon/src/session.rs · src/platform/'],
   bridge: ['wg-kotlin · DaemonSessionBridge', 'Verifica a identidade do daemon pelo kernel, envia a configuração inicial e troca pacotes IP com o daemon na conexão IPC exclusiva da TUN. Conecta o stream ao DuplexChannelPipe.', 'wg-kotlin/src/jvmMain/.../iface/DaemonSessionBridge.kt · daemon-protocol/daemon.proto'],
   crypto: ['wg-kotlin · CryptoSessionManager', 'Seleciona o peer, organiza os pacotes e aciona criptografia, descriptografia e timers pela implementação BoringTunPeerSession.', 'wg-kotlin/src/commonMain/.../crypto/CryptoSessionManagerImpl.kt · BoringTunPeerSession.kt'],
@@ -84,7 +83,7 @@ const graphs = {
   modules: {
     height: 660,
     title: 'Módulos e contratos do wg-kotlin',
-    description: 'wg-kotlin depende do wrapper UniFFI, que usa BoringTun. O módulo Kotlin se comunica por IPC com o daemon Rust. O daemon depende de daemon-proto e scribe-rs. Os arquivos daemon-protocol geram contratos Kotlin e Rust.',
+    description: 'wg-kotlin depende do wrapper UniFFI, que usa BoringTun. O módulo Kotlin se comunica por IPC com o daemon Rust. O daemon depende de daemon-proto e mantém um logger de texto em logging.rs. Os arquivos daemon-protocol geram contratos Kotlin e Rust.',
     groups: [
       [8, 116, 326, 394, 'Gradle · módulos JVM'],
       [384, 116, 326, 394, 'wg-kotlin-daemon-rust · workspace Cargo'],
@@ -95,7 +94,6 @@ const graphs = {
       ['daemon', 400, 170, 294, 104, 'daemon', ['binário wg-kotlin-daemon', 'TUN · rotas · DNS · MTU'], 'CRATE / PROCESSO'],
       ['wrapper', 24, 386, 294, 106, 'wg-kotlin-uniffi-boringtun', ['bindings UniFFI + biblioteca Rust'], 'MÓDULO GRADLE + CRATE'],
       ['proto', 400, 386, 140, 106, 'daemon-proto', ['tipos protobuf', 'protobuf gerados'], 'CRATE'],
-      ['scribe', 554, 386, 140, 106, 'scribe-rs', ['logs por', 'scrolls'], 'CRATE'],
       ['boringtun', 24, 564, 294, 84, 'boringtun', ['motor WireGuard em Rust'], 'DEPENDÊNCIA EXTERNA'],
     ],
     edges: [
@@ -104,10 +102,9 @@ const graphs = {
       ['dep', 'M171 274 V386', 'UniFFI / biblioteca nativa', 171, 329],
       ['dep', 'M171 492 V564', 'dependência Cargo', 171, 533],
       ['dep', 'M470 274 V386', 'contratos protobuf', 465, 331],
-      ['dep', 'M624 274 V386', 'logging', 624, 331],
       ['rpc', 'M318 220 H400', 'IPC', 359, 199, true],
     ],
-    foot: 'Dois módulos Gradle e três crates no workspace Rust. daemon-protocol é o contrato compartilhado. Selecione um bloco para ver os arquivos de origem.',
+    foot: 'Dois módulos Gradle e duas crates no workspace Rust. daemon-protocol é o contrato compartilhado. Selecione um bloco para ver os arquivos de origem.',
   },
   runtime: {
     height: 836,

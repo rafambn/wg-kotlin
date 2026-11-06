@@ -1,12 +1,10 @@
 use crate::ipc::{PROTOCOL_VERSION, read_frame, write_frame};
-use crate::logging::{self, LogComponent, LogLevel};
+use crate::logging::Logger;
 use crate::session::{SessionManager, TunSession};
 use crate::validation;
 use daemon_proto::pb::client_message::Payload as ClientPayload;
 use daemon_proto::pb::server_message::Payload as ServerPayload;
 use daemon_proto::pb::{ClientMessage, DaemonReady, Packet, ServerMessage, SessionError, SessionStarted, TunSessionConfig};
-use scribe_rs::Scribe;
-use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -16,7 +14,7 @@ use tonic::Status;
 
 #[derive(Clone)]
 pub struct DaemonService {
-    scribe: Arc<Mutex<Scribe>>,
+    logger: Logger,
     active_sessions: Arc<Mutex<HashSet<String>>>,
 }
 
@@ -97,27 +95,8 @@ impl DaemonService {
         Ok(())
     }
 
-    pub fn new(scribe: Arc<Mutex<Scribe>>) -> Self {
-        Self { scribe, active_sessions: Arc::new(Mutex::new(HashSet::new())) }
-    }
-
-    pub async fn seal_scroll(
-        &self,
-        component: LogComponent,
-        level: LogLevel,
-        event: &str,
-        fields: impl IntoIterator<Item = (String, Value)>,
-        success: bool,
-    ) {
-        let scribe = self.scribe.lock().await;
-        let mut scroll = scribe.new_scroll(None);
-        scroll.insert("event".to_string(), Value::String(event.to_string()));
-        for (key, value) in fields {
-            scroll.insert(key, value);
-        }
-        scroll.insert("component".to_string(), Value::from(component.as_str()));
-        scroll.insert("level".to_string(), Value::from(level.as_str()));
-        scribe.seal(scroll, success);
+    pub fn new(logger: Logger) -> Self {
+        Self { logger, active_sessions: Arc::new(Mutex::new(HashSet::new())) }
     }
 
     pub async fn wait_for_sessions(&self) {
@@ -126,17 +105,12 @@ impl DaemonService {
         }
     }
 
-    pub async fn retire_logs(&self) {
-        logging::retire_scribe(&self.scribe).await;
-    }
-
     async fn run_session_loop(
         self,
         mut incoming: mpsc::Receiver<Result<ClientMessage, Status>>,
         session: TunSession,
         mut shutdown: watch::Receiver<bool>,
         started_at: Instant,
-        session_fields: Vec<(String, Value)>,
         tx: mpsc::Sender<Result<ServerMessage, Status>>,
     ) {
         let interface_name = session.interface_name().to_string();
@@ -219,58 +193,20 @@ impl DaemonService {
             .unwrap_or_else(|error| Err(format!("failed joining session cleanup: {error}")));
         let read_join_result = read_task.await;
 
-        let mut success = true;
-        let mut error_message_text: Option<String> = None;
-        let mut outcome = "closed";
-        let mut error_type: Option<String> = None;
-
         // A full response queue must not hold up the remaining cleanup.
         if let Err(status) = write_result {
+            self.logger.log(format_args!("session failed interface={interface_name}: {status}"));
             let _ = tx.try_send(Ok(error_message(&status)));
-            success = false;
-            error_message_text = Some(status.message().to_string());
-            error_type = Some(status.code().to_string());
-            outcome = "stream_failed";
         }
-
         if let Err(error) = close_result {
+            self.logger.log(format_args!("session cleanup failed interface={interface_name}: {error}"));
             let status = Status::internal(format!("failed closing TUN session: {error}"));
             let _ = tx.try_send(Ok(error_message(&status)));
-            success = false;
-            error_type = Some("close_failed".to_string());
-            outcome = "close_failed";
-            if error_message_text.is_none() {
-                error_message_text = Some(status.message().to_string());
-            }
         }
-
-        if let Err(join_error) = read_join_result {
-            success = false;
-            error_type = Some("read_task_join_failed".to_string());
-            outcome = "read_task_failed";
-            if error_message_text.is_none() {
-                error_message_text = Some(format!("failed joining read task: {join_error}"));
-            }
+        if let Err(error) = read_join_result {
+            self.logger.log(format_args!("session reader failed interface={interface_name}: {error}"));
         }
-
-        let mut fields = session_fields.clone();
-        fields.push(("interface".to_string(), Value::String(interface_name.clone())));
-        fields.push(("outcome".to_string(), Value::String(outcome.to_string())));
-        fields.push(("duration_ms".to_string(), Value::Number((started_at.elapsed().as_millis() as u64).into())));
-        if let Some(error_type) = &error_type {
-            fields.push(("error_type".to_string(), Value::String(error_type.clone())));
-        }
-        if let Some(error_message_text) = &error_message_text {
-            fields.push(("error".to_string(), Value::String(error_message_text.clone())));
-        }
-
-        let level = if success { LogLevel::Info } else { LogLevel::Error };
-        self.seal_scroll(LogComponent::Session, level, "daemon_session", fields, success).await;
-
-        let mut stopped_fields = session_fields;
-        stopped_fields.push(("interface".to_string(), Value::String(interface_name.clone())));
-        stopped_fields.push(("outcome".to_string(), Value::String(outcome.to_string())));
-        self.seal_scroll(LogComponent::Session, level, "daemon_session_stopped", stopped_fields, success).await;
+        self.logger.log(format_args!("session stopped interface={interface_name} duration_ms={}", started_at.elapsed().as_millis()));
         self.active_sessions.lock().await.remove(&interface_name);
     }
 }
@@ -289,14 +225,8 @@ impl DaemonService {
             incoming.recv().await.transpose()?.ok_or_else(|| Status::invalid_argument("first session message must contain config"))?;
 
         let config = extract_config(first_message)?;
-        let session_fields = session_config_fields(&config);
         if let Err(error_message) = validation::validate_config(&config) {
-            let mut fields = session_fields.clone();
-            fields.push(("outcome".to_string(), Value::String("rejected".to_string())));
-            fields.push(("error".to_string(), Value::String(error_message.clone())));
-            fields.push(("error_type".to_string(), Value::String("invalid_argument".to_string())));
-            fields.push(("duration_ms".to_string(), Value::Number((started_at.elapsed().as_millis() as u64).into())));
-            self.seal_scroll(LogComponent::Session, LogLevel::Warn, "daemon_session", fields, false).await;
+            self.logger.log(format_args!("session rejected interface={}: {error_message}", config.interface_name));
             return Err(Status::invalid_argument(error_message));
         }
 
@@ -321,23 +251,13 @@ impl DaemonService {
 
         if duplicate_session {
             let error_message = format!("Session already active for {}", config.interface_name);
-            let mut fields = session_fields.clone();
-            fields.push(("outcome".to_string(), Value::String("rejected".to_string())));
-            fields.push(("error".to_string(), Value::String(error_message.clone())));
-            fields.push(("error_type".to_string(), Value::String("failed_precondition".to_string())));
-            fields.push(("duration_ms".to_string(), Value::Number((started_at.elapsed().as_millis() as u64).into())));
-            self.seal_scroll(LogComponent::Session, LogLevel::Warn, "daemon_session", fields, false).await;
+            self.logger.log(format_args!("session rejected interface={}: {error_message}", config.interface_name));
             return Err(Status::failed_precondition(error_message));
         }
 
         if session_limit_reached {
             let error_message = format!("Daemon session limit reached ({MAX_ACTIVE_SESSIONS})");
-            let mut fields = session_fields.clone();
-            fields.push(("outcome".to_string(), Value::String("rejected".to_string())));
-            fields.push(("error".to_string(), Value::String(error_message.clone())));
-            fields.push(("error_type".to_string(), Value::String("resource_exhausted".to_string())));
-            fields.push(("duration_ms".to_string(), Value::Number((started_at.elapsed().as_millis() as u64).into())));
-            self.seal_scroll(LogComponent::Session, LogLevel::Warn, "daemon_session", fields, false).await;
+            self.logger.log(format_args!("session rejected interface={}: {error_message}", config.interface_name));
             return Err(Status::resource_exhausted(error_message));
         }
 
@@ -357,12 +277,7 @@ impl DaemonService {
             let session = match start_result {
                 Ok(session) => session,
                 Err(error_message) => {
-                    let mut fields = session_fields.clone();
-                    fields.push(("outcome".to_string(), Value::String("start_failed".to_string())));
-                    fields.push(("error".to_string(), Value::String(error_message.clone())));
-                    fields.push(("error_type".to_string(), Value::String("start_failed".to_string())));
-                    fields.push(("duration_ms".to_string(), Value::Number((started_at.elapsed().as_millis() as u64).into())));
-                    service.seal_scroll(LogComponent::Session, LogLevel::Error, "daemon_session", fields, false).await;
+                    service.logger.log(format_args!("session start failed interface={interface_name}: {error_message}"));
                     service.active_sessions.lock().await.remove(&interface_name);
                     let _ = tx.try_send(Err(Status::failed_precondition(error_message)));
                     return;
@@ -373,10 +288,8 @@ impl DaemonService {
                     payload: Some(ServerPayload::Started(SessionStarted { interface_name: session.interface_name().to_string() })),
                 }))
                 .await;
-            let mut started_fields = session_fields.clone();
-            started_fields.push(("interface".to_string(), Value::String(session.interface_name().to_string())));
-            service.seal_scroll(LogComponent::Session, LogLevel::Info, "daemon_session_started", started_fields, true).await;
-            service.run_session_loop(incoming, session, shutdown, started_at, session_fields, tx).await;
+            service.logger.log(format_args!("session started interface={}", session.interface_name()));
+            service.run_session_loop(incoming, session, shutdown, started_at, tx).await;
         });
 
         Ok(rx)
@@ -409,25 +322,6 @@ async fn send_response(tx: &mpsc::Sender<Result<ServerMessage, Status>>, message
 const MAX_PACKET_FRAME_SIZE: usize = 65535;
 const MAX_ACTIVE_SESSIONS: usize = 16;
 const PACKET_CHANNEL_CAPACITY: usize = 64;
-
-fn session_config_fields(config: &TunSessionConfig) -> Vec<(String, Value)> {
-    let (dns_server_count, dns_domain_count) = match &config.dns {
-        Some(dns) => (dns.servers.len(), dns.search_domains.len()),
-        None => (0, 0),
-    };
-
-    vec![
-        ("session_id".to_string(), Value::from(scribe_rs::scroll::new_scroll_id())),
-        ("requested_interface".to_string(), Value::String(config.interface_name.clone())),
-        ("platform".to_string(), Value::String(std::env::consts::OS.to_string())),
-        ("address_count".to_string(), Value::Number((config.addresses.len() as u64).into())),
-        ("route_count".to_string(), Value::Number((config.peer_allowed_ips.len() as u64).into())),
-        ("endpoint_count".to_string(), Value::Number((config.peer_endpoints.len() as u64).into())),
-        ("dns_server_count".to_string(), Value::Number((dns_server_count as u64).into())),
-        ("dns_domain_count".to_string(), Value::Number((dns_domain_count as u64).into())),
-        ("mtu_configured".to_string(), Value::Bool(config.mtu != 0)),
-    ]
-}
 
 #[cfg(test)]
 mod tests {
@@ -490,9 +384,7 @@ mod tests {
         use tokio::io::AsyncReadExt;
 
         for phase in ["before_ready", "idle", "blocked_error"] {
-            let mut scribe = Scribe::builder().build();
-            scribe.hire();
-            let service = DaemonService::new(Arc::new(Mutex::new(scribe)));
+            let service = DaemonService::new(Logger::new(None).unwrap());
             let (shutdown, _receiver) = watch::channel(false);
             if phase == "before_ready" {
                 shutdown.send_replace(true);
@@ -518,7 +410,6 @@ mod tests {
                 let _ = connection.await;
             }
             drop(client);
-            service.retire_logs().await;
             result.unwrap().unwrap().unwrap();
             assert!(service.active_sessions.lock().await.is_empty());
         }
@@ -529,9 +420,7 @@ mod tests {
         use daemon_proto::pb::{Cidr, Ip, ip};
 
         for cancel in [false, true] {
-            let mut scribe = Scribe::builder().build();
-            scribe.hire();
-            let service = DaemonService::new(Arc::new(Mutex::new(scribe)));
+            let service = DaemonService::new(Logger::new(None).unwrap());
             let (_shutdown_tx, shutdown) = watch::channel(false);
             let config = TunSessionConfig {
                 interface_name: "utun7".to_string(),
@@ -550,7 +439,6 @@ mod tests {
                 assert_eq!(error.code(), tonic::Code::FailedPrecondition);
             }
             tokio::time::timeout(Duration::from_secs(2), service.wait_for_sessions()).await.unwrap();
-            service.retire_logs().await;
         }
     }
 
@@ -559,9 +447,7 @@ mod tests {
     async fn macos_name_validation_and_normalization_precede_reservation() {
         use daemon_proto::pb::{Cidr, Ip, ip};
 
-        let mut scribe = Scribe::builder().build();
-        scribe.hire();
-        let service = DaemonService::new(Arc::new(Mutex::new(scribe)));
+        let service = DaemonService::new(Logger::new(None).unwrap());
         let (_shutdown_tx, shutdown) = watch::channel(false);
         // Fill the reservations so even an unfixed implementation cannot reach
         // TUN creation. An alias must be rejected as a duplicate, not capacity.
@@ -590,6 +476,5 @@ mod tests {
             assert_eq!(error.code(), expected_code, "{name}: {error}");
             assert_eq!(service.active_sessions.lock().await.len(), MAX_ACTIVE_SESSIONS);
         }
-        service.retire_logs().await;
     }
 }

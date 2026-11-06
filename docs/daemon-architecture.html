@@ -76,7 +76,7 @@ svg { display: block; width: 100%; min-width: 700px; height: auto; }
   </aside>
   <p class="foot" id="foot"></p>
 </section>
-<noscript>Ative JavaScript para navegar pelo grafo. Os componentes principais são main.rs → server.rs → session.rs → platform/, com daemon-proto nos contratos e scribe-rs nos logs.</noscript>
+<noscript>Ative JavaScript para navegar pelo grafo. Os componentes principais são main.rs → server.rs → session.rs → platform/, com daemon-proto nos contratos e logging.rs nos logs.</noscript>
 <script>
 'use strict';
 const NS = 'http://www.w3.org/2000/svg';
@@ -84,14 +84,14 @@ const svg = document.getElementById('diagram');
 const root = 'wg-kotlin-daemon-rust/';
 const details = {
   client: ['Cliente IPC do app', 'Abre uma conexão local por TUN. O kernel identifica o processo e o daemon verifica a instância viva do app antes de enviar Ready. A primeira mensagem do cliente contém TunSessionConfig; as seguintes carregam OutgoingPacket. Recebe Started, IncomingPacket ou Error. A conexão é named pipe no Windows ou Unix domain socket no Linux/macOS.', 'daemon-proto/src/lib.rs · contratos gerados de daemon-protocol/daemon.proto'],
-  main: ['main.rs · inicialização do processo', 'Lê endpoint, owner-pid, owner-start-ms e log-path pela CLI. Verifica a instância do app, exige root ou Administrador e verifica os programas necessários. No Windows, prepara a DLL Wintun. Inicia Scribe e o listener IPC. Monitora a vida do app e autoriza cada conexão pelo PID fornecido pelo kernel.', 'daemon/src/main.rs · main(), run(), ensure_root(), prepare_wintun()'],
-  service: ['DaemonService · entrada das sessões', 'O accept loop verifica a identidade do cliente e entrega a conexão local ao serviço. O serviço envia Ready, valida a configuração, reserva a interface, inicia TunSession e cria a tarefa que mantém o stream. Compartilha Scribe e active_sessions por Arc<Mutex<...>>. Recusa processos que não correspondem à instância autorizada do app antes de ler configurações.', 'daemon/src/main.rs · daemon/src/server.rs · DaemonService'],
+  main: ['main.rs · inicialização do processo', 'Lê endpoint, owner-pid, owner-start-ms e log-path pela CLI. Verifica a instância do app, exige root ou Administrador e verifica os programas necessários. No Windows, prepara a DLL Wintun. Inicia o logger de texto e o listener IPC. Monitora a vida do app e autoriza cada conexão pelo PID fornecido pelo kernel.', 'daemon/src/main.rs · main(), run(), ensure_root(), prepare_wintun()'],
+  service: ['DaemonService · entrada das sessões', 'O accept loop verifica a identidade do cliente e entrega a conexão local ao serviço. O serviço envia Ready, valida a configuração, reserva a interface, inicia TunSession e cria a tarefa que mantém o stream. Compartilha o canal do logger e mantém active_sessions por Arc<Mutex<...>>. Recusa processos que não correspondem à instância autorizada do app antes de ler configurações.', 'daemon/src/main.rs · daemon/src/server.rs · DaemonService'],
   proto: ['daemon-proto · contratos gerados', 'O build usa protoc vendorizado e prost para gerar ClientMessage, ServerMessage e TunSessionConfig. O transporte usa quadros protobuf com comprimento de quatro bytes. O código Rust inclui esses contratos com tonic::include_proto!. O schema compartilhado é a entrada de geração, fora deste workspace Cargo.', 'daemon-proto/build.rs · daemon-proto/src/lib.rs'],
   manager: ['SessionManager::start()', 'Prepara a plataforma, monta DeviceBuilder com nome utun, endereços e MTU e cria SyncDevice. No Unix, ativa modo não bloqueante. Cria InterruptEvent, aplica rotas e DNS e devolve TunSession com o hook de limpeza.', 'daemon/src/session.rs · SessionManager::start()'],
   tun: ['TunSession · dispositivo TUN', 'Agrupa o SyncDevice de tun-rs, InterruptEvent, indicador closed e CleanupHook em referências compartilhadas. read_packet() usa recv_intr(); write_packet() usa send_intr(). O descritor nativo é liberado quando as últimas referências ao dispositivo são descartadas.', 'daemon/src/session.rs · TunSession, read_packet(), write_packet(), close()'],
   platform: ['platform · configuração e limpeza', 'Seleciona linux.rs, macos.rs ou windows.rs em compilação. As plataformas usam RouteManager para rotas e comandos do sistema para DNS. configure_session() retorna uma closure FnOnce que tenta remover as rotas e desfazer o DNS ao fechar a sessão.', 'daemon/src/platform/mod.rs · configure_session(), into_cleanup_hook()'],
-  logger: ['Scribe + FileSaver', 'O daemon cria eventos estruturados com contexto e resultado. Scribe enfileira os registros para uma tarefa consumidora; FileSaver serializa cada registro em JSON, acrescenta uma linha ao arquivo e executa flush.', 'daemon/src/logging.rs · scribe-rs/src/scribe.rs'],
-  file: ['Arquivo JSONL', 'Destino de todos os eventos do processo. O caminho padrão é vpn-daemon.jsonl no diretório do executável; --log-path permite escolher outro arquivo. Cada linha contém success e data, incluindo scroll_id, serviço, versão, sistema e arquitetura.', 'daemon/src/main.rs · daemon/src/logging.rs · FileSaver'],
+  logger: ['Logger', 'Enfileira mensagens de texto sem bloquear as tarefas de rede. Uma thread dedicada escreve no arquivo indicado por --log-path ou em stdout. A fila comporta até 256 entradas.', 'daemon/src/logging.rs · Logger::new(), Logger::log()'],
+  file: ['stdout ou arquivo', 'Sem --log-path, as mensagens vão somente para stdout. Com um caminho, são acrescentadas somente ao arquivo informado. Diretórios ausentes são criados.', 'daemon/src/logging.rs · Logger::new()'],
   os: ['Sistema operacional', 'O sistema entrega à TUN os pacotes enviados pelas rotas configuradas. Pacotes escritos na TUN entram na pilha IP como recebidos pela interface virtual. O daemon também altera as tabelas de rotas e a configuração DNS do sistema.', 'daemon/src/session.rs · daemon/src/platform/'],
   config: ['Após autenticação · TunSessionConfig', 'Após autorizar o PID do cliente e enviar Ready, o serviço exige o payload Config na primeira mensagem da sessão. Os campos são interface_name, mtu, addresses, peer_allowed_ips, peer_endpoints e dns. Um pacote ou payload ausente nessa posição produz InvalidArgument.', 'daemon/src/server.rs · session(), extract_config() · daemon-proto/src/lib.rs'],
   validate: ['validation::validate_config()', 'Exige nome utun seguido de dígitos e até 15 caracteres, pelo menos um endereço, CIDRs e DNS válidos. Limita a 64 endereços, 256 rotas e 64 servidores DNS. MTU diferente de zero deve estar entre 576 e 65535, ou ao menos 1280 com IPv6. DNS deve fornecer servidores e domínios juntos.', 'daemon/src/validation.rs · validate_config()'],
@@ -115,7 +115,7 @@ const details = {
   release: ['Liberar a reserva', 'Após aguardar o leitor, remove o nome real da interface de active_sessions. A TUN ainda pode ter referências vivas na tarefa; o descarte final acontece quando essas referências deixam de existir.', 'daemon/src/server.rs · sessions.remove(&interface_name)'],
   summary: ['Resultado da sessão', 'Preserva erros de stream, fechamento e join. Quando necessário, envia ServerMessage::Error. Registra outcome, duração e contexto nos eventos daemon_session e daemon_session_stopped.', 'daemon/src/server.rs · final de run_session_loop()'],
   done: ['Fim da tarefa e do stream', 'Ao terminar run_session_loop(), seus senders mpsc e suas referências à sessão são descartados. Sem senders, ReceiverStream termina após consumir a fila; sem referências ao dispositivo, o descritor nativo da TUN é fechado.', 'daemon/src/server.rs · run_session_loop() · daemon/src/session.rs · campos Arc'],
-  shutdown: ['Sinais e dono · encerramento do processo', 'Ctrl+C, SIGTERM, pedido IPC autorizado ou saída do app iniciam o encerramento. O listener fecha, um watch cancela as conexões e main aguarda as sessões por até quatro segundos. Registra daemon_shutdown e encerra o Scribe.', 'daemon/src/main.rs · run(), shutdown_signal()'],
+  shutdown: ['Sinais e dono · encerramento do processo', 'Ctrl+C, SIGTERM, pedido IPC autorizado ou saída do app iniciam o encerramento. O listener fecha, um watch cancela as conexões e main aguarda as sessões por até quatro segundos. Registra daemon_shutdown e encerra o Logger.', 'daemon/src/main.rs · run(), shutdown_signal()'],
   routes: ['Rotas · route_manager', 'Constrói rotas a partir de peer_allowed_ips e rotas de host para peer_endpoints. Consulta find_route(), filtra destinos e executa delete() antes de add(). Na implementação atual, as rotas de endpoint também recebem o nome da TUN. Essas operações usam a biblioteca route_manager, sem passar por run_command().', 'daemon/src/platform/mod.rs · build_and_filter_routes(), add_routes_with_predelete()'],
   table: ['Tabela de rotas do sistema', 'RouteManager consulta e altera as rotas do sistema operacional. As rotas selecionadas são capturadas no hook de limpeza. Falhas ao adicionar rotas retornam erro ao caminho de configuração da sessão.', 'daemon/src/platform/mod.rs · RouteManager'],
   linux: ['Linux · resolvectl', 'Depois de instalar rotas, executa resolvectl revert na interface. Com servidores e domínios, aplica resolvectl dns e resolvectl domain, prefixando os domínios com ~ para roteamento DNS. O teardown executa revert novamente.', 'daemon/src/platform/linux.rs · configure_session(), revert_dns()'],
@@ -123,29 +123,28 @@ const details = {
   windows: ['Windows · PowerShell / NRPT', 'Antes de criar a primeira TUN do processo, tenta remover regras NRPT antigas com o prefixo kmpvpn-daemon:. Na configuração, remove regras da interface e cria uma regra para cada domínio, com servidores e comentário enviados por variáveis de ambiente. O teardown remove as regras pelo comentário.', 'daemon/src/platform/windows.rs · prepare_session_start() em platform/mod.rs'],
   command: ['run_command() · comandos DNS', 'Executa resolvectl, scutil ou PowerShell com argumentos e ambiente. Se houver stdin, escreve a entrada antes de iniciar as threads leitoras e o cronômetro. Captura até 1 MiB por saída, consulta try_wait() a cada 25 ms e tenta encerrar o filho após 20 s. Status zero é tratado como sucesso.', 'daemon/src/platform/mod.rs · run_command(), read_capped()'],
   hookReady: ['Hook pronto ou rollback', 'Se a configuração terminar com sucesso, uma closure captura rotas e nome da interface para executar a limpeza futura. Se ocorrer erro, a limpeza é tentada imediatamente e a sessão não é anunciada como Started.', 'daemon/src/platform/mod.rs · into_cleanup_hook()'],
-  mainEvents: ['Eventos do processo', 'main emite daemon_startup após abrir o listener. Rejeições de identidade e falhas de conexão geram scrolls próprios; daemon_shutdown registra se as sessões terminaram no prazo. Os eventos incluem endpoint, PID e owner_pid.', 'daemon/src/main.rs · criação e selagem dos scrolls'],
-  sessionEvents: ['Eventos das sessões', 'DaemonService emite daemon_session_started, daemon_session e daemon_session_stopped. Rejeições e falhas de início também geram daemon_session. Os campos incluem interface, contagens da configuração, duração, outcome e descrição de falhas.', 'daemon/src/server.rs · seal_scroll(), session_config_fields()'],
-  context: ['Contexto de cada registro', 'create_daemon_scribe() define service, version, os e arch como imprint. new_scroll() adiciona scroll_id e copia o imprint. seal() guarda success junto aos dados; header e footer de Margin são pontos opcionais da biblioteca.', 'daemon/src/logging.rs · scribe-rs/src/scribe.rs · scribe-rs/src/scroll.rs'],
-  scribe: ['Scribe · new_scroll() e seal()', 'O código do daemon monta um mapa JSON de campos e sela o evento com o resultado. Scribe clona o registro selado para enfileirá-lo. O Arc<Mutex<Scribe>> compartilhado coordena o acesso feito pelas tarefas do servidor.', 'scribe-rs/src/scribe.rs · daemon/src/server.rs · seal_scroll()'],
-  logQueue: ['Fila de logs · mpsc unbounded', 'hire() cria um canal sem limite de quantidade e inicia uma tarefa Tokio. Essa tarefa recebe os registros na ordem da fila e chama save() de cada Saver configurado. O FileSaver é o destino instalado pelo daemon.', 'scribe-rs/src/scribe.rs · hire(), enqueue()'],
-  saver: ['FileSaver::save()', 'Serializa SealedScroll em JSON, obtém o mutex do BufWriter, acrescenta uma linha ao arquivo e executa flush(). Essas operações de arquivo são síncronas. Falhas são impressas em stderr pelo próprio saver.', 'daemon/src/logging.rs · FileSaver::save()'],
-  retire: ['Scribe::retire()', 'Retira e descarta o sender de Scribe e aguarda a tarefa consumidora. Sem novos registros, ela drena o canal, termina e permite que retire() retorne. main chama esse método depois de registrar o encerramento do daemon.', 'scribe-rs/src/scribe.rs · retire() · daemon/src/main.rs'],
+  mainEvents: ['Eventos do processo', 'Registra início e fim do daemon, conexões aceitas e rejeitadas e falhas. As mensagens incluem o endpoint e a identidade do processo quando aplicáveis.', 'daemon/src/main.rs · Logger::log()'],
+  sessionEvents: ['Eventos das sessões', 'Registra início, rejeição, falhas e fim da sessão com o nome da interface. O fim inclui a duração em milissegundos.', 'daemon/src/server.rs · Logger::log()'],
+  context: ['Contexto de cada linha', 'O logger acrescenta timestamp Unix em milissegundos e PID ao texto da mensagem. Quebras de linha são escapadas.', 'daemon/src/logging.rs · Logger::log()'],
+  logQueue: ['Fila de logs', 'sync_channel mantém até 256 entradas. try_send descarta novos registros quando a fila enche. A escrita ocorre fora do executor Tokio.', 'daemon/src/logging.rs · Logger::with_writer()'],
+  saver: ['Thread de escrita', 'Escreve uma linha de texto por mensagem. Um erro de escrita encerra o consumidor e os próximos registros são descartados.', 'daemon/src/logging.rs · Logger::with_writer()'],
+  retire: ['Logger::flush()', 'Enfileira um pedido de flush se houver espaço e aguarda a resposta por até 500 ms. Uma saída bloqueada não impede o encerramento do processo.', 'daemon/src/logging.rs · Logger::flush()'],
 };
 const graphs = {
   overview: {
     height: 810, selected: 'service', title: 'Componentes do daemon Rust',
-    description: 'O app abre uma conexão IPC por TUN e o listener autoriza o PID pelo kernel. DaemonService usa daemon-proto, SessionManager e Scribe. SessionManager cria a TUN e aplica a configuração da plataforma. O sistema operacional troca pacotes pela TUN e recebe a configuração de rotas e DNS.',
+    description: 'O app abre uma conexão IPC por TUN e o listener autoriza o PID pelo kernel. DaemonService usa daemon-proto, SessionManager e Logger. SessionManager cria a TUN e aplica a configuração da plataforma. O sistema operacional troca pacotes pela TUN e recebe a configuração de rotas e DNS.',
     groups: [[8, 116, 804, 538, 'Processo wg-kotlin-daemon · root / Administrador']],
     nodes: [
       ['client', 260, 8, 300, 82, 'Cliente IPC', ['Session · configuração + IP'], 'FORA DO PROCESSO'],
-      ['main', 20, 158, 210, 100, 'Inicializar processo', ['CLI · dono · privilégios', 'Scribe · listener IPC'], 'MAIN.RS'],
+      ['main', 20, 158, 210, 100, 'Inicializar processo', ['CLI · dono · privilégios', 'Logger · listener IPC'], 'MAIN.RS'],
       ['service', 260, 158, 300, 100, 'DaemonService', ['PID do kernel · IPC local', 'Ready · config · pacotes'], 'MAIN.RS + SERVER.RS'],
       ['proto', 20, 340, 232, 100, 'daemon-proto', ['mensagens protobuf geradas', 'prost'], 'CONTRATOS RUST'],
       ['manager', 294, 340, 232, 100, 'SessionManager', ['cria TunSession', 'nome · endereços · MTU'], 'SESSION.RS'],
-      ['logger', 568, 340, 232, 100, 'Scribe + FileSaver', ['eventos estruturados', 'fila + arquivo'], 'LOGGING.RS + SCRIBE-RS'],
+      ['logger', 568, 340, 232, 100, 'Logger', ['mensagens de texto', 'fila + thread de escrita'], 'LOGGING.RS'],
       ['tun', 20, 522, 232, 100, 'TunSession', ['SyncDevice + InterruptEvent', 'E/S via tun-rs'], 'DISPOSITIVO COMPARTILHADO'],
       ['platform', 294, 522, 232, 100, 'platform', ['rotas + DNS por sistema', 'devolve CleanupHook'], 'CONFIGURAÇÃO DE REDE'],
-      ['file', 568, 522, 232, 100, 'vpn-daemon.jsonl', ['um JSON por evento', 'caminho configurável'], 'ARQUIVO'],
+      ['file', 568, 522, 232, 100, 'stdout ou arquivo', ['uma linha por evento', 'arquivo com --log-path'], 'DESTINO EXCLUSIVO'],
       ['os', 150, 716, 520, 82, 'Sistema operacional', ['interface virtual · pilha IP · rotas · DNS'], 'FORA DO PROCESSO'],
     ],
     edges: [
@@ -277,29 +276,29 @@ const graphs = {
     foot: 'A plataforma é selecionada por cfg(target_os). No Windows, a preparação inicial de NRPT ocorre antes de criar a TUN. RouteManager altera rotas diretamente; run_command() é usado para DNS.',
   },
   logs: {
-    height: 864, selected: 'scribe', title: 'Fluxo dos logs estruturados',
-    description: 'Eventos do processo e das sessões recebem metadados e são selados pelo Scribe. Uma fila sem limite alimenta a tarefa que chama FileSaver, serializa JSON e acrescenta linhas ao arquivo. No encerramento, retire descarta o sender e aguarda a fila ser consumida.',
+    height: 676, selected: 'logger', title: 'Fluxo dos logs de texto',
+    description: 'Mensagens do processo e das sessões recebem timestamp e PID. Uma fila limitada alimenta a thread que escreve em stdout ou no arquivo informado. O encerramento aguarda o flush por até 500 ms.',
     groups: [],
     nodes: [
-      ['mainEvents', 20, 8, 232, 100, 'Eventos do processo', ['startup · error · shutdown', 'endpoint · dono · PID'], 'MAIN.RS'],
-      ['sessionEvents', 294, 8, 232, 100, 'Eventos das sessões', ['started · resultado · stopped', 'interface · duração · outcome'], 'SERVER.RS'],
-      ['context', 568, 8, 232, 100, 'Contexto comum', ['service · version · os · arch', 'scroll_id + success'], 'IMPRINT + SCROLL'],
-      ['scribe', 294, 238, 232, 100, 'Scribe', ['new_scroll() → seal()', 'Arc<Mutex<Scribe>> no daemon'], 'MONTAGEM DO REGISTRO'],
-      ['logQueue', 294, 414, 232, 100, 'Fila de logs', ['mpsc::unbounded_channel', 'tarefa Tokio consumidora'], 'HIRE()'],
-      ['saver', 294, 590, 232, 100, 'FileSaver::save()', ['JSON + linha + flush', 'BufWriter protegido por mutex'], 'E/S SÍNCRONA'],
-      ['retire', 568, 590, 232, 100, 'retire()', ['descarta o sender', 'aguarda o consumidor'], 'APÓS DAEMON_SHUTDOWN'],
-      ['file', 294, 766, 232, 82, 'vpn-daemon.jsonl', ['ou caminho em --log-path'], 'SAÍDA EM DISCO'],
+      ['mainEvents', 20, 8, 232, 100, 'Eventos do processo', ['início · falhas · fim', 'endpoint · dono'], 'MAIN.RS'],
+      ['sessionEvents', 294, 8, 232, 100, 'Eventos das sessões', ['início · falhas · fim', 'interface · duração'], 'SERVER.RS'],
+      ['context', 568, 8, 232, 100, 'Contexto comum', ['timestamp · PID', 'uma linha de texto'], 'LOGGER::LOG()'],
+      ['logger', 294, 200, 232, 82, 'Logger', ['formata a mensagem'], 'LOGGING.RS'],
+      ['logQueue', 294, 346, 232, 82, 'Fila limitada', ['até 256 entradas · try_send'], 'SYNC_CHANNEL'],
+      ['saver', 294, 492, 232, 82, 'Thread de escrita', ['writeln! no destino escolhido'], 'FORA DO TOKIO'],
+      ['retire', 568, 492, 232, 82, 'flush()', ['espera até 500 ms'], 'AO ENCERRAR'],
+      ['file', 294, 610, 232, 60, 'stdout ou arquivo', ['arquivo com --log-path'], 'DESTINO'],
     ],
     edges: [
-      ['logging', 'M136 108 V180 H350 V238', '', 0, 0],
-      ['logging', 'M410 108 V238', 'campos do evento', 410, 180],
-      ['logging', 'M684 108 V180 H470 V238', '', 0, 0],
-      ['logging', 'M410 338 V414', 'SealedScroll', 410, 378],
-      ['logging', 'M410 514 V590', 'Saver::save()', 410, 554],
-      ['logging', 'M410 690 V766', 'append + flush', 410, 730],
-      ['cleanup', 'M684 590 V464 H526', 'fecha e drena', 684, 534],
+      ['logging', 'M136 108 V158 H350 V200', '', 0, 0],
+      ['logging', 'M410 108 V200', '', 0, 0],
+      ['logging', 'M684 108 V158 H470 V200', '', 0, 0],
+      ['logging', 'M410 282 V346', 'texto', 450, 316],
+      ['logging', 'M410 428 V492', 'mensagem', 460, 460],
+      ['logging', 'M410 574 V610', '', 0, 0],
+      ['cleanup', 'M684 492 V386 H526', 'solicita flush', 684, 440],
     ],
-    foot: 'O arquivo contém um JSON por linha. Os scrolls descrevem o processo e a sessão, incluindo contagens e resultado; o loop de pacotes não registra um evento por pacote.',
+    foot: 'A fila cheia descarta mensagens novas. Saída bloqueada ou com falha não impede a limpeza das sessões. Não há filtros nem arquivo padrão.',
   },
 };
 let selected;
@@ -315,7 +314,7 @@ function choose(id) {
   const [title, description, source] = details[id];
   document.getElementById('detail-title').textContent = title;
   document.getElementById('detail-text').textContent = description;
-  document.getElementById('detail-source').textContent = source.replace(/(^| · )((?:daemon|daemon-proto|scribe-rs)\/)/g, '$1' + root + '$2');
+  document.getElementById('detail-source').textContent = source.replace(/(^| · )((?:daemon|daemon-proto)\/)/g, '$1' + root + '$2');
   svg.querySelectorAll('.node').forEach(node => node.classList.toggle('selected', node.dataset.id === id));
 }
 function draw(view) {

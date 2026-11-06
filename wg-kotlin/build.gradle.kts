@@ -59,12 +59,10 @@ val buildIpcFixture by tasks.registering(Exec::class) {
     inputs.dir(rootProject.layout.projectDirectory.dir("wg-kotlin-daemon-rust/daemon/src"))
     inputs.dir(rootProject.layout.projectDirectory.dir("wg-kotlin-daemon-rust/daemon/examples"))
     inputs.dir(rootProject.layout.projectDirectory.dir("wg-kotlin-daemon-rust/daemon-proto/src"))
-    inputs.dir(rootProject.layout.projectDirectory.dir("wg-kotlin-daemon-rust/scribe-rs/src"))
     inputs.files(
         rootProject.layout.projectDirectory.file("wg-kotlin-daemon-rust/daemon/Cargo.toml"),
         rootProject.layout.projectDirectory.file("wg-kotlin-daemon-rust/daemon-proto/Cargo.toml"),
         rootProject.layout.projectDirectory.file("wg-kotlin-daemon-rust/daemon-proto/build.rs"),
-        rootProject.layout.projectDirectory.file("wg-kotlin-daemon-rust/scribe-rs/Cargo.toml"),
         rootProject.layout.projectDirectory.file("wg-kotlin-daemon-rust/Cargo.toml"),
     )
     inputs.dir(rootProject.layout.projectDirectory.dir("daemon-protocol"))

@@ -6,7 +6,8 @@ use system_configuration_sys::dynamic_store::{SCDynamicStoreCreateWithOptions, k
 fn test_keys() -> [CFString; 2] {
     // These keys are outside State:/Network and Setup:/Network, so no resolver
     // or network interface is configured by these tests.
-    let prefix = format!("wg-kotlin-tests/{}", scribe_rs::scroll::new_scroll_id());
+    static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let prefix = format!("wg-kotlin-tests/{}-{}", std::process::id(), NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     [CFString::new(&format!("{prefix}/DNS")), CFString::new(&format!("{prefix}/Interface"))]
 }
 

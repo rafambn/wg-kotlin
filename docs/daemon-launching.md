@@ -197,6 +197,11 @@ Session initialization runs on a blocking worker so OS and DNS operations do not
 occupy async executor threads. Its owning task completes cleanup even when the
 client disconnects before receiving Started.
 
+OS commands share a 20-second deadline for writing stdin, draining stdout and
+stderr, and waiting for process exit. On timeout or IO failure, the daemon kills
+and reaps the subprocess. It retains at most 1 MiB from each output while
+continuing to drain the pipes, and includes captured output in error diagnostics.
+
 An independent, authorized control connection can send `ClientMessage.shutdown`,
 field 4, after readiness. Shutdown is not accepted inside an existing TUN session.
 

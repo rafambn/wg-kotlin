@@ -546,7 +546,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test]
-    async fn equivalent_macos_names_share_the_reservation_even_at_capacity() {
+    async fn macos_name_validation_and_normalization_precede_reservation() {
         use daemon_proto::pb::{Cidr, Ip, ip};
 
         let mut scribe = Scribe::builder().build();
@@ -562,6 +562,12 @@ mod tests {
             ("utun000", tonic::Code::FailedPrecondition),
             ("utun00000000000", tonic::Code::FailedPrecondition),
             ("utun000000000001", tonic::Code::InvalidArgument),
+            ("utun4294967295", tonic::Code::InvalidArgument),
+            ("utun04294967295", tonic::Code::InvalidArgument),
+            ("utun4294967296", tonic::Code::InvalidArgument),
+            ("utun99999999999", tonic::Code::InvalidArgument),
+            ("utun4294967294", tonic::Code::ResourceExhausted),
+            ("utun04294967294", tonic::Code::ResourceExhausted),
         ] {
             let config = TunSessionConfig {
                 interface_name: name.to_string(),

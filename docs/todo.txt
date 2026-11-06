@@ -99,14 +99,12 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
     O filtro é compartilhado por Linux, macOS e Windows.
     Referência: daemon/src/platform/mod.rs, build_and_filter_routes().
 
-12. Aplicar o timeout dos subprocessos também à escrita em stdin.
-    run_command() faz write_all() antes de iniciar o cronômetro e antes de
-    drenar stdout e stderr. Se o processo não consumir a entrada, a escrita
-    pode bloquear indefinidamente sem acionar o timeout. Também há risco de
-    deadlock se o processo preencher sua saída enquanto recebe a entrada.
-    Supervisionar entrada, saída e término simultaneamente sob um prazo único,
-    encerrando e coletando o processo nos caminhos de erro.
-    Referência: daemon/src/platform/mod.rs, run_command().
+12. Implementado: aplicar um único timeout à entrada, saída e término dos comandos.
+    run_command() supervisiona stdin, stdout, stderr e a saída do processo
+    simultaneamente, com prazo de 20 segundos. Encerrar e coletar o subprocesso
+    em caso de timeout ou erro de IO, preservando os diagnósticos já capturados.
+    Continuar drenando cada saída após atingir o limite de 1 MiB armazenado.
+    Referência: daemon/src/platform/mod.rs, run_command() e command_output().
 
 13. Impedir que uma instância remova as regras DNS de outra no Windows.
     clear_stale_nrpt_rules_once() remove todas as regras com o prefixo

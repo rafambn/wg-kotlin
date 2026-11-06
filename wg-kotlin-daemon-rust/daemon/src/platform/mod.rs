@@ -2,11 +2,11 @@ use crate::ip_util::{parse_proto_cidr, parse_proto_ip, proto_ip_to_string};
 use daemon_proto::pb::{Ip, TunSessionConfig};
 use route_manager::{Route, RouteManager};
 use std::collections::HashSet;
-use std::io::{Read, Write};
 use std::net::IpAddr as StdIpAddr;
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::{Output, Stdio};
+use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::process::Command;
 
 #[cfg(target_os = "linux")]
 pub mod linux;
@@ -127,7 +127,6 @@ pub fn run_command(
     // tools matching root UIDs so shells and network tools retain privileges.
     #[cfg(unix)]
     if unsafe { libc::geteuid() } == 0 {
-        use std::os::unix::process::CommandExt;
         command.uid(0);
     }
 
@@ -135,69 +134,12 @@ pub fn run_command(
         command.env(key, value);
     }
 
-    // Child tools must not inherit the private launcher control pipe.
-    command.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() });
+    let output = command_output(&mut command, stdin, COMMAND_TIMEOUT)
+        .map_err(|error| format!("{operation_label}: command '{program}': {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("{operation_label}: failed to start command '{program}': {error}"))?;
-
-    if let Some(stdin_payload) = stdin {
-        let mut stdin_handle = child.stdin.take().ok_or_else(|| format!("{operation_label}: command '{program}' did not expose stdin pipe"))?;
-
-        stdin_handle
-            .write_all(stdin_payload.as_bytes())
-            .map_err(|error| format!("{operation_label}: failed writing stdin to '{program}': {error}"))?;
-    }
-
-    let stdout_handle = child.stdout.take().ok_or_else(|| format!("{operation_label}: command '{program}' did not expose stdout pipe"))?;
-    let stderr_handle = child.stderr.take().ok_or_else(|| format!("{operation_label}: command '{program}' did not expose stderr pipe"))?;
-
-    let stdout_reader = thread::spawn(move || read_capped(stdout_handle, MAX_COMMAND_OUTPUT_BYTES));
-    let stderr_reader = thread::spawn(move || read_capped(stderr_handle, MAX_COMMAND_OUTPUT_BYTES));
-
-    let started_at = Instant::now();
-    let mut timed_out = false;
-    let status = loop {
-        let status = child.try_wait().map_err(|error| format!("{operation_label}: failed waiting for command '{program}': {error}"))?;
-        if let Some(status) = status {
-            break status;
-        }
-
-        if started_at.elapsed() >= COMMAND_TIMEOUT {
-            timed_out = true;
-            break child
-                .kill()
-                .and_then(|_| child.wait())
-                .map_err(|error| format!("{operation_label}: failed to terminate timed out command '{program}': {error}"))?;
-        }
-
-        thread::sleep(COMMAND_POLL_INTERVAL);
-    };
-
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| format!("{operation_label}: failed joining stdout reader for command '{program}'"))?
-        .map_err(|error| format!("{operation_label}: failed reading stdout for command '{program}': {error}"))
-        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())?;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| format!("{operation_label}: failed joining stderr reader for command '{program}'"))?
-        .map_err(|error| format!("{operation_label}: failed reading stderr for command '{program}': {error}"))
-        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())?;
-
-    if timed_out {
-        return Err(format!(
-            "{operation_label}: command '{program}' timed out after {}s\nstdout: {}\nstderr: {}",
-            COMMAND_TIMEOUT.as_secs(),
-            stdout.trim(),
-            stderr.trim(),
-        ));
-    }
-
-    if status.success() {
+    if output.status.success() {
         return Ok(stdout);
     }
 
@@ -206,15 +148,80 @@ pub fn run_command(
         return Ok(stdout);
     }
 
-    Err(format!("{operation_label}: command '{program}' failed (code {:?})\nstdout: {}\nstderr: {}", status.code(), stdout.trim(), stderr.trim(),))
+    Err(format!("{operation_label}: command '{program}' failed (code {:?})\nstdout: {}\nstderr: {}", output.status.code(), stdout.trim(), stderr.trim(),))
 }
 
-fn read_capped<R: Read>(mut reader: R, max_bytes: usize) -> std::io::Result<Vec<u8>> {
-    let mut output = Vec::<u8>::with_capacity(max_bytes.min(8192));
+fn command_output(command: &mut Command, stdin: Option<&str>, timeout: Duration) -> Result<Output, String> {
+    // run_command is synchronous and runs on blocking workers. A local IO
+    // driver supervises every pipe without adding detached reader threads.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("failed to create command runtime: {error}"))?;
+    runtime.block_on(async {
+        // Child tools must not inherit the private launcher control pipe.
+        let mut child = command
+            .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|error| format!("failed to start: {error}"))?;
+        let stdin_handle = child.stdin.take();
+        let stdout_handle = child.stdout.take().expect("stdout is piped");
+        let stderr_handle = child.stderr.take().expect("stderr is piped");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let work = async {
+            let (_, _, _, status) = tokio::try_join!(
+                async {
+                    if let Some(payload) = stdin {
+                        let mut handle = stdin_handle.expect("stdin is piped when input is provided");
+                        handle.write_all(payload.as_bytes()).await.map_err(|error| format!("failed writing stdin: {error}"))?;
+                    }
+                    Ok(())
+                },
+                async {
+                    read_capped(stdout_handle, &mut stdout, MAX_COMMAND_OUTPUT_BYTES).await.map_err(|error| format!("failed reading stdout: {error}"))
+                },
+                async {
+                    read_capped(stderr_handle, &mut stderr, MAX_COMMAND_OUTPUT_BYTES).await.map_err(|error| format!("failed reading stderr: {error}"))
+                },
+                async { child.wait().await.map_err(|error| format!("failed waiting: {error}")) },
+            )?;
+            Ok(status)
+        };
+        let result = match tokio::time::timeout(timeout, work).await {
+            Ok(result) => result,
+            Err(_) => Err(format!("timed out after {}s", timeout.as_secs_f64())),
+        };
+        match result {
+            Ok(status) => Ok(Output { status, stdout, stderr }),
+            Err(error) => {
+                let kill_result = child.start_kill();
+                let wait_result = child.wait().await;
+                let mut detail = format!(
+                    "{error}\nstdout: {}\nstderr: {}",
+                    String::from_utf8_lossy(&stdout).trim(),
+                    String::from_utf8_lossy(&stderr).trim()
+                );
+                if let Err(error) = kill_result {
+                    detail.push_str(&format!("\nfailed to terminate: {error}"));
+                }
+                if let Err(error) = wait_result {
+                    detail.push_str(&format!("\nfailed to reap: {error}"));
+                }
+                Err(detail)
+            }
+        }
+    })
+}
+
+async fn read_capped<R: AsyncRead + Unpin>(mut reader: R, output: &mut Vec<u8>, max_bytes: usize) -> std::io::Result<()> {
     let mut chunk = [0_u8; 8192];
 
     loop {
-        let bytes_read = reader.read(&mut chunk)?;
+        let bytes_read = reader.read(&mut chunk).await?;
         if bytes_read == 0 {
             break;
         }
@@ -226,7 +233,7 @@ fn read_capped<R: Read>(mut reader: R, max_bytes: usize) -> std::io::Result<Vec<
         }
     }
 
-    Ok(output)
+    Ok(())
 }
 
 /// Resolve before creating the TUN: assigning its addresses can install
@@ -337,8 +344,10 @@ pub fn into_cleanup_hook(
 }
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
-const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
 
 #[cfg(test)]
 mod route_tests;
+
+#[cfg(test)]
+mod command_tests;

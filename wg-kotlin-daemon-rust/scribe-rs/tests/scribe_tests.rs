@@ -69,3 +69,25 @@ async fn sealed_scroll_matches_expected_wire_shape() {
     assert_eq!(json["data"]["service"], Value::String("wg-daemon".to_string()));
     assert_eq!(json["data"]["event"], Value::String("daemon_check".to_string()));
 }
+
+#[test]
+fn synchronous_seal_delivers_without_a_runtime() {
+    let memory = Arc::new(MemorySaver { written: Mutex::new(Vec::new()) });
+    let scribe = Scribe::builder().saver(memory.clone()).build();
+    let sealed = scribe.seal(scribe.new_scroll(None), false);
+    assert_eq!(memory.written.lock().unwrap().as_slice(), &[sealed]);
+}
+
+#[tokio::test]
+async fn filters_run_before_delivery_and_retired_scribes_do_not_write_synchronously() {
+    let memory = Arc::new(MemorySaver { written: Mutex::new(Vec::new()) });
+    let mut scribe = Scribe::builder().saver(memory.clone()).filter(|scroll| scroll.success).build();
+    scribe.hire();
+    scribe.seal(scribe.new_scroll(None), false);
+    scribe.seal(scribe.new_scroll(None), true);
+    scribe.retire().await;
+    scribe.seal(scribe.new_scroll(None), true);
+    let written = memory.written.lock().unwrap();
+    assert_eq!(written.len(), 1);
+    assert!(written[0].success);
+}

@@ -131,7 +131,7 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
     Registrar o tamanho e uma amostra limitada dos valores rejeitados e limitar
     o armazenamento e a fila de logs.
     Referência: daemon/src/server.rs, session_config_fields() e rejeição de config,
-    daemon/src/logging.rs, FileSaver, e scribe-rs/src/scribe.rs, hire().
+    daemon/src/logging.rs, JsonSaver, e scribe-rs/src/scribe.rs, hire().
 
 16. Implementado: validar o limite numérico do índice de interface no macOS.
     Converter o sufixo com parse::<u32>() e verificar checked_add(1), aceitando
@@ -151,15 +151,16 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
     O daemon não depende mais do executável scutil no macOS.
     Referência: daemon/src/platform/dns_macos.rs e macos.rs.
 
-18. Melhorar o direcionamento e o contexto dos logs do daemon.
-    Permitir configurar os destinos, como arquivo JSONL, stdout e stderr,
-    aproveitando os Savers já suportados pelo Scribe. Definir filtros por nível
-    e componente e incluir timestamp, component e session_id estável para
-    acompanhar uma sessão e distinguir seus eventos dos eventos do processo.
-    Definir o diretório padrão apropriado ao sistema e preservar --log-path
-    como opção explícita. Garantir que uma falha no destino possa ser relatada
-    em stderr sem recursão nem impedir a limpeza das sessões. Coordenar com
-    o item 15 os limites de fila, tamanho e retenção dos registros.
+18. Implementado: configurar destinos, filtros e contexto dos logs do daemon.
+    --log-target seleciona file, stdout e stderr; --log-level e --log-component
+    filtram os Scrolls antes do envio. Incluir timestamp em milissegundos Unix,
+    nível, componente, PID e session_id estável entre os eventos de uma sessão.
+    Usar diretórios de logs do sistema, preservando --log-path como override.
+    Falhas de arquivo/stdout geram Scrolls de diagnóstico e fallback em stderr,
+    sem recursão. Executar os Savers fora do runtime e limitar a espera final
+    a 500 ms, mais até 100 ms para reportar timeout, preservando a limpeza das
+    sessões mesmo com saída bloqueada. Os limites de fila, tamanho de registros
+    e retenção de arquivos permanecem pendentes no item 15.
     Referência: daemon/src/main.rs, daemon/src/logging.rs, daemon/src/server.rs
     e scribe-rs/src/scribe.rs, ScribeBuilder::saver().
 

@@ -1,14 +1,13 @@
 use anyhow::bail;
 use clap::Parser;
-use daemon::logging::{LogComponent, LogLevel, LogOptions};
+use daemon::logging::Logger;
 #[cfg(unix)]
 use daemon::owner::allow_owner_signals;
-use daemon::{ipc::LocalListener, logging, owner::OwnerProcess, platform, server::DaemonService};
+use daemon::{ipc::LocalListener, owner::OwnerProcess, platform, server::DaemonService};
 #[cfg(windows)]
 use daemon::{session, wintun::WintunDll};
-use serde_json::Value;
-use std::{sync::Arc, time::Duration};
-use tokio::sync::{Mutex, watch};
+use std::{path::PathBuf, sync::Arc, time::Duration};
+use tokio::sync::watch;
 
 #[derive(Parser, Debug)]
 #[command(name = "wg-kotlin-daemon", version)]
@@ -19,61 +18,50 @@ struct Cli {
     owner_pid: u32,
     #[arg(long)]
     owner_start_time: u64,
-    #[command(flatten)]
-    logging: LogOptions,
+    #[arg(long)]
+    log_path: Option<PathBuf>,
 }
 
 fn main() -> std::process::ExitCode {
-    match run_main() {
-        Ok(()) => std::process::ExitCode::SUCCESS,
+    let cli = Cli::parse();
+    // Configure process credentials before starting the log worker or Tokio.
+    let owner = prepare_owner(&cli);
+    let logger = match Logger::new(cli.log_path.as_deref()) {
+        Ok(logger) => logger,
         Err(error) => {
-            logging::report_fatal_error(format!("{error:#}"));
-            std::process::ExitCode::FAILURE
+            if let Ok(logger) = Logger::new(None) {
+                logger.log(format_args!("cannot open log output: {error}"));
+                logger.flush();
+            }
+            return std::process::ExitCode::FAILURE;
         }
+    };
+    let result =
+        owner.and_then(|owner| tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(run(cli, Arc::new(owner), logger.clone())));
+    if let Err(error) = &result {
+        logger.log(format_args!("daemon failed: {error:#}"));
     }
+    logger.flush();
+    if result.is_ok() { std::process::ExitCode::SUCCESS } else { std::process::ExitCode::FAILURE }
 }
 
-fn run_main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+fn prepare_owner(cli: &Cli) -> anyhow::Result<OwnerProcess> {
     ensure_root()?;
     let owner = OwnerProcess::open(cli.owner_pid, cli.owner_start_time)?;
     #[cfg(unix)]
     allow_owner_signals(owner.uid)?;
-    tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(run(cli, Arc::new(owner)))
+    Ok(owner)
 }
 
-async fn run(cli: Cli, owner: Arc<OwnerProcess>) -> anyhow::Result<()> {
+async fn run(cli: Cli, owner: Arc<OwnerProcess>, logger: Logger) -> anyhow::Result<()> {
     platform::ensure_required_binaries(platform::required_binaries()).map_err(anyhow::Error::msg)?;
     #[cfg(windows)]
     let wintun = Arc::new(WintunDll::prepare()?);
     #[cfg(windows)]
     session::set_wintun_dll(&wintun).map_err(anyhow::Error::msg)?;
-    let mut scribe = logging::create_daemon_scribe(&cli.logging);
-    scribe.hire();
-    let service = DaemonService::new(Arc::new(Mutex::new(scribe)));
-    let mut listener = match LocalListener::bind(&cli.endpoint, &owner) {
-        Ok(listener) => listener,
-        Err(error) => {
-            service
-                .seal_scroll(LogComponent::Daemon, LogLevel::Error, "daemon_error", [("error".into(), Value::String(error.to_string()))], false)
-                .await;
-            service.retire_logs().await;
-            return Err(error.into());
-        }
-    };
-    service
-        .seal_scroll(
-            LogComponent::Daemon,
-            LogLevel::Info,
-            "daemon_startup",
-            [
-                ("endpoint".into(), Value::String(cli.endpoint)),
-                ("pid".into(), Value::from(std::process::id())),
-                ("owner_pid".into(), Value::from(owner.pid)),
-            ],
-            true,
-        )
-        .await;
+    let service = DaemonService::new(logger.clone());
+    let mut listener = LocalListener::bind(&cli.endpoint, &owner)?;
+    logger.log(format_args!("daemon started endpoint={} owner_pid={}", cli.endpoint, owner.pid));
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let mut connections = tokio::task::JoinSet::new();
     let mut monitor = tokio::time::interval(Duration::from_millis(100));
@@ -88,16 +76,17 @@ async fn run(cli: Cli, owner: Arc<OwnerProcess>) -> anyhow::Result<()> {
             connection = listener.accept() => {
                 let (stream, peer_pid) = match connection { Ok(value) => value, Err(error) => break Err(error) };
                 if !owner.authorizes(peer_pid) {
-                    service.seal_scroll(LogComponent::Ipc, LogLevel::Warn, "daemon_connection_rejected", [("peer_pid".into(), Value::from(peer_pid))], false).await;
+                    logger.log(format_args!("connection rejected peer_pid={peer_pid}"));
                     drop(stream);
                     continue;
                 }
-                service.seal_scroll(LogComponent::Ipc, LogLevel::Debug, "daemon_connection_accepted", [("peer_pid".into(), Value::from(peer_pid))], true).await;
+                logger.log(format_args!("connection accepted peer_pid={peer_pid}"));
                 let service = service.clone();
                 let shutdown = shutdown_tx.clone();
+                let logger = logger.clone();
                 connections.spawn(async move {
                     if let Err(error) = service.serve_connection(stream, shutdown).await {
-                        service.seal_scroll(LogComponent::Ipc, LogLevel::Error, "daemon_connection_error", [("error".into(), Value::String(error.to_string()))], false).await;
+                        logger.log(format_args!("connection failed peer_pid={peer_pid}: {error}"));
                     }
                 });
             }
@@ -105,7 +94,7 @@ async fn run(cli: Cli, owner: Arc<OwnerProcess>) -> anyhow::Result<()> {
     };
     let _ = shutdown_tx.send(true);
     if let Err(error) = &result {
-        service.seal_scroll(LogComponent::Daemon, LogLevel::Error, "daemon_error", [("error".into(), Value::String(error.to_string()))], false).await;
+        logger.log(format_args!("listener failed: {error}"));
     }
     drop(listener);
     let drained = tokio::time::timeout(Duration::from_secs(4), async {
@@ -114,18 +103,9 @@ async fn run(cli: Cli, owner: Arc<OwnerProcess>) -> anyhow::Result<()> {
     })
     .await
     .is_ok();
-    let success = result.is_ok() && drained;
-    service
-        .seal_scroll(
-            LogComponent::Daemon,
-            if success { LogLevel::Info } else { LogLevel::Error },
-            "daemon_shutdown",
-            [("sessions_drained".into(), Value::Bool(drained))],
-            success,
-        )
-        .await;
-    service.retire_logs().await;
+    logger.log(format_args!("daemon stopped sessions_drained={drained}"));
     if !drained {
+        logger.flush();
         std::process::exit(1);
     }
     result?;

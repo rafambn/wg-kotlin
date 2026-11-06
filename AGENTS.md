@@ -20,6 +20,5 @@ reviewing or changing the daemon.
   Callers are expected to understand the routing impact of the routes they request.
 - Require `resolvectl` at daemon startup on Linux, including for sessions that
   do not configure DNS.
-- Use only Scribe Scrolls for daemon logging, through `new_scroll` and `seal`.
-  Do not use `note(...)`. Model all events, including lifecycle events and errors,
-  as contextual scrolls.
+- Log plain text to the file supplied with `--log-path`, or only to stdout when
+  no path is supplied. Do not use Scribe.

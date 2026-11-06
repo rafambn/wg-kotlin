@@ -38,7 +38,7 @@ The application must:
   process handle. Release native handles after exit and retain exit status for
   subsequent queries.
 - Redirect or drain standard output/error so process output cannot block it.
-  These streams do not carry IPC data. Runtime logging uses Scribe JSONL.
+  These streams do not carry IPC data. Runtime logs are plain text.
 - Clean up partial launches if permission is denied or the callback throws before
   returning a process. After the callback returns, the library owns cleanup.
 
@@ -191,42 +191,26 @@ Reference: [named pipe access controls](https://learn.microsoft.com/en-us/window
 
 ## Logs
 
-The daemon emits Scribe Scrolls as JSONL. Select one or more destinations with
-`--log-target file,stdout,stderr`; repeating the option also works. The default
-target is `file`. `--log-path` selects its explicit path and is ignored when the
-file target is disabled. Missing parent directories are created.
+The daemon writes plain text to stdout by default. When `--log-path` is supplied,
+it appends logs only to that file and creates missing parent directories. Failure
+to open the requested file fails startup, with a diagnostic on stdout.
 
-Default file locations:
+Each line contains the Unix timestamp in milliseconds, daemon PID and message.
+Session messages include the interface name; the stop message includes its
+elapsed duration. Embedded newlines are escaped so one event occupies one line.
 
-| System | Path |
-| --- | --- |
-| Linux | `/var/log/wg-kotlin/daemon.jsonl` |
-| macOS | `/Library/Logs/wg-kotlin/daemon.jsonl` |
-| Windows | `<ProgramData>/wg-kotlin/logs/daemon.jsonl`, using the Windows known folder |
+There are no log targets, severity filters, component filters or default log file.
+For example:
 
-`--log-level` sets the minimum severity: `trace`, `debug`, `info`, `warn`, or
-`error`. The default is `info`. `--log-component daemon,ipc,session` restricts
-output to the selected components; omitting it includes all components.
-Logging diagnostics use the `logging` component. Filters run before enqueueing.
-For example, `--log-target file,stderr --log-level debug` retains accepted IPC
-connections as well as lifecycle events.
+```text
+--log-path /path/to/daemon.log
+```
 
-Each record includes `timestamp` as Unix epoch milliseconds, `level`, `component`,
-and `pid`. Session events carry a UUID `session_id` shared by startup, summary,
-and stop records. Reusing an interface creates a new session ID. `scroll_id`
-identifies each individual record. Process events have no session ID.
-
-If a file or stdout write fails, stderr receives a `daemon_log_error` Scroll and
-the original record. Diagnostics include the source event, Scroll ID, and session
-ID when available, and bypass normal filters. Stderr is the terminal fallback;
-its write errors do not reenter the logger. If no requested destination can be
-opened, subsequent records also go to stderr.
-
-Savers run on a dedicated thread. Shutdown waits at most 500 ms for logs to drain,
-then allows up to 100 ms for a timeout diagnostic. A blocked output does not keep
-the runtime alive or prevent session cleanup. Records still pending at exit can
-be lost. Fatal process errors also use Scrolls on stderr and have a 100 ms
-reporting deadline, so a full stderr pipe cannot hold the process open.
+A dedicated thread writes logs through a queue of up to 256 entries. Logging is
+best effort: a full queue drops new messages, and an output error stops the log
+worker. Shutdown waits at most 500 ms for a flush when the queue has room for the
+flush request. Unread stdout or a blocked file does not hold up session cleanup
+or process exit. Records still pending at exit can be lost.
 
 ## Framed protobuf protocol
 

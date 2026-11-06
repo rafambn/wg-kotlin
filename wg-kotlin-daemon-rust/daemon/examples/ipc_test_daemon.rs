@@ -2,13 +2,12 @@
 use clap::Parser;
 use daemon::{
     ipc::{LocalListener, PROTOCOL_VERSION, read_frame, write_frame},
+    logging::Logger,
     owner::OwnerProcess,
     server::DaemonService,
 };
 use daemon_proto::pb::{ClientMessage, DaemonReady, Packet, ServerMessage, SessionStarted, client_message, server_message};
-use scribe_rs::Scribe;
-use std::sync::Arc;
-use tokio::sync::{Mutex, watch};
+use tokio::sync::watch;
 
 #[derive(Parser)]
 struct Args {
@@ -38,9 +37,7 @@ async fn main() -> anyhow::Result<()> {
     }
     let owner = OwnerProcess::open(args.owner_pid, args.owner_start_time)?;
     let mut listener = LocalListener::bind(&args.endpoint, &owner)?;
-    let mut scribe = Scribe::builder().build();
-    scribe.hire();
-    let service = DaemonService::new(Arc::new(Mutex::new(scribe)));
+    let service = DaemonService::new(Logger::new(args.log_path.as_deref().map(std::path::Path::new))?);
     let (shutdown, mut stopped) = watch::channel(false);
     let mut monitor = tokio::time::interval(std::time::Duration::from_millis(100));
     loop {

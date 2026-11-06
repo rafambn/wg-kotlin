@@ -34,9 +34,7 @@ pub struct TunSession {
 
 impl SessionManager {
     pub fn start(config: &TunSessionConfig) -> Result<TunSession, String> {
-        if !is_supported_interface_name(&config.interface_name) {
-            return Err(format!("unsupported interface name '{}': expected utun[0-9]+", config.interface_name));
-        }
+        crate::validation::validate_interface_name(&config.interface_name)?;
 
         #[cfg(target_os = "windows")]
         let wintun = WINTUN_DLL.get().and_then(Weak::upgrade).ok_or("Wintun DLL is not initialized")?;
@@ -125,9 +123,5 @@ impl TunSession {
 }
 
 pub fn is_supported_interface_name(interface_name: &str) -> bool {
-    let Some(index_part) = interface_name.strip_prefix("utun") else {
-        return false;
-    };
-
-    !index_part.is_empty() && index_part.chars().all(|ch| ch.is_ascii_digit())
+    crate::validation::validate_interface_name(interface_name).is_ok()
 }

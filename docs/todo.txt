@@ -133,13 +133,12 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
     Referência: daemon/src/server.rs, session_config_fields() e rejeição de config,
     daemon/src/logging.rs, FileSaver, e scribe-rs/src/scribe.rs, hire().
 
-16. Validar o limite numérico do índice de interface no macOS.
-    utun4294967295 passa na validação, mas tun-rs 2.8.3 converte o sufixo em
-    u32 e soma 1 sem verificar overflow. Com checagem de overflow ocorre panic,
-    contornando o tratamento de Err e deixando a reserva da sessão presa.
-    Em release padrão, o valor resulta em zero e solicita uma interface
-    automática, contrariando o nome pedido. Validar a faixa suportada antes
-    da reserva, usando conversão e adição verificadas.
+16. Implementado: validar o limite numérico do índice de interface no macOS.
+    Converter o sufixo com parse::<u32>() e verificar checked_add(1), aceitando
+    índices de 0 a 4294967294, inclusive com zeros à esquerda. Rejeitar overflow
+    antes da reserva e da criação nativa, evitando panic ou seleção automática
+    de interface. Compartilhar a validação entre o RPC, SessionManager::start()
+    e is_supported_interface_name().
     Referência: daemon/src/validation.rs, validate_interface_name(), e tun-rs 2.8.3,
     src/platform/macos/tuntap.rs, criação do índice de controle.
 

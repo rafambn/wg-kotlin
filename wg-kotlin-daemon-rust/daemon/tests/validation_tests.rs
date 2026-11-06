@@ -25,6 +25,31 @@ fn rejects_non_utun_interface() {
     assert!(error.contains("utun"));
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn checks_macos_interface_index_before_native_session_start() {
+    for (name, accepted) in [
+        ("utun0", true),
+        ("utun00000000000", true),
+        ("utun4294967294", true),
+        ("utun04294967294", true),
+        ("utun4294967295", false),
+        ("utun04294967295", false),
+        ("utun4294967296", false),
+        ("utun99999999999", false),
+    ] {
+        let mut config = TunSessionConfig { interface_name: name.to_string(), addresses: vec![cidr_v4(&[10, 0, 0, 1], 24)], ..Default::default() };
+        assert_eq!(validate_config(&config).is_ok(), accepted, "{name}");
+        assert_eq!(daemon::session::is_supported_interface_name(name), accepted, "{name}");
+        if !accepted {
+            // A regression fails route resolution before it can create a TUN.
+            config.peer_endpoints = vec![Ip { value: None }];
+            let error = daemon::session::SessionManager::start(&config).err().expect("invalid index must be rejected");
+            assert!(error.contains("4294967294"), "{name}: {error}");
+        }
+    }
+}
+
 #[test]
 fn rejects_incomplete_dns() {
     let config = TunSessionConfig {

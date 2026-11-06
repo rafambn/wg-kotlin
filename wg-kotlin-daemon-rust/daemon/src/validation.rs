@@ -25,7 +25,7 @@ pub fn validate_config(config: &TunSessionConfig) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_interface_name(interface_name: &str) -> Result<(), String> {
+pub(crate) fn validate_interface_name(interface_name: &str) -> Result<(), String> {
     if interface_name.len() > MAX_INTERFACE_NAME_LENGTH {
         return Err(format!("interface name must be at most {MAX_INTERFACE_NAME_LENGTH} characters and match `utun[0-9]+`",));
     }
@@ -34,6 +34,10 @@ fn validate_interface_name(interface_name: &str) -> Result<(), String> {
     };
     if suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_digit()) {
         return Err("interface name must be at most 15 characters and match `utun[0-9]+`".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    if suffix.parse::<u32>().ok().and_then(|index| index.checked_add(1)).is_none() {
+        return Err(format!("macOS interface index must be between 0 and {}", u32::MAX - 1));
     }
     Ok(())
 }

@@ -171,6 +171,12 @@ connections. PID checks enforce app exclusivity beyond account-level permissions
 The JVM client uses overlapped I/O, with native buffers retained until completion
 and pending operations canceled when the connection closes.
 
+NRPT rule comments identify the daemon PID, its creation time from GetProcessTimes,
+and the interface. Session cleanup matches the complete comment. Initial cleanup
+removes recognized rules only when that process instance has exited. A live
+process with a reused PID has a different creation time, so it cannot keep old
+rules alive. Unknown comments and owners that cannot be inspected are preserved.
+
 Reference: [named pipe access controls](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights),
 [client PID](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeclientprocessid),
 [server PID](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid).

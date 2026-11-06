@@ -106,15 +106,14 @@ Escopo da revisão: daemon, daemon-proto e scribe-rs dentro de wg-kotlin-daemon-
     Continuar drenando cada saída após atingir o limite de 1 MiB armazenado.
     Referência: daemon/src/platform/mod.rs, run_command() e command_output().
 
-13. Impedir que uma instância remova as regras DNS de outra no Windows.
-    clear_stale_nrpt_rules_once() remove todas as regras com o prefixo
-    kmpvpn-daemon:, sem identificar a instância proprietária ou verificar se
-    ela continua ativa. Ao iniciar uma sessão em um segundo daemon, mesmo
-    usando outra porta e outra interface, as regras da primeira instância
-    podem ser removidas. Identificar a propriedade e a atividade das regras
-    ou garantir uma única instância antes de executar a limpeza global.
+13. Implementado: isolar as regras DNS de cada instância no Windows.
+    Marcar cada regra NRPT com PID, instante de criação do daemon e interface.
+    A limpeza por sessão usa essa identidade completa. A limpeza inicial remove
+    somente regras de proprietários encerrados, incluindo PIDs reutilizados.
+    Preservar regras de instâncias vivas, comentários não reconhecidos e regras
+    cuja identidade proprietária não possa ser consultada por erro de acesso.
     Referência: daemon/src/platform/windows.rs, clear_stale_nrpt_rules_once()
-    e CLEAR_ALL_NRPT_RULES_SCRIPT.
+    e CLEAR_STALE_NRPT_RULES_SCRIPT.
 
 14. Implementado junto ao item 10: manter a responsabilidade pela inicialização
     após o cancelamento do RPC. A task da sessão aguarda o worker bloqueante,

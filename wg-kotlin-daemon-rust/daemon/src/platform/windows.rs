@@ -29,7 +29,7 @@ pub fn configure_session(config: &TunSessionConfig, interface_name: &str, endpoi
                 &vec![
                     ("WG_KOTLIN_DNS_NAMESPACES".to_string(), dns_domains.join("\n")),
                     ("WG_KOTLIN_DNS_SERVERS".to_string(), dns_servers.join("\n")),
-                    ("WG_KOTLIN_NRPT_COMMENT".to_string(), rule_comment(interface_name)),
+                    ("WG_KOTLIN_NRPT_COMMENT".to_string(), rule_comment(interface_name)?),
                 ],
                 &[],
             )?;
@@ -46,7 +46,7 @@ fn clear_nrpt_rules(interface_name: &str) -> Result<(), String> {
         "powershell",
         &vec!["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), CLEAR_NRPT_RULES_SCRIPT.to_string()],
         None,
-        &vec![("WG_KOTLIN_NRPT_COMMENT".to_string(), rule_comment(interface_name))],
+        &vec![("WG_KOTLIN_NRPT_COMMENT".to_string(), rule_comment(interface_name)?)],
         &[],
     )
     .map(|_| ())
@@ -67,7 +67,7 @@ pub(crate) fn clear_stale_nrpt_rules_once() -> Result<(), String> {
     run_command(
         "clear-stale-nrpt-rules",
         "powershell",
-        &vec!["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), CLEAR_ALL_NRPT_RULES_SCRIPT.to_string()],
+        &vec!["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), CLEAR_STALE_NRPT_RULES_SCRIPT.to_string()],
         None,
         &vec![("WG_KOTLIN_NRPT_COMMENT_PREFIX".to_string(), NRPT_COMMENT_PREFIX.to_string())],
         &[],
@@ -77,8 +77,18 @@ pub(crate) fn clear_stale_nrpt_rules_once() -> Result<(), String> {
     Ok(())
 }
 
-fn rule_comment(interface_name: &str) -> String {
-    format!("{NRPT_COMMENT_PREFIX}{interface_name}")
+fn rule_comment(interface_name: &str) -> Result<String, String> {
+    use windows::Win32::Foundation::FILETIME;
+    use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+
+    let mut creation = FILETIME::default();
+    let mut exit = FILETIME::default();
+    let mut kernel = FILETIME::default();
+    let mut user = FILETIME::default();
+    unsafe { GetProcessTimes(GetCurrentProcess(), &mut creation, &mut exit, &mut kernel, &mut user) }
+        .map_err(|error| format!("failed to identify NRPT owner: {error}"))?;
+    let created_at = ((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64;
+    Ok(format!("{NRPT_COMMENT_PREFIX}{}:{created_at}:{interface_name}", std::process::id()))
 }
 
 const SET_NRPT_RULE_SCRIPT: &str = r#"
@@ -95,7 +105,54 @@ $ErrorActionPreference = 'Stop'
 Get-DnsClientNrptRule | Where-Object { $_.Comment -eq $env:WG_KOTLIN_NRPT_COMMENT } | Remove-DnsClientNrptRule -Force
 "#;
 
-const CLEAR_ALL_NRPT_RULES_SCRIPT: &str = r#"
+const CLEAR_STALE_NRPT_RULES_SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
-Get-DnsClientNrptRule | Where-Object { $_.Comment -like "$env:WG_KOTLIN_NRPT_COMMENT_PREFIX*" } | Remove-DnsClientNrptRule -Force
+$prefix = [regex]::Escape($env:WG_KOTLIN_NRPT_COMMENT_PREFIX)
+foreach ($rule in Get-DnsClientNrptRule) {
+    if ($rule.Comment -notmatch "\A${prefix}([1-9][0-9]*):([0-9]+):utun[0-9]+\z") { continue }
+    [int]$ownerPid = 0
+    [long]$ownerStart = 0
+    if (-not [int]::TryParse($Matches[1], [ref]$ownerPid) -or -not [long]::TryParse($Matches[2], [ref]$ownerStart)) { continue }
+    $owner = $null
+    $alive = $false
+    try {
+        $owner = [System.Diagnostics.Process]::GetProcessById($ownerPid)
+        $alive = -not $owner.HasExited -and $owner.StartTime.ToFileTimeUtc() -eq $ownerStart
+    } catch [System.ArgumentException] {
+        # The PID no longer exists.
+    } catch [System.InvalidOperationException] {
+        # The process exited while its identity was being read.
+    } catch [System.ComponentModel.Win32Exception] {
+        # Keep rules when access to their owner's identity is unavailable.
+        continue
+    } finally {
+        if ($null -ne $owner) { $owner.Dispose() }
+    }
+    if (-not $alive) { $rule | Remove-DnsClientNrptRule -Force }
+}
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nrpt_rules_are_isolated_by_process_instance() {
+        let script = format!(
+            "$clearStale = {{ {CLEAR_STALE_NRPT_RULES_SCRIPT} }}\n$clearSession = {{ {CLEAR_NRPT_RULES_SCRIPT} }}\n$setRules = {{ {SET_NRPT_RULE_SCRIPT} }}\n{}",
+            include_str!("nrpt_tests.ps1")
+        );
+        run_command(
+            "test-nrpt-ownership",
+            "powershell",
+            &["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), script],
+            None,
+            &[
+                ("WG_KOTLIN_NRPT_COMMENT_PREFIX".to_string(), NRPT_COMMENT_PREFIX.to_string()),
+                ("WG_KOTLIN_NRPT_TEST_OWNER".to_string(), rule_comment("utun0").unwrap()),
+            ],
+            &[],
+        )
+        .unwrap();
+    }
+}

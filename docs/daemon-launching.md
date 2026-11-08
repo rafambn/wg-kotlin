@@ -92,9 +92,15 @@ On Linux and Windows, sessions that resolve to the same native endpoint route
 share its installation. The first session installs the host exception and the
 last session removes it. Closing another session or rolling back failed DNS
 setup does not remove a pin still in use. Linux keeps its replace/delete policy
-and does not restore routes that existed before the first installation.
+and does not create separate routing tables.
 Route resolution, TUN creation and route installation are serialized with route
 cleanup within the daemon. DNS operations run outside that mutex.
+
+On Linux, macOS and Windows, cleanup removes the session's routes without
+restoring entries that were replaced, including routes installed by an earlier
+session. This is intentional, including after setup fails. Users must understand
+and accept this impact before requesting routes: removing the VPN's route does
+not reconstruct the previous entry.
 
 ## Linux desktop
 
@@ -136,16 +142,16 @@ signal ownership arrangement. Other processes of that UID can also send signals;
 this grants them no permission to create TUN sessions. Child DNS tools receive
 matching root UIDs and do not inherit the launcher's standard input.
 
-On macOS, route setup records the exact entries displaced by the daemon,
-including endpoint exceptions and the default route. Snapshots distinguish
-prefixes and interface scopes and retain the gateway, source address, interface,
-flags and metrics. Within a daemon process, a shared registry tracks each route's
-original snapshot and its active session owners. Closing a session preserves
-the most recent remaining owner's route; closing the last owner restores the
-original entry. This also applies after partial route or DNS setup failure.
+On macOS, a shared registry tracks only the currently installed version of each
+route and its users, identified by prefix and interface scope. Identical routes
+share the installation until the last user closes. Replacing a route gives the
+new installation a separate identity, so closing an earlier session cannot
+delete it. Closing the latest installation removes it without reinstalling an
+earlier session's route or any preexisting entry. Setup rollback follows the same
+policy and only cleans installations that the session registered.
 Endpoint lookups use the same mutex as route changes, so they cannot observe
-the gap between DELETE and ADD. Failed cleanup retains its snapshots for retry
-before a later lookup or setup, including configurations without endpoints.
+the gap between DELETE and ADD. Failed cleanup retains the pending removal for
+retry before a later lookup or setup, including configurations without endpoints.
 Cleanup leaves detected external route changes untouched and
 reports the conflict while continuing with other routes and DNS.
 

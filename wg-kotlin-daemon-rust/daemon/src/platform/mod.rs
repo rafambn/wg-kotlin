@@ -86,7 +86,7 @@ pub fn configure_session(config: &Config, interface: &str, endpoints: ResolvedEn
     let cleanup_routes = move |#[cfg(not(target_os = "macos"))] pins: &mut EndpointPins| {
         #[cfg(target_os = "macos")]
         {
-            saved.restore()
+            saved.clear()
         }
         #[cfg(not(target_os = "macos"))]
         {

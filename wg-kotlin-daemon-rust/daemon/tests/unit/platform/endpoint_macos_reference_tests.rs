@@ -200,7 +200,7 @@ fn endpoint_requests_match_the_previous_implementation() {
         let previous = EndpointRoute::lookup(destination).unwrap();
         let current = super::RouteMessage::lookup(destination).unwrap();
         for operation in [libc::RTM_ADD, libc::RTM_DELETE] {
-            let expected = restore_message(&previous.message(libc::RTM_ADD).unwrap(), operation).unwrap();
+            let expected = route_message(&previous.message(libc::RTM_ADD).unwrap(), operation).unwrap();
             assert_eq!(current.message(operation).unwrap(), expected);
         }
     }
@@ -243,10 +243,10 @@ fn native_routing_socket_keeps_queued_replies_in_separate_reads() {
     }
 }
 
-pub(in crate::platform) fn restore_message(original: &[u8], operation: i32) -> io::Result<Vec<u8>> {
+pub(in crate::platform) fn route_message(original: &[u8], operation: i32) -> io::Result<Vec<u8>> {
     let head = header(original)?;
     if head.rtm_index == 0 {
-        return Err(io::Error::other("route has no interface to restore"));
+        return Err(io::Error::other("route has no interface"));
     }
     if head.rtm_flags & libc::RTF_PROXY != 0 {
         return Err(io::Error::other("cannot safely replace a kernel proxy route"));
@@ -405,7 +405,7 @@ fn host_routes_match_the_previous_wire_format_for_both_families() {
                         field!(reply, rtm_rmx.rmx_expire, 123u32);
                         let route = super::RouteMessage::host_route(destination, &reply).unwrap();
                         for operation in [libc::RTM_ADD, libc::RTM_DELETE] {
-                            let expected = restore_message(&expected.message(libc::RTM_ADD).unwrap(), operation).unwrap();
+                            let expected = route_message(&expected.message(libc::RTM_ADD).unwrap(), operation).unwrap();
                             assert_eq!(route.message(operation).unwrap(), expected);
                         }
                     }

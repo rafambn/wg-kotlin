@@ -4,9 +4,26 @@ Objetivo atual: revisar a implementação com o Astra e corrigir os problemas
 confirmados, preservando segurança e legibilidade e evitando código desnecessário.
 Testes não entram na contagem de produção.
 
-Contagem atual: 1.533 linhas de código. As correções das rotas compartilhadas
-acrescentam 178 linhas à base de 1.355. A referência anterior de 1.200 linhas
-permanece não atingida; a revisão atual prioriza corrigir os bugs confirmados.
+Contagem atual: 1.513 linhas de código. A remoção da restauração no macOS retira
+20 linhas da base revisada de 1.533. A referência anterior de 1.200 linhas
+permanece não atingida.
+
+[x] Em 08/11/2026, remover a restauração de rotas a pedido do usuário.
+    Nas três plataformas, encerrar ou desfazer a inicialização de uma sessão
+    remove suas rotas sem reconstruir entradas substituídas. AGENTS.md registra
+    que essa política é intencional e que o usuário deve conhecer seu impacto.
+    O macOS mantém somente a instalação atual e suas referências, sem guardar
+    rotas originais ou uma pilha para reativar sessões anteriores. Pins iguais
+    continuam compartilhados; fechar uma instalação substituída não apaga a
+    atual. Falhas de remoção mantêm somente a tentativa de limpeza pendente.
+    Os testes de falhas parciais e das ordens de fechamento usam o contrato novo.
+    O usuário executou o teste nativo macOS atualizado com privilégios. As duas
+    ordens de fechamento confirmaram o pin compartilhado enquanto necessário,
+    a remoção final das rotas e interfaces e a ausência de restauração tanto da
+    rota preexistente quanto da instalação de uma sessão anterior.
+    A resolução nativa e as dependências de rotas foram preservadas. A biblioteca
+    não foi adotada para substituir esse backend. Registros antigos sobre
+    restauração descrevem etapas anteriores, superadas por esta decisão.
 
 A métrica escolhida pelo usuário conta apenas código, sem comentários e linhas
 vazias. A medição usa cloc 2.08 no código de produção em daemon/src, nas três

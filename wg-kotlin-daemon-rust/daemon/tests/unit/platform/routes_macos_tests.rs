@@ -86,212 +86,6 @@ impl RouteTable for FakeRoutes {
 }
 
 #[test]
-fn failed_delete_still_restores_the_backup_if_the_entry_disappears_before_cleanup() {
-    let original = route("198.51.100.10", 32, 2, Some("192.0.2.1"));
-    let requested = route("198.51.100.10", 32, 7, None);
-    let key = route_key(&original.0).unwrap();
-    let mut table = FakeRoutes { routes: vec![original.clone()], fail: Some((libc::RTM_DELETE, key.clone())), ..Default::default() };
-    let mut state = RouteRegistry::default();
-    let mut routes = SessionRoutes::default();
-    let error = routes.add(requested, &mut table, &mut state).unwrap_err();
-    assert_eq!(error.downcast_ref::<io::Error>().unwrap().raw_os_error(), Some(libc::EIO));
-    // A failed request can still have reached the kernel, or the entry can expire.
-    table.routes.clear();
-    let before = table.calls.len();
-    routes.restore_with(&mut table, &mut state).unwrap();
-    assert_eq!(&table.calls[before..], &[(libc::RTM_ADD, key)]);
-    assert_eq!(table.routes.len(), 1);
-    assert_eq!(table.routes[0].0, original.message(libc::RTM_ADD).unwrap());
-}
-
-#[test]
-fn restore_ignores_only_a_missing_route_and_keeps_other_native_delete_errors() {
-    for errno in [libc::ESRCH, libc::EIO, libc::EPERM, libc::ENOENT] {
-        let original = route("198.51.100.10", 32, 2, Some("192.0.2.1"));
-        let requested = route("198.51.100.10", 32, 7, None);
-        let mut table = FakeRoutes { routes: vec![original.clone()], ..Default::default() };
-        let mut state = RouteRegistry::default();
-        let mut routes = SessionRoutes::default();
-        routes.add(requested, &mut table, &mut state).unwrap();
-        table.delete_error = Some(errno);
-        let before = table.calls.len();
-        let result = routes.restore_with(&mut table, &mut state);
-        let operations: Vec<_> = table.calls[before..].iter().map(|(operation, _)| *operation).collect();
-        assert_eq!(table.routes.len(), 1);
-        if errno == libc::ESRCH {
-            result.unwrap();
-            assert_eq!(operations, [libc::RTM_DELETE, libc::RTM_ADD]);
-            assert_eq!(table.routes[0].0, original.message(libc::RTM_ADD).unwrap());
-        } else {
-            let error = result.unwrap_err();
-            assert_eq!(error.to_string(), io::Error::from_raw_os_error(errno).to_string());
-            assert_eq!(operations, [libc::RTM_DELETE]);
-            assert_eq!(header(&table.routes[0].0).unwrap().rtm_index, 7);
-        }
-    }
-}
-
-#[test]
-fn restores_ipv4_and_ipv6_defaults_with_original_attributes() {
-    for (destination, gateway) in [("0.0.0.0", "192.0.2.1"), ("::", "fe80::1")] {
-        let mut original = route(destination, 0, 2, Some(gateway));
-        reference_field!(original.0, rtm_flags, libc::RTF_UP | libc::RTF_GATEWAY | libc::RTF_PROTO3);
-        let start = offset_of!(libc::rt_msghdr, rtm_rmx);
-        for (offset, value) in [
-            (offset_of!(libc::rt_metrics, rmx_mtu), 1400u32),
-            (offset_of!(libc::rt_metrics, rmx_hopcount), 7),
-            (offset_of!(libc::rt_metrics, rmx_rtt), 123),
-            (offset_of!(libc::rt_metrics, rmx_locks), libc::RTV_MTU as u32),
-        ] {
-            original.0[start + offset..start + offset + 4].copy_from_slice(&value.to_ne_bytes());
-        }
-        // Include the preferred source, as returned by NET_RT_DUMP.
-        append(&mut original.0, &ip_address(if destination == "::" { "2001:db8::2" } else { "192.0.2.2" }.parse().unwrap()));
-        reference_field!(original.0, rtm_addrs, libc::RTA_DST | libc::RTA_GATEWAY | libc::RTA_NETMASK | libc::RTA_IFA);
-        reference_field!(original.0, rtm_msglen, original.0.len() as u16);
-        let expected = original.message(libc::RTM_ADD).unwrap();
-        let requested = route(destination, 0, 7, None);
-        let mut table = FakeRoutes { routes: vec![original], ..Default::default() };
-        let mut state = RouteRegistry::default();
-        let mut routes = SessionRoutes::default();
-        routes.add(requested, &mut table, &mut state).unwrap();
-        assert_eq!(header(&table.routes[0].0).unwrap().rtm_index, 7);
-        routes.restore_with(&mut table, &mut state).unwrap();
-        assert_eq!(table.routes[0].0, expected);
-    }
-}
-
-#[test]
-fn an_expiring_host_route_is_pinned_then_restored_even_when_the_path_is_the_same() {
-    let mut original = route("198.51.100.10", 32, 2, None);
-    reference_field!(original.0, rtm_flags, libc::RTF_UP | libc::RTF_HOST | libc::RTF_WASCLONED | libc::RTF_LLINFO);
-    let expire = offset_of!(libc::rt_msghdr, rtm_rmx) + offset_of!(libc::rt_metrics, rmx_expire);
-    original.0[expire..expire + 4].copy_from_slice(&1234u32.to_ne_bytes());
-    let requested = route("198.51.100.10", 32, 2, None);
-    let mut table = FakeRoutes { routes: vec![original.clone()], ..Default::default() };
-    let mut state = RouteRegistry::default();
-    let mut routes = SessionRoutes::default();
-    routes.add(requested, &mut table, &mut state).unwrap();
-    let installed = header(&table.routes[0].0).unwrap();
-    assert_ne!(installed.rtm_flags & libc::RTF_STATIC, 0);
-    assert_eq!(installed.rtm_rmx.rmx_expire, 0);
-    routes.restore_with(&mut table, &mut state).unwrap();
-    assert_eq!(table.routes[0].0, original.message(libc::RTM_ADD).unwrap());
-}
-
-#[test]
-fn failed_add_restores_the_displaced_route_and_earlier_changes() {
-    let first = route("198.51.100.10", 32, 2, Some("192.0.2.1"));
-    let original = route("0.0.0.0", 0, 2, Some("192.0.2.1"));
-    let requested = route("0.0.0.0", 0, 7, None);
-    let keys = [route_key(&first.0).unwrap(), route_key(&requested.0).unwrap()];
-    let mut table = FakeRoutes { routes: vec![original.clone()], fail: Some((libc::RTM_ADD, keys[1].clone())), ..Default::default() };
-    let mut state = RouteRegistry::default();
-    let mut routes = SessionRoutes::default();
-    routes.add(first, &mut table, &mut state).unwrap();
-    assert!(routes.add(requested, &mut table, &mut state).is_err());
-    assert!(table.find(&keys[1]).unwrap().is_none());
-    routes.restore_with(&mut table, &mut state).unwrap();
-    assert_eq!(table.routes.len(), 1);
-    assert_eq!(table.routes[0].0, original.message(libc::RTM_ADD).unwrap());
-}
-
-#[test]
-fn failed_delete_and_unattempted_routes_are_left_intact() {
-    let original = route("0.0.0.0", 0, 2, Some("192.0.2.1"));
-    let unattempted = route("203.0.113.0", 24, 2, Some("192.0.2.1"));
-    let requested = route("0.0.0.0", 0, 7, None);
-    let keys = [route_key(&requested.0).unwrap(), route_key(&unattempted.0).unwrap()];
-    let mut table =
-        FakeRoutes { routes: vec![original.clone(), unattempted.clone()], fail: Some((libc::RTM_DELETE, keys[0].clone())), ..Default::default() };
-    let mut state = RouteRegistry::default();
-    let mut routes = SessionRoutes::default();
-    assert!(routes.add(requested, &mut table, &mut state).is_err());
-    routes.restore_with(&mut table, &mut state).unwrap();
-    assert_eq!(table.routes[0].0, original.0);
-    assert_eq!(table.routes[1].0, unattempted.0);
-    assert_eq!(table.calls.len(), 1);
-}
-
-#[test]
-fn external_route_changes_are_preserved_while_other_routes_are_cleaned() {
-    let first = route("0.0.0.0", 0, 7, None);
-    let second = route("2001:db8::", 64, 7, None);
-    let mut table = FakeRoutes::default();
-    let mut state = RouteRegistry::default();
-    let mut routes = SessionRoutes::default();
-    routes.add(first, &mut table, &mut state).unwrap();
-    routes.add(second, &mut table, &mut state).unwrap();
-    let external = route("2001:db8::", 64, 9, None);
-    table.routes[1] = external.clone();
-    assert!(routes.restore_with(&mut table, &mut state).unwrap_err().to_string().contains("leaving it untouched"));
-    assert_eq!(table.routes.len(), 1);
-    assert_eq!(table.routes[0].0, external.0);
-}
-
-#[test]
-fn restoration_preserves_every_kind_of_external_egress_change() {
-    let flags = libc::RTF_UP | libc::RTF_HOST | libc::RTF_STATIC | libc::RTF_GATEWAY;
-    let attrs = vec![
-        (libc::RTAX_DST, ip_address("198.51.100.1".parse().unwrap())),
-        (libc::RTAX_GATEWAY, ip_address("192.0.2.1".parse().unwrap())),
-        (libc::RTAX_NETMASK, ip_address("255.255.255.255".parse().unwrap())),
-        (libc::RTAX_IFA, ip_address("192.0.2.7".parse().unwrap())),
-    ];
-    for changed in ["interface", "gateway", "source", "missing-source", "gateway-flag", "reject", "blackhole"] {
-        let requested = RouteMessage::new(7, flags, &attrs).unwrap();
-        let key = route_key(&requested.0).unwrap();
-        let mut changed_attrs = attrs.clone();
-        let (mut index, mut changed_flags) = (7, flags);
-        match changed {
-            "interface" => index = 9,
-            "gateway" => changed_attrs[1].1 = ip_address("192.0.2.254".parse().unwrap()),
-            "source" => changed_attrs[3].1 = ip_address("192.0.2.8".parse().unwrap()),
-            "missing-source" => changed_attrs.retain(|(kind, _)| *kind != libc::RTAX_IFA),
-            "gateway-flag" => changed_flags ^= libc::RTF_GATEWAY,
-            "reject" => changed_flags |= libc::RTF_REJECT,
-            "blackhole" => changed_flags |= libc::RTF_BLACKHOLE,
-            _ => unreachable!(),
-        }
-        let external = RouteMessage::new(index, changed_flags, &changed_attrs).unwrap();
-        assert_eq!(route_key(&external.0).unwrap(), key);
-        let mut table = FakeRoutes::default();
-        let mut state = RouteRegistry::default();
-        let mut session = SessionRoutes::default();
-        session.add(requested, &mut table, &mut state).unwrap();
-        table.routes[0] = external.clone();
-        table.calls.clear();
-        let error = session.restore_with(&mut table, &mut state).unwrap_err();
-        assert!(error.to_string().contains("leaving it untouched"), "{changed}: {error:#}");
-        assert!(table.calls.is_empty(), "{changed}: {:?}", table.calls);
-        assert_eq!(table.routes[0].0, external.0);
-    }
-}
-
-#[test]
-fn restoration_keeps_native_address_errors_after_the_key_has_matched() {
-    for unknown in [libc::RTAX_GATEWAY, libc::RTAX_IFA] {
-        let mut attrs = vec![
-            (libc::RTAX_DST, ip_address("198.51.100.1".parse().unwrap())),
-            (libc::RTAX_GATEWAY, ip_address("192.0.2.1".parse().unwrap())),
-            (libc::RTAX_IFA, ip_address("192.0.2.7".parse().unwrap())),
-        ];
-        attrs.iter_mut().find(|(kind, _)| *kind == unknown).unwrap().1 = vec![2, libc::AF_UNSPEC as u8];
-        let requested = RouteMessage::new(7, libc::RTF_UP | libc::RTF_HOST | libc::RTF_STATIC | libc::RTF_GATEWAY, &attrs).unwrap();
-        let mut table = FakeRoutes::default();
-        let mut state = RouteRegistry::default();
-        let mut session = SessionRoutes::default();
-        session.add(requested, &mut table, &mut state).unwrap();
-        let installed = table.routes[0].0.clone();
-        table.calls.clear();
-        let error = session.restore_with(&mut table, &mut state).unwrap_err();
-        assert_eq!(error.to_string(), "unsupported routing address family");
-        assert!(table.calls.is_empty());
-        assert_eq!(table.routes[0].0, installed);
-    }
-}
-
-#[test]
 fn route_keys_distinguish_scope_and_prefix_and_ignore_host_bits() {
     let global = route("192.0.2.0", 24, 2, None);
     let mut scoped = global.clone();
@@ -367,7 +161,7 @@ fn tun_routes_normalize_network_bits_for_both_families() {
 }
 
 #[test]
-fn kernel_dump_is_read_only_and_preserves_exact_routes_and_metrics() {
+fn kernel_dump_and_native_encoding_preserve_exact_routes_and_metrics() {
     let routes = dump_routes().unwrap();
     let loopback = route_key(&route("127.0.0.1", 32, 1, None).0).unwrap();
     assert!(routes.iter().any(|route| route_key(&route.0).unwrap() == loopback));
@@ -382,16 +176,16 @@ fn kernel_dump_is_read_only_and_preserves_exact_routes_and_metrics() {
             continue;
         }
         for operation in [libc::RTM_ADD, libc::RTM_DELETE] {
-            let expected = crate::platform::os::reference_tests::restore_message(&route.0, operation).unwrap();
+            let expected = crate::platform::os::reference_tests::route_message(&route.0, operation).unwrap();
             assert_eq!(route.message(operation).unwrap(), expected);
         }
-        let restored = route.message(libc::RTM_ADD).unwrap();
-        assert_eq!(route_key(&restored).unwrap(), route_key(&route.0).unwrap());
+        let encoded = route.message(libc::RTM_ADD).unwrap();
+        assert_eq!(route_key(&encoded).unwrap(), route_key(&route.0).unwrap());
         let metrics = offset_of!(libc::rt_msghdr, rtm_rmx)..size_of::<libc::rt_msghdr>();
-        assert_eq!(restored[metrics.clone()], route.0[metrics]);
-        assert_ne!(header(&restored).unwrap().rtm_addrs & libc::RTA_IFP, 0);
+        assert_eq!(encoded[metrics.clone()], route.0[metrics]);
+        assert_ne!(header(&encoded).unwrap().rtm_addrs & libc::RTA_IFP, 0);
         let before = addresses(&route.0, &original).unwrap();
-        let after = addresses(&restored, &header(&restored).unwrap()).unwrap();
+        let after = addresses(&encoded, &header(&encoded).unwrap()).unwrap();
         for index in 0..before.len() {
             if index != libc::RTAX_IFP as usize {
                 assert_eq!(before[index], after[index]);
@@ -401,7 +195,7 @@ fn kernel_dump_is_read_only_and_preserves_exact_routes_and_metrics() {
 }
 
 #[test]
-fn every_native_metric_and_extra_address_survives_restoration() {
+fn native_encoding_preserves_metrics_and_extra_addresses() {
     let mut bytes = vec![0; size_of::<libc::rt_msghdr>()];
     // Deliberately include nonzero C padding and every metric, including reserved words.
     bytes[6..8].copy_from_slice(&[0x52, 0xa7]);
@@ -432,55 +226,9 @@ fn every_native_metric_and_extra_address_survives_restoration() {
     reference_field!(bytes, rtm_msglen, bytes.len() as u16);
     let route = RouteMessage(bytes);
     for operation in [libc::RTM_ADD, libc::RTM_DELETE] {
-        let expected = crate::platform::os::reference_tests::restore_message(&route.0, operation).unwrap();
+        let expected = crate::platform::os::reference_tests::route_message(&route.0, operation).unwrap();
         assert_eq!(route.message(operation).unwrap(), expected);
         assert_eq!(&expected[6..8], &[0x52, 0xa7]);
-    }
-}
-
-#[test]
-fn restoration_preserves_native_errors_and_continues_other_cleanup() {
-    struct DeleteFailure {
-        table: FakeRoutes,
-        key: RouteKey,
-        errno: i32,
-    }
-    impl RouteTable for DeleteFailure {
-        fn find(&mut self, key: &RouteKey) -> Result<Option<RouteMessage>> {
-            self.table.find(key)
-        }
-        fn request(&mut self, route: &RouteMessage, operation: i32) -> Result<()> {
-            if operation == libc::RTM_DELETE && route_key(&route.0)? == self.key {
-                if self.errno == libc::ESRCH {
-                    // The route disappears between the lookup and the delete request.
-                    self.table.routes.retain(|route| route_key(&route.0).unwrap() != self.key);
-                }
-                return Err(io::Error::from_raw_os_error(self.errno)).context("injected routing failure");
-            }
-            self.table.request(route, operation)
-        }
-    }
-    for errno in [libc::ESRCH, libc::EPERM, libc::EIO] {
-        let original = route("0.0.0.0", 0, 2, Some("192.0.2.1"));
-        let requested = route("0.0.0.0", 0, 7, None);
-        let unrelated = route("2001:db8::", 64, 7, None);
-        let mut table = FakeRoutes { routes: vec![original.clone()], ..Default::default() };
-        let mut state = RouteRegistry::default();
-        let mut changes = SessionRoutes::default();
-        changes.add(unrelated, &mut table, &mut state).unwrap();
-        changes.add(requested.clone(), &mut table, &mut state).unwrap();
-        let mut table = DeleteFailure { table, key: route_key(&requested.0).unwrap(), errno };
-        let result = changes.restore_with(&mut table, &mut state);
-        assert_eq!(result.is_ok(), errno == libc::ESRCH);
-        assert_eq!(table.table.routes.len(), 1); // The unrelated route is always cleaned.
-        if errno == libc::ESRCH {
-            assert_eq!(table.table.routes[0].0, original.message(libc::RTM_ADD).unwrap());
-        } else {
-            let error = result.unwrap_err().to_string();
-            assert!(error.contains("injected routing failure"), "{error}");
-            assert!(error.contains(&io::Error::from_raw_os_error(errno).to_string()), "{error}");
-            assert_eq!(table.table.routes[0].0, requested.message(libc::RTM_ADD).unwrap());
-        }
     }
 }
 
@@ -691,344 +439,299 @@ fn snapshot_lookup_matches_previous_for_arbitrary_trailing_bytes() {
 }
 
 #[test]
-fn duplicate_routes_keep_the_first_backup_and_reverse_insertion_order() {
-    let first = route("198.51.100.10", 32, 2, Some("192.0.2.1"));
-    let second = route("198.51.100.20", 32, 2, Some("192.0.2.1"));
-    let first_key = route_key(&first.0).unwrap();
-    let second_key = route_key(&second.0).unwrap();
-    let mut table = FakeRoutes { routes: vec![first.clone(), second.clone()], ..Default::default() };
-    let mut state = RouteRegistry::default();
-    let mut changes = SessionRoutes::default();
-    changes.add(route("198.51.100.10", 32, 7, None), &mut table, &mut state).unwrap();
-    changes.add(route("198.51.100.20", 32, 7, None), &mut table, &mut state).unwrap();
-    let before = table.calls.len();
-    changes.add(route("198.51.100.10", 32, 9, Some("192.0.2.9")), &mut table, &mut state).unwrap();
-    assert_eq!(table.calls.len(), before, "a duplicate must not install another egress");
-    changes.restore_with(&mut table, &mut state).unwrap();
-    assert_eq!(
-        &table.calls[before..],
-        &[
-            (libc::RTM_DELETE, second_key.clone()),
-            (libc::RTM_ADD, second_key.clone()),
-            (libc::RTM_DELETE, first_key.clone()),
-            (libc::RTM_ADD, first_key.clone()),
-        ]
-    );
-    assert_eq!(table.find(&first_key).unwrap().unwrap().0, first.message(libc::RTM_ADD).unwrap());
-    assert_eq!(table.find(&second_key).unwrap().unwrap().0, second.message(libc::RTM_ADD).unwrap());
+fn replacing_ipv4_and_ipv6_routes_never_reinstalls_the_original() {
+    for (destination, gateway) in [("0.0.0.0", "192.0.2.1"), ("::", "fe80::1")] {
+        let original = route(destination, 0, 2, Some(gateway));
+        let requested = route(destination, 0, 7, None);
+        let mut table = FakeRoutes { routes: vec![original], ..Default::default() };
+        let mut state = RouteRegistry::default();
+        let mut session = SessionRoutes::default();
+        session.add(requested, &mut table, &mut state).unwrap();
+        let before = table.calls.len();
+        session.clear_with(&mut table, &mut state).unwrap();
+        assert!(table.routes.is_empty());
+        assert!(state.is_empty());
+        assert!(table.calls[before..].iter().all(|(operation, _)| *operation == libc::RTM_DELETE));
+    }
 }
 
 #[test]
-fn multi_session_overlapping_routes_restore_the_original_in_either_close_order() {
-    for (destination, gateway) in [("0.0.0.0", "192.0.2.1"), ("::", "fe80::1")] {
+fn shared_endpoint_is_removed_only_after_the_last_session_in_either_close_order() {
+    for preexisting in [false, true] {
         for first in [0, 1] {
-            let mut original = route(destination, 0, 2, Some(gateway));
-            reference_field!(original.0, rtm_rmx.rmx_mtu, 1492u32);
-            let expected = original.message(libc::RTM_ADD).unwrap();
-            let mut table = FakeRoutes { routes: vec![original], ..Default::default() };
+            let pin = route("198.51.100.10", 32, 2, Some("192.0.2.1"));
+            let mut original = pin.clone();
+            reference_field!(original.0, rtm_rmx.rmx_expire, 1234u32);
+            let mut table = FakeRoutes { routes: if preexisting { vec![original] } else { vec![] }, ..Default::default() };
             let mut state = RouteRegistry::default();
             let mut sessions = [Some(SessionRoutes::default()), Some(SessionRoutes::default())];
-            for (index, session) in sessions.iter_mut().enumerate() {
-                session.as_mut().unwrap().add(route(destination, 0, 7 + index as u16, None), &mut table, &mut state).unwrap();
+            for session in &mut sessions {
+                session.as_mut().unwrap().add(pin.clone(), &mut table, &mut state).unwrap();
             }
-            sessions[first].take().unwrap().restore_with(&mut table, &mut state).unwrap();
-            assert_eq!(header(&table.routes[0].0).unwrap().rtm_index, if first == 0 { 8 } else { 7 });
-            sessions[1 - first].take().unwrap().restore_with(&mut table, &mut state).unwrap();
+            let before = table.calls.len();
+            sessions[first].take().unwrap().clear_with(&mut table, &mut state).unwrap();
             assert_eq!(table.routes.len(), 1);
-            assert_eq!(table.routes[0].0, expected);
+            assert_eq!(table.calls.len(), before, "a shared route must not be reinstalled or removed");
+            sessions[1 - first].take().unwrap().clear_with(&mut table, &mut state).unwrap();
+            assert!(table.routes.is_empty(), "the preexisting entry must not be restored either");
+            assert!(state.is_empty());
         }
     }
 }
 
 #[test]
-fn multi_session_shared_endpoint_pin_is_kept_until_the_last_owner_closes() {
-    for preexisting in [false, true] {
-        let pin = route("198.51.100.10", 32, 2, Some("192.0.2.1"));
-        let mut original = pin.clone();
-        reference_field!(original.0, rtm_rmx.rmx_mtu, 1400u32);
-        reference_field!(original.0, rtm_rmx.rmx_expire, 1234u32);
-        let expected = original.message(libc::RTM_ADD).unwrap();
-        let mut table = FakeRoutes { routes: if preexisting { vec![original] } else { vec![] }, ..Default::default() };
-        let mut state = RouteRegistry::default();
-        let mut a = SessionRoutes::default();
-        let mut b = SessionRoutes::default();
-        a.add(pin.clone(), &mut table, &mut state).unwrap();
-        b.add(pin.clone(), &mut table, &mut state).unwrap();
-        a.restore_with(&mut table, &mut state).unwrap();
-        assert_eq!(table.routes.len(), 1, "the second session still owns the endpoint pin");
-        assert_eq!(table.routes[0].0, pin.message(libc::RTM_ADD).unwrap());
-        b.restore_with(&mut table, &mut state).unwrap();
-        assert_eq!(table.routes.len(), usize::from(preexisting));
-        if preexisting {
-            assert_eq!(table.routes[0].0, expected);
-        }
-    }
-}
-
-fn assert_current_route(table: &mut FakeRoutes, key: &RouteKey, expected: Option<&RouteMessage>) {
-    assert_eq!(table.find(key).unwrap().map(|route| route.0), expected.map(|route| route.message(libc::RTM_ADD).unwrap()));
-}
-
-#[test]
-fn multi_session_three_owners_can_close_in_every_order() {
+fn replaced_sessions_cannot_delete_the_new_route_and_are_never_reactivated() {
     for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
         let original = route("0.0.0.0", 0, 2, Some("192.0.2.1"));
         let key = route_key(&original.0).unwrap();
-        let requested: [_; 3] = std::array::from_fn(|index| route("0.0.0.0", 0, 7 + index as u16, None));
-        let mut table = FakeRoutes { routes: vec![original.clone()], ..Default::default() };
+        let mut table = FakeRoutes { routes: vec![original], ..Default::default() };
         let mut state = RouteRegistry::default();
-        let mut sessions: [_; 3] = std::array::from_fn(|_| Some(SessionRoutes::default()));
-        for (session, requested) in sessions.iter_mut().zip(&requested) {
-            session.as_mut().unwrap().add(requested.clone(), &mut table, &mut state).unwrap();
+        let mut sessions = [Some(SessionRoutes::default()), Some(SessionRoutes::default()), Some(SessionRoutes::default())];
+        // The third request reuses the first egress, but has a new installation identity.
+        for (session, interface) in sessions.iter_mut().zip([7, 8, 7]) {
+            session.as_mut().unwrap().add(route("0.0.0.0", 0, interface, None), &mut table, &mut state).unwrap();
         }
+        let mut latest_alive = true;
         for index in order {
-            sessions[index].take().unwrap().restore_with(&mut table, &mut state).unwrap();
-            let expected = sessions.iter().rposition(Option::is_some).map(|index| &requested[index]).unwrap_or(&original);
-            assert_current_route(&mut table, &key, Some(expected));
+            sessions[index].take().unwrap().clear_with(&mut table, &mut state).unwrap();
+            latest_alive &= index != 2;
+            let current = table.find(&key).unwrap();
+            assert_eq!(current.is_some(), latest_alive, "close order={order:?}, closing={index}");
+            if let Some(current) = current {
+                assert_eq!(header(&current.0).unwrap().rtm_index, 7);
+            }
         }
         assert!(state.is_empty());
     }
 }
 
 #[test]
-fn multi_session_scopes_are_independent_and_duplicate_keys_keep_the_first_request() {
-    let mut requested = [route("198.51.100.10", 32, 7, None), route("198.51.100.10", 32, 8, None)];
-    for route in &mut requested {
-        let flags = header(&route.0).unwrap().rtm_flags | libc::RTF_IFSCOPE;
-        reference_field!(route.0, rtm_flags, flags);
-    }
+fn duplicate_keys_are_installed_once_and_cleared_in_reverse_order() {
+    let first = route("198.51.100.10", 32, 7, None);
+    let second = route("198.51.100.20", 32, 7, None);
     let mut table = FakeRoutes::default();
     let mut state = RouteRegistry::default();
-    let mut a = SessionRoutes::default();
-    let mut b = SessionRoutes::default();
-    a.add(requested[0].clone(), &mut table, &mut state).unwrap();
-    let calls = table.calls.len();
-    a.add(requested[0].clone(), &mut table, &mut state).unwrap();
-    assert_eq!(table.calls.len(), calls);
-    b.add(requested[1].clone(), &mut table, &mut state).unwrap();
-    assert_eq!(state.len(), 2);
-    a.restore_with(&mut table, &mut state).unwrap();
-    assert_current_route(&mut table, &route_key(&requested[1].0).unwrap(), Some(&requested[1]));
-    b.restore_with(&mut table, &mut state).unwrap();
-    assert!(state.is_empty());
+    let mut session = SessionRoutes::default();
+    session.add(first.clone(), &mut table, &mut state).unwrap();
+    session.add(second.clone(), &mut table, &mut state).unwrap();
+    let before = table.calls.len();
+    session.add(route("198.51.100.10", 32, 9, None), &mut table, &mut state).unwrap();
+    assert_eq!(table.calls.len(), before);
+    session.clear_with(&mut table, &mut state).unwrap();
+    assert_eq!(&table.calls[before..], &[(libc::RTM_DELETE, route_key(&second.0).unwrap()), (libc::RTM_DELETE, route_key(&first.0).unwrap()),]);
     assert!(table.routes.is_empty());
-}
-
-#[test]
-fn multi_session_partial_setup_rolls_back_without_releasing_another_session_pin() {
-    let pin = route("198.51.100.10", 32, 2, Some("192.0.2.1"));
-    let original = route("0.0.0.0", 0, 2, Some("192.0.2.1"));
-    let vpn = route("0.0.0.0", 0, 8, None);
-    let key = route_key(&vpn.0).unwrap();
-    let mut table = FakeRoutes { routes: vec![original.clone()], fail: Some((libc::RTM_ADD, key.clone())), ..Default::default() };
-    let mut state = RouteRegistry::default();
-    let mut a = SessionRoutes::default();
-    let mut b = SessionRoutes::default();
-    a.add(pin.clone(), &mut table, &mut state).unwrap();
-    b.add(pin.clone(), &mut table, &mut state).unwrap();
-    assert!(b.add(vpn, &mut table, &mut state).is_err());
-    b.restore_with(&mut table, &mut state).unwrap();
-    assert_current_route(&mut table, &route_key(&pin.0).unwrap(), Some(&pin));
-    assert_current_route(&mut table, &key, Some(&original));
-    a.restore_with(&mut table, &mut state).unwrap();
-    assert_current_route(&mut table, &route_key(&pin.0).unwrap(), None);
-    assert_current_route(&mut table, &key, Some(&original));
     assert!(state.is_empty());
 }
 
 #[test]
-fn multi_session_failed_setup_restores_only_owners_that_are_still_alive() {
-    for operation in [libc::RTM_DELETE, libc::RTM_ADD] {
-        for applied in [false, true] {
-            for close_a_first in [false, true] {
-                let original = route("0.0.0.0", 0, 2, Some("192.0.2.1"));
-                let key = route_key(&original.0).unwrap();
-                let active = route("0.0.0.0", 0, 7, None);
-                let mut table = FakeRoutes { routes: vec![original.clone()], ..Default::default() };
-                let mut state = RouteRegistry::default();
-                let mut a = Some(SessionRoutes::default());
-                let mut b = SessionRoutes::default();
-                a.as_mut().unwrap().add(active.clone(), &mut table, &mut state).unwrap();
-                if applied {
-                    table.after_apply = Some((operation, key.clone()));
-                } else {
-                    table.fail = Some((operation, key.clone()));
-                }
-                let error = b.add(route("0.0.0.0", 0, 8, None), &mut table, &mut state).unwrap_err();
-                assert_eq!(error.downcast_ref::<io::Error>().unwrap().raw_os_error(), Some(if applied { libc::ETIMEDOUT } else { libc::EIO }));
-                if close_a_first {
-                    a.take().unwrap().restore_with(&mut table, &mut state).unwrap();
-                    // Closing the old device can remove a route whose failed DELETE never took effect.
-                    table.routes.retain(|route| header(&route.0).unwrap().rtm_index != 7);
-                }
-                b.restore_with(&mut table, &mut state).unwrap();
-                assert_current_route(&mut table, &key, Some(if close_a_first { &original } else { &active }));
-                if let Some(a) = a {
-                    a.restore_with(&mut table, &mut state).unwrap();
-                }
-                assert_current_route(&mut table, &key, Some(&original));
-                assert!(state.is_empty());
-            }
-        }
-    }
-}
-
-#[test]
-fn multi_session_restores_the_observed_snapshot_of_the_previous_owner() {
-    let original = route("0.0.0.0", 0, 2, Some("192.0.2.1"));
-    let key = route_key(&original.0).unwrap();
-    let mut table = FakeRoutes { routes: vec![original.clone()], ..Default::default() };
-    let mut state = RouteRegistry::default();
-    let mut a = SessionRoutes::default();
-    let mut b = SessionRoutes::default();
-    a.add(route("0.0.0.0", 0, 7, None), &mut table, &mut state).unwrap();
-    reference_field!(table.routes[0].0, rtm_rmx.rmx_mtu, 1280u32);
-    reference_field!(table.routes[0].0, rtm_rmx.rmx_rtt, 777u32);
-    let observed = table.routes[0].clone();
-    b.add(route("0.0.0.0", 0, 8, None), &mut table, &mut state).unwrap();
-    b.restore_with(&mut table, &mut state).unwrap();
-    assert_current_route(&mut table, &key, Some(&observed));
-    a.restore_with(&mut table, &mut state).unwrap();
-    assert_current_route(&mut table, &key, Some(&original));
-}
-
-#[test]
-fn multi_session_residual_route_does_not_replace_a_live_owner_snapshot() {
-    let original = route("0.0.0.0", 0, 2, Some("192.0.2.1"));
-    let key = route_key(&original.0).unwrap();
-    let mut table = FakeRoutes { routes: vec![original.clone()], ..Default::default() };
-    let mut state = RouteRegistry::default();
-    let mut a = SessionRoutes::default();
-    let mut b = SessionRoutes::default();
-    let mut c = SessionRoutes::default();
-    a.add(route("0.0.0.0", 0, 7, None), &mut table, &mut state).unwrap();
-    reference_field!(table.routes[0].0, rtm_rmx.rmx_mtu, 1280u32);
-    let observed_a = table.routes[0].clone();
-    b.add(route("0.0.0.0", 0, 8, None), &mut table, &mut state).unwrap();
-    reference_field!(table.routes[0].0, rtm_rmx.rmx_mtu, 1100u32);
-    table.fail = Some((libc::RTM_DELETE, key.clone()));
-    assert!(b.restore_with(&mut table, &mut state).is_err());
-    c.add(route("0.0.0.0", 0, 9, None), &mut table, &mut state).unwrap();
-    c.restore_with(&mut table, &mut state).unwrap();
-    assert_current_route(&mut table, &key, Some(&observed_a));
-    a.restore_with(&mut table, &mut state).unwrap();
-    assert_current_route(&mut table, &key, Some(&original));
-    assert!(state.is_empty());
-}
-
-#[test]
-fn orphaned_cleanup_preserves_the_baseline_until_recovery_finishes() {
-    for failure in ["find", "delete", "add", "delete-applied", "add-applied"] {
-        let mut original = route("0.0.0.0", 0, 2, Some("192.0.2.1"));
-        reference_field!(original.0, rtm_rmx.rmx_mtu, 1492u32);
-        let key = route_key(&original.0).unwrap();
-        let mut table = FakeRoutes { routes: vec![original.clone()], ..Default::default() };
-        let mut state = RouteRegistry::default();
-        let mut session = SessionRoutes::default();
-        session.add(route("0.0.0.0", 0, 7, None), &mut table, &mut state).unwrap();
-        match failure {
-            "find" => table.find_error = Some(key.clone()),
-            "delete" => table.fail = Some((libc::RTM_DELETE, key.clone())),
-            "add" => table.fail = Some((libc::RTM_ADD, key.clone())),
-            "delete-applied" => table.after_apply = Some((libc::RTM_DELETE, key.clone())),
-            "add-applied" => table.after_apply = Some((libc::RTM_ADD, key.clone())),
-            _ => unreachable!(),
-        }
-        assert!(session.restore_with(&mut table, &mut state).is_err(), "{failure}");
-        assert!(state[&key].owners.is_empty());
-        assert_eq!(state[&key].original.as_ref().unwrap().0, original.0);
-        table.find_error = None;
-        let before = table.calls.len();
-        recover_orphans(&mut state, &mut table).unwrap();
-        assert!(state.is_empty(), "{failure}");
-        assert_current_route(&mut table, &key, Some(&original));
-        if failure == "add-applied" {
-            assert_eq!(table.calls.len(), before, "a lost ACK must not force another DELETE/ADD of the restored baseline");
-        }
-    }
-}
-
-#[test]
-fn orphaned_cleanup_is_not_adopted_as_a_new_sessions_baseline() {
-    let original = route("0.0.0.0", 0, 2, Some("192.0.2.1"));
-    let key = route_key(&original.0).unwrap();
-    let mut table = FakeRoutes { routes: vec![original.clone()], ..Default::default() };
-    let mut state = RouteRegistry::default();
-    let mut a = SessionRoutes::default();
-    let mut b = SessionRoutes::default();
-    a.add(route("0.0.0.0", 0, 7, None), &mut table, &mut state).unwrap();
-    table.fail = Some((libc::RTM_DELETE, key.clone()));
-    assert!(a.restore_with(&mut table, &mut state).is_err());
-    b.add(route("0.0.0.0", 0, 8, None), &mut table, &mut state).unwrap();
-    b.restore_with(&mut table, &mut state).unwrap();
-    assert_current_route(&mut table, &key, Some(&original));
-    assert!(state.is_empty());
-}
-
-#[test]
-fn orphan_recovery_attempts_every_key_and_does_not_prevent_active_cleanup() {
-    let first = route("198.51.100.10", 32, 2, Some("192.0.2.1"));
-    let second = route("203.0.113.10", 32, 2, Some("192.0.2.1"));
-    let active = route("2001:db8::", 64, 7, None);
-    let keys = [route_key(&first.0).unwrap(), route_key(&second.0).unwrap(), route_key(&active.0).unwrap()];
-    let mut table = FakeRoutes::default();
-    let mut state = RouteRegistry::default();
-    let mut a = SessionRoutes::default();
-    let mut b = SessionRoutes::default();
-    a.add(first, &mut table, &mut state).unwrap();
-    a.add(second, &mut table, &mut state).unwrap();
-    table.delete_error = Some(libc::EIO);
-    table.fail = Some((libc::RTM_DELETE, keys[0].clone()));
-    assert!(a.restore_with(&mut table, &mut state).is_err());
-    assert_eq!(state.len(), 2);
-    table.delete_error = None;
-    table.find_error = Some(keys[1].clone());
-    assert!(recover_orphans(&mut state, &mut table).is_err());
-    assert!(!state.contains_key(&keys[0]));
-    assert!(state.contains_key(&keys[1]));
-    b.add(active, &mut table, &mut state).unwrap();
-    b.restore_with(&mut table, &mut state).unwrap();
-    assert!(!state.contains_key(&keys[2]));
-    table.find_error = None;
-    recover_orphans(&mut state, &mut table).unwrap();
-    assert!(state.is_empty());
-    assert!(table.routes.is_empty());
-}
-
-#[test]
-fn external_changes_are_preserved_with_active_owners_and_orphaned_history() {
-    for keep_a_alive in [false, true] {
+fn failed_add_cleans_earlier_changes_without_recreating_displaced_routes() {
+    for applied in [false, true] {
         let original = route("0.0.0.0", 0, 2, Some("192.0.2.1"));
-        let external = route("0.0.0.0", 0, 9, None);
         let key = route_key(&original.0).unwrap();
         let mut table = FakeRoutes { routes: vec![original], ..Default::default() };
         let mut state = RouteRegistry::default();
-        let mut a = Some(SessionRoutes::default());
-        let mut b = SessionRoutes::default();
-        a.as_mut().unwrap().add(route("0.0.0.0", 0, 7, None), &mut table, &mut state).unwrap();
-        if keep_a_alive {
-            b.add(route("0.0.0.0", 0, 8, None), &mut table, &mut state).unwrap();
+        let mut session = SessionRoutes::default();
+        session.add(route("2001:db8::", 64, 7, None), &mut table, &mut state).unwrap();
+        if applied {
+            table.after_apply = Some((libc::RTM_ADD, key));
         } else {
-            table.fail = Some((libc::RTM_DELETE, key.clone()));
-            assert!(a.take().unwrap().restore_with(&mut table, &mut state).is_err());
+            table.fail = Some((libc::RTM_ADD, key));
         }
-        table.routes[0] = external.clone();
+        let error = session.add(route("0.0.0.0", 0, 7, None), &mut table, &mut state).unwrap_err();
+        assert_eq!(error.downcast_ref::<io::Error>().unwrap().raw_os_error(), Some(if applied { libc::ETIMEDOUT } else { libc::EIO }));
         let before = table.calls.len();
-        if keep_a_alive {
-            assert!(b.restore_with(&mut table, &mut state).is_err());
-            assert_eq!(state[&key].owners.len(), 1);
-            assert!(a.take().unwrap().restore_with(&mut table, &mut state).is_err());
+        session.clear_with(&mut table, &mut state).unwrap();
+        assert!(table.routes.is_empty());
+        assert!(state.is_empty());
+        assert!(table.calls[before..].iter().all(|(operation, _)| *operation == libc::RTM_DELETE));
+    }
+}
+
+#[test]
+fn failed_delete_does_not_transfer_ownership_or_touch_unattempted_routes() {
+    for applied in [false, true] {
+        let pin = route("198.51.100.10", 32, 2, Some("192.0.2.1"));
+        let untouched = route("203.0.113.10", 32, 2, Some("192.0.2.1"));
+        let key = route_key(&pin.0).unwrap();
+        let mut table = FakeRoutes { routes: vec![untouched.clone()], ..Default::default() };
+        let mut state = RouteRegistry::default();
+        let mut first = SessionRoutes::default();
+        let mut failed = SessionRoutes::default();
+        first.add(pin, &mut table, &mut state).unwrap();
+        if applied {
+            table.after_apply = Some((libc::RTM_DELETE, key));
         } else {
+            table.fail = Some((libc::RTM_DELETE, key));
+        }
+        assert!(failed.add(route("198.51.100.10", 32, 7, None), &mut table, &mut state).is_err());
+        let before = table.calls.len();
+        failed.clear_with(&mut table, &mut state).unwrap();
+        assert_eq!(table.calls.len(), before, "a failed replacement does not own the earlier session's route");
+        first.clear_with(&mut table, &mut state).unwrap();
+        assert_eq!(table.routes.len(), 1);
+        assert_eq!(table.routes[0].0, untouched.0);
+        assert!(state.is_empty());
+    }
+}
+
+#[test]
+fn failed_replacement_add_does_not_reactivate_an_earlier_live_session() {
+    for applied in [false, true] {
+        let active = route("0.0.0.0", 0, 7, None);
+        let key = route_key(&active.0).unwrap();
+        let mut table = FakeRoutes::default();
+        let mut state = RouteRegistry::default();
+        let mut first = SessionRoutes::default();
+        let mut failed = SessionRoutes::default();
+        first.add(active, &mut table, &mut state).unwrap();
+        if applied {
+            table.after_apply = Some((libc::RTM_ADD, key));
+        } else {
+            table.fail = Some((libc::RTM_ADD, key));
+        }
+        assert!(failed.add(route("0.0.0.0", 0, 8, None), &mut table, &mut state).is_err());
+        failed.clear_with(&mut table, &mut state).unwrap();
+        let before = table.calls.len();
+        first.clear_with(&mut table, &mut state).unwrap();
+        assert_eq!(table.calls.len(), before);
+        assert!(table.routes.is_empty());
+        assert!(state.is_empty());
+    }
+}
+
+#[test]
+fn a_failed_shared_setup_keeps_the_other_sessions_pin() {
+    let pin = route("198.51.100.10", 32, 2, Some("192.0.2.1"));
+    let broken = route("203.0.113.10", 32, 7, None);
+    let mut table = FakeRoutes::default();
+    let mut state = RouteRegistry::default();
+    let mut first = SessionRoutes::default();
+    let mut failed = SessionRoutes::default();
+    first.add(pin.clone(), &mut table, &mut state).unwrap();
+    failed.add(pin, &mut table, &mut state).unwrap();
+    table.fail = Some((libc::RTM_ADD, route_key(&broken.0).unwrap()));
+    assert!(failed.add(broken, &mut table, &mut state).is_err());
+    failed.clear_with(&mut table, &mut state).unwrap();
+    assert_eq!(table.routes.len(), 1);
+    first.clear_with(&mut table, &mut state).unwrap();
+    assert!(table.routes.is_empty());
+    assert!(state.is_empty());
+}
+
+#[test]
+fn cleanup_retries_failed_removals_but_never_adds_routes() {
+    for failure in ["find", "delete", "delete-applied"] {
+        let requested = route("0.0.0.0", 0, 7, None);
+        let key = route_key(&requested.0).unwrap();
+        let mut table = FakeRoutes::default();
+        let mut state = RouteRegistry::default();
+        let mut session = SessionRoutes::default();
+        session.add(requested, &mut table, &mut state).unwrap();
+        match failure {
+            "find" => table.find_error = Some(key.clone()),
+            "delete" => table.fail = Some((libc::RTM_DELETE, key.clone())),
+            "delete-applied" => table.after_apply = Some((libc::RTM_DELETE, key.clone())),
+            _ => unreachable!(),
+        }
+        assert!(session.clear_with(&mut table, &mut state).is_err());
+        assert_eq!(state[&key].users, 0);
+        table.find_error = None;
+        let before = table.calls.len();
+        recover_orphans(&mut state, &mut table).unwrap();
+        assert!(table.routes.is_empty());
+        assert!(state.is_empty());
+        assert!(table.calls[before..].iter().all(|(operation, _)| *operation == libc::RTM_DELETE));
+    }
+}
+
+#[test]
+fn cleanup_ignores_only_esrch_and_preserves_other_native_delete_errors() {
+    for errno in [libc::ESRCH, libc::EIO, libc::EPERM, libc::ENOENT] {
+        let mut table = FakeRoutes::default();
+        let mut state = RouteRegistry::default();
+        let mut session = SessionRoutes::default();
+        session.add(route("198.51.100.10", 32, 7, None), &mut table, &mut state).unwrap();
+        session.add(route("203.0.113.10", 32, 7, None), &mut table, &mut state).unwrap();
+        table.delete_error = Some(errno);
+        let result = session.clear_with(&mut table, &mut state);
+        assert_eq!(result.is_ok(), errno == libc::ESRCH);
+        if let Err(error) = result {
+            assert!(format!("{error:#}").contains(&io::Error::from_raw_os_error(errno).to_string()));
+        }
+        assert_eq!(table.routes.len(), usize::from(errno != libc::ESRCH));
+        recover_orphans(&mut state, &mut table).unwrap();
+        assert!(table.routes.is_empty());
+        assert!(state.is_empty());
+    }
+}
+
+#[test]
+fn external_changes_are_not_deleted_or_overwritten_during_setup_or_cleanup() {
+    for orphaned in [false, true] {
+        let requested = route("0.0.0.0", 0, 7, None);
+        let external = route("0.0.0.0", 0, 9, None);
+        let key = route_key(&requested.0).unwrap();
+        let mut table = FakeRoutes::default();
+        let mut state = RouteRegistry::default();
+        let mut session = SessionRoutes::default();
+        session.add(requested, &mut table, &mut state).unwrap();
+        if orphaned {
+            table.fail = Some((libc::RTM_DELETE, key.clone()));
+            assert!(session.clear_with(&mut table, &mut state).is_err());
+        } else {
+            let mut other = SessionRoutes::default();
+            table.routes[0] = external.clone();
+            let before = table.calls.len();
+            assert!(other.add(route("0.0.0.0", 0, 8, None), &mut table, &mut state).is_err());
+            other.clear_with(&mut table, &mut state).unwrap();
+            assert_eq!(table.calls.len(), before);
+            assert!(session.clear_with(&mut table, &mut state).is_err());
+        }
+        let before = table.calls.len();
+        if orphaned {
+            table.routes[0] = external.clone();
             assert!(recover_orphans(&mut state, &mut table).is_err());
         }
         assert_eq!(table.calls.len(), before);
         assert_eq!(table.routes[0].0, external.0);
         assert!(state.is_empty());
-        let mut replacement = SessionRoutes::default();
-        replacement.add(route("0.0.0.0", 0, 8, None), &mut table, &mut state).unwrap();
-        replacement.restore_with(&mut table, &mut state).unwrap();
-        assert_current_route(&mut table, &key, Some(&external));
     }
+}
+
+#[test]
+fn cleanup_of_an_old_version_cannot_affect_shared_users_of_a_new_version() {
+    let mut table = FakeRoutes::default();
+    let mut state = RouteRegistry::default();
+    let mut old = SessionRoutes::default();
+    let mut a = SessionRoutes::default();
+    let mut b = SessionRoutes::default();
+    old.add(route("0.0.0.0", 0, 7, None), &mut table, &mut state).unwrap();
+    a.add(route("0.0.0.0", 0, 8, None), &mut table, &mut state).unwrap();
+    b.add(route("0.0.0.0", 0, 8, None), &mut table, &mut state).unwrap();
+    old.clear_with(&mut table, &mut state).unwrap();
+    a.clear_with(&mut table, &mut state).unwrap();
+    assert_eq!(table.routes.len(), 1);
+    assert_eq!(header(&table.routes[0].0).unwrap().rtm_index, 8);
+    b.clear_with(&mut table, &mut state).unwrap();
+    assert!(state.is_empty());
+    assert!(table.routes.is_empty());
+}
+
+#[test]
+fn sharing_an_active_route_can_reinstall_it_if_it_disappeared() {
+    let pin = route("198.51.100.10", 32, 2, Some("192.0.2.1"));
+    let mut table = FakeRoutes::default();
+    let mut state = RouteRegistry::default();
+    let mut first = SessionRoutes::default();
+    let mut second = SessionRoutes::default();
+    first.add(pin.clone(), &mut table, &mut state).unwrap();
+    table.routes.clear();
+    second.add(pin, &mut table, &mut state).unwrap();
+    first.clear_with(&mut table, &mut state).unwrap();
+    assert_eq!(table.routes.len(), 1);
+    second.clear_with(&mut table, &mut state).unwrap();
+    assert!(table.routes.is_empty());
+    assert!(state.is_empty());
 }
 
 #[test]
@@ -1045,13 +748,13 @@ fn endpoint_lookup_waits_for_the_route_transaction_mutex() {
     let early = result.recv_timeout(Duration::from_millis(100));
     drop(guard);
     worker.join().unwrap();
-    assert!(matches!(early, Err(mpsc::RecvTimeoutError::Timeout)), "lookup ran while the route transaction lock was held");
+    assert!(matches!(early, Err(mpsc::RecvTimeoutError::Timeout)));
     result.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
 }
 
 #[tokio::test]
-#[ignore = "root on macOS; creates two temporary TUNs, one free benchmark host route and a loopback endpoint pin"]
-async fn native_shared_routes_survive_out_of_order_session_cleanup() {
+#[ignore = "root on macOS; creates two temporary TUNs and free benchmark host routes"]
+async fn native_shared_routes_are_cleaned_without_restoring_replaced_routes() {
     tokio::task::spawn_blocking(|| {
         use crate::session::TunSession;
         use daemon_proto::pb::{Cidr, Ip, TunSessionConfig, ip};
@@ -1059,7 +762,7 @@ async fn native_shared_routes_survive_out_of_order_session_cleanup() {
         #[derive(Default)]
         struct Cleanup {
             sessions: Vec<TunSession>,
-            original: Option<RouteMessage>,
+            fixtures: Vec<RouteMessage>,
         }
         impl Drop for Cleanup {
             fn drop(&mut self) {
@@ -1067,12 +770,13 @@ async fn native_shared_routes_survive_out_of_order_session_cleanup() {
                     let _ = session.close();
                 }
                 let _ = recover_routes();
-                if let Some(original) = &self.original
-                    && let Ok(key) = route_key(&original.0)
-                    && let Ok(Some(current)) = SystemRoutes.find(&key)
-                    && current.same_egress(original).unwrap_or(false)
-                {
-                    let _ = SystemRoutes.request(&current, libc::RTM_DELETE);
+                for fixture in &self.fixtures {
+                    if let Ok(key) = route_key(&fixture.0)
+                        && let Ok(Some(current)) = SystemRoutes.find(&key)
+                        && current.same_egress(fixture).unwrap_or(false)
+                    {
+                        let _ = SystemRoutes.request(&current, libc::RTM_DELETE);
+                    }
                 }
             }
         }
@@ -1083,26 +787,23 @@ async fn native_shared_routes_survive_out_of_order_session_cleanup() {
                 let candidate = route(&format!("198.18.254.{last}"), 32, lo, None);
                 table.find(&route_key(&candidate.0).unwrap()).unwrap().is_none()
             })
-            .take(3)
+            .take(4)
             .collect();
-        assert_eq!(available.len(), 3, "benchmark host addresses are already in use");
+        assert_eq!(available.len(), 4, "benchmark host addresses are already in use");
         let destination = format!("198.18.254.{}", available[0]);
-        let mut original = route(&destination, 32, lo, None);
-        reference_field!(original.0, rtm_rmx.rmx_mtu, 1337u32);
+        let original = route(&destination, 32, lo, None);
+        let endpoint = route(&format!("198.18.254.{}", available[3]), 32, lo, None);
         let key = route_key(&original.0).unwrap();
-        let mut cleanup = Cleanup::default();
-        let added = table.request(&original, libc::RTM_ADD);
-        if !added.as_ref().is_err_and(|error| error.downcast_ref::<io::Error>().and_then(io::Error::raw_os_error) == Some(libc::EEXIST)) {
-            cleanup.original = Some(original.clone());
-        }
-        added.unwrap();
-        let original = table.find(&key).unwrap().unwrap();
-        let endpoint = RouteMessage::lookup("127.0.0.2".parse().unwrap()).unwrap();
         let endpoint_key = route_key(&endpoint.0).unwrap();
-        let endpoint_before = table.find(&endpoint_key).unwrap();
+        let mut cleanup = Cleanup::default();
         let proto = |address: [u8; 4]| Ip { value: Some(ip::Value::V4(address.to_vec())) };
         let mut used_names = Vec::new();
         for first in [0, 1] {
+            for fixture in [&original, &endpoint] {
+                // The fixture owns these previously free routes even if the ADD reply fails.
+                cleanup.fixtures.push(fixture.clone());
+                table.request(fixture, libc::RTM_ADD).unwrap();
+            }
             let names: Vec<_> =
                 (64..256).map(|index| format!("utun{index}")).filter(|name| nix::net::if_::if_nametoindex(name.as_str()).is_err()).take(2).collect();
             assert_eq!(names.len(), 2, "no two unused interfaces in utun64..utun255");
@@ -1112,38 +813,95 @@ async fn native_shared_routes_survive_out_of_order_session_cleanup() {
                     mtu: 1400,
                     addresses: vec![Cidr { ip: Some(proto([198, 18, 254, available[index + 1]])), prefix: 32 }],
                     peer_allowed_ips: vec![Cidr { ip: Some(proto([198, 18, 254, available[0]])), prefix: 32 }],
-                    peer_endpoints: vec![proto([127, 0, 0, 2])],
+                    peer_endpoints: vec![proto([198, 18, 254, available[3]])],
                     ..Default::default()
                 })
                 .unwrap();
-                // Separate factories must still share the same route ownership registry.
                 cleanup.sessions.push(crate::session::factory().unwrap()(&config).unwrap());
                 used_names.push(name.clone());
             }
-            eprintln!("shared routes interfaces={names:?} benchmark={destination} first_close={first}");
-            let remaining = names[1 - first].clone();
+            eprintln!("no-restore routes interfaces={names:?} benchmark={destination} first_close={first}");
             cleanup.sessions.remove(first).close().unwrap();
-            let current = table.find(&key).unwrap().unwrap();
-            assert_eq!(u32::from(header(&current.0).unwrap().rtm_index), nix::net::if_::if_nametoindex(remaining.as_str()).unwrap());
-            let pin = table.find(&endpoint_key).unwrap().expect("the remaining session still needs its endpoint pin");
-            assert!(pin.same_egress(&endpoint).unwrap());
-            cleanup.sessions.remove(0).close().unwrap();
-            let restored = table.find(&key).unwrap().unwrap();
-            assert!(restored.same_egress(&original).unwrap());
-            assert_eq!(header(&restored.0).unwrap().rtm_rmx.rmx_mtu, header(&original.0).unwrap().rtm_rmx.rmx_mtu);
-            let pin_after = table.find(&endpoint_key).unwrap();
-            match (&endpoint_before, &pin_after) {
-                (Some(before), Some(after)) => assert!(after.same_egress(before).unwrap()),
-                (None, None) => {}
-                _ => panic!("endpoint pin was not restored to its original presence"),
+            let current = table.find(&key).unwrap();
+            if first == 0 {
+                assert_eq!(u32::from(header(&current.unwrap().0).unwrap().rtm_index), nix::net::if_::if_nametoindex(names[1].as_str()).unwrap());
+            } else {
+                assert!(current.is_none(), "closing the latest installation must not bring back an earlier session's route");
             }
+            assert!(table.find(&endpoint_key).unwrap().is_some(), "the remaining session still owns the shared endpoint pin");
+            cleanup.sessions.remove(0).close().unwrap();
+            assert!(table.find(&key).unwrap().is_none(), "the original benchmark route must not be restored");
+            assert!(table.find(&endpoint_key).unwrap().is_none(), "the preexisting endpoint route must not be restored");
         }
         drop(cleanup);
-        assert!(table.find(&key).unwrap().is_none(), "benchmark route remains after fixture cleanup");
+        assert!(table.find(&key).unwrap().is_none());
+        assert!(table.find(&endpoint_key).unwrap().is_none());
         for name in used_names {
             assert!(nix::net::if_::if_nametoindex(name.as_str()).is_err(), "temporary interface remains: {name}");
         }
     })
     .await
     .unwrap();
+}
+
+#[test]
+fn cleanup_preserves_every_kind_of_external_egress_change() {
+    let flags = libc::RTF_UP | libc::RTF_HOST | libc::RTF_STATIC | libc::RTF_GATEWAY;
+    let attrs = vec![
+        (libc::RTAX_DST, ip_address("198.51.100.1".parse().unwrap())),
+        (libc::RTAX_GATEWAY, ip_address("192.0.2.1".parse().unwrap())),
+        (libc::RTAX_NETMASK, ip_address("255.255.255.255".parse().unwrap())),
+        (libc::RTAX_IFA, ip_address("192.0.2.7".parse().unwrap())),
+    ];
+    for changed in ["interface", "gateway", "source", "missing-source", "gateway-flag", "reject", "blackhole"] {
+        let requested = RouteMessage::new(7, flags, &attrs).unwrap();
+        let key = route_key(&requested.0).unwrap();
+        let mut changed_attrs = attrs.clone();
+        let (mut index, mut changed_flags) = (7, flags);
+        match changed {
+            "interface" => index = 9,
+            "gateway" => changed_attrs[1].1 = ip_address("192.0.2.254".parse().unwrap()),
+            "source" => changed_attrs[3].1 = ip_address("192.0.2.8".parse().unwrap()),
+            "missing-source" => changed_attrs.retain(|(kind, _)| *kind != libc::RTAX_IFA),
+            "gateway-flag" => changed_flags ^= libc::RTF_GATEWAY,
+            "reject" => changed_flags |= libc::RTF_REJECT,
+            "blackhole" => changed_flags |= libc::RTF_BLACKHOLE,
+            _ => unreachable!(),
+        }
+        let external = RouteMessage::new(index, changed_flags, &changed_attrs).unwrap();
+        assert_eq!(route_key(&external.0).unwrap(), key);
+        let mut table = FakeRoutes::default();
+        let mut state = RouteRegistry::default();
+        let mut session = SessionRoutes::default();
+        session.add(requested, &mut table, &mut state).unwrap();
+        table.routes[0] = external.clone();
+        table.calls.clear();
+        let error = session.clear_with(&mut table, &mut state).unwrap_err();
+        assert!(error.to_string().contains("leaving it untouched"), "{changed}: {error:#}");
+        assert!(table.calls.is_empty(), "{changed}: {:?}", table.calls);
+        assert_eq!(table.routes[0].0, external.0);
+    }
+}
+
+#[test]
+fn cleanup_keeps_native_address_errors_after_the_key_has_matched() {
+    for unknown in [libc::RTAX_GATEWAY, libc::RTAX_IFA] {
+        let mut attrs = vec![
+            (libc::RTAX_DST, ip_address("198.51.100.1".parse().unwrap())),
+            (libc::RTAX_GATEWAY, ip_address("192.0.2.1".parse().unwrap())),
+            (libc::RTAX_IFA, ip_address("192.0.2.7".parse().unwrap())),
+        ];
+        attrs.iter_mut().find(|(kind, _)| *kind == unknown).unwrap().1 = vec![2, libc::AF_UNSPEC as u8];
+        let requested = RouteMessage::new(7, libc::RTF_UP | libc::RTF_HOST | libc::RTF_STATIC | libc::RTF_GATEWAY, &attrs).unwrap();
+        let mut table = FakeRoutes::default();
+        let mut state = RouteRegistry::default();
+        let mut session = SessionRoutes::default();
+        session.add(requested, &mut table, &mut state).unwrap();
+        let installed = table.routes[0].0.clone();
+        table.calls.clear();
+        let error = session.clear_with(&mut table, &mut state).unwrap_err();
+        assert_eq!(error.to_string(), "unsupported routing address family");
+        assert!(table.calls.is_empty());
+        assert_eq!(table.routes[0].0, installed);
+    }
 }

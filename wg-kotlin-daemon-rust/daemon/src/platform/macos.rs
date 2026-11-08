@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail, ensure};
-use indexmap::{IndexMap, IndexSet, map::Entry};
+use indexmap::IndexMap;
 use objc2_core_foundation::{CFArray, CFDictionary, CFRetained, CFString, CFType, Type as _};
 use objc2_system_configuration::{SCDynamicStore, SCError, SCErrorString, kSCStatusNoKey};
 use route_manager::Route;
@@ -126,7 +126,7 @@ impl RouteMessage {
 
     fn message(&self, operation: i32) -> Result<Vec<u8>> {
         let head = header(&self.0)?;
-        ensure!(operation == libc::RTM_GET || head.rtm_index != 0, "route has no interface to restore");
+        ensure!(operation == libc::RTM_GET || head.rtm_index != 0, "route has no interface");
         ensure!(head.rtm_flags & libc::RTF_PROXY == 0, "cannot safely replace a kernel proxy route");
         let mut attrs = addresses(&self.0, &head)?;
         // Bind ADD/DELETE to the original interface, even if a new TUN now routes its gateway.
@@ -250,21 +250,12 @@ static ROUTES: LazyLock<Mutex<RouteRegistry>> = LazyLock::new(Mutex::default);
 
 #[derive(Default)]
 pub(super) struct SessionRoutes {
-    // One identity across this session's keys, removed explicitly during cleanup.
-    id: Arc<()>,
-    keys: IndexSet<RouteKey>,
-}
-
-struct RouteOwner {
-    id: Arc<()>,
-    snapshot: Arc<RouteMessage>,
+    routes: IndexMap<RouteKey, Arc<RouteMessage>>,
 }
 
 struct RouteState {
-    original: Option<Arc<RouteMessage>>,
-    // Keep snapshot identity when a request may have failed without changing the route.
-    attempted: Option<Arc<RouteMessage>>,
-    owners: Vec<RouteOwner>,
+    route: Arc<RouteMessage>,
+    users: usize,
 }
 
 pub(super) fn recover_routes() -> Result<()> {
@@ -286,84 +277,70 @@ impl SessionRoutes {
 
     fn add(&mut self, route: RouteMessage, table: &mut RouteTable, state: &mut RouteRegistry) -> Result<()> {
         let key = route_key(&route.0)?;
-        if self.keys.contains(&key) {
+        if self.routes.contains_key(&key) {
             return Ok(());
         }
         let current = table.find(&key)?;
-        let change = match state.entry(key.clone()) {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                if let Some(original) = &current {
-                    original.message(libc::RTM_ADD)?;
+        if let Some(known) = state.get_mut(&key) {
+            if let Some(current) = &current {
+                ensure!(current.same_egress(&known.route)?, "route changed outside its session; leaving it untouched");
+            }
+            if route.same_egress(&known.route)? {
+                known.users += 1;
+                self.routes.insert(key, known.route.clone());
+                if current.is_none() {
+                    table.request(&known.route, libc::RTM_ADD)?;
                 }
-                let original = current.clone().map(Arc::new);
-                entry.insert(RouteState { attempted: original.clone(), original, owners: Vec::new() })
+                return Ok(());
             }
-        };
-        // Register ownership before any request, including requests whose replies may be lost.
-        self.keys.insert(key.clone());
-        change.owners.push(RouteOwner { id: self.id.clone(), snapshot: Arc::new(route) });
-        apply_route(&key, state, current, table, false)
+        }
+        // A failed DELETE must not transfer ownership of an entry that may remain.
+        if let Some(current) = current {
+            table.request(&current, libc::RTM_DELETE)?;
+        }
+        let route = Arc::new(route);
+        // Register before ADD: its reply can fail after the route was installed.
+        state.insert(key.clone(), RouteState { route: route.clone(), users: 1 });
+        self.routes.insert(key, route.clone());
+        table.request(&route, libc::RTM_ADD)
     }
 
-    pub fn restore(self) -> Result<()> {
+    pub fn clear(self) -> Result<()> {
         let mut state = ROUTES.lock().map_err(|_| anyhow!("route registry poisoned"))?;
-        self.restore_with(&mut SystemRoutes, &mut state)
+        self.clear_with(&mut SystemRoutes, &mut state)
     }
 
-    fn restore_with(self, table: &mut RouteTable, state: &mut RouteRegistry) -> Result<()> {
-        super::cleanup_results(self.keys.into_iter().rev().map(|key| {
-            let change = state.get_mut(&key).context("missing route ownership")?;
-            let index = change.owners.iter().position(|owner| Arc::ptr_eq(&owner.id, &self.id)).context("missing route owner")?;
-            change.owners.remove(index);
-            if index != change.owners.len() {
-                return Ok(()); // A later session still owns the installed route.
+    fn clear_with(self, table: &mut RouteTable, state: &mut RouteRegistry) -> Result<()> {
+        super::cleanup_results(self.routes.into_iter().rev().map(|(key, route)| {
+            let Some(known) = state.get_mut(&key).filter(|known| Arc::ptr_eq(&known.route, &route)) else {
+                return Ok(()); // A later installation replaced this session's entry.
+            };
+            known.users -= 1;
+            if known.users == 0 {
+                remove_owned_route(&key, state, table)?;
             }
-            apply_route(&key, state, table.find(&key)?, table, true)
+            Ok(())
         }))
     }
 }
 
 fn recover_orphans(state: &mut RouteRegistry, table: &mut RouteTable) -> Result<()> {
-    let keys: Vec<_> = state.iter().rev().filter(|(_, change)| change.owners.is_empty()).map(|(key, _)| key.clone()).collect();
-    super::cleanup_results(keys.iter().map(|key| apply_route(key, state, table.find(key)?, table, true)))
+    let keys: Vec<_> = state.iter().rev().filter(|(_, change)| change.users == 0).map(|(key, _)| key.clone()).collect();
+    super::cleanup_results(keys.iter().map(|key| remove_owned_route(key, state, table)))
 }
 
-fn apply_route(key: &RouteKey, state: &mut RouteRegistry, current: Option<RouteMessage>, table: &mut RouteTable, restoring: bool) -> Result<()> {
-    let change = state.get_mut(key).context("missing route ownership")?;
-    let current = current.map(Arc::new);
-    if let Some(current) = &current
-        && !change.attempted.as_ref().map_or(Ok(false), |known| current.same_egress(known))?
-    {
-        if change.owners.is_empty() {
-            state.shift_remove(key); // An external owner superseded this history.
+fn remove_owned_route(key: &RouteKey, state: &mut RouteRegistry, table: &mut RouteTable) -> Result<()> {
+    let known = state.get(key).context("missing route ownership")?;
+    if let Some(current) = table.find(key)? {
+        if !current.same_egress(&known.route)? {
+            state.shift_remove(key);
+            bail!("route changed outside its session; leaving it untouched");
         }
-        bail!("route changed outside its session; leaving it untouched");
-    }
-    let target = change.owners.last().map(|owner| &owner.snapshot).or(change.original.as_ref());
-    let unchanged = current.is_some() && change.attempted.as_ref().zip(target).is_some_and(|(known, target)| Arc::ptr_eq(known, target));
-    // Refresh only the owner whose snapshot was installed, not a pending or removed owner.
-    if let (Some(current), Some(known)) = (&current, &change.attempted)
-        && let Some(owner) = change.owners.iter_mut().find(|owner| Arc::ptr_eq(&owner.snapshot, known))
-    {
-        owner.snapshot = current.clone();
-        change.attempted = Some(current.clone());
-    }
-    let target = change.owners.last().map(|owner| owner.snapshot.clone()).or_else(|| change.original.clone());
-    if !unchanged {
-        if let Some(current) = &current
-            && let Err(error) = table.request(current, libc::RTM_DELETE)
-        {
-            ensure!(restoring && error.downcast_ref::<io::Error>().and_then(io::Error::raw_os_error) == Some(libc::ESRCH), error);
-        }
-        change.attempted = target.clone();
-        if let Some(target) = target {
-            table.request(&target, libc::RTM_ADD)?;
+        if let Err(error) = table.request(&current, libc::RTM_DELETE) {
+            ensure!(error.downcast_ref::<io::Error>().and_then(io::Error::raw_os_error) == Some(libc::ESRCH), error);
         }
     }
-    if change.owners.is_empty() {
-        state.shift_remove(key);
-    }
+    state.shift_remove(key);
     Ok(())
 }
 

@@ -88,6 +88,14 @@ when installing the exception. Windows uses GetBestRoute2. Missing routes and
 lookup errors fail session startup. The endpoint exceptions are installed before
 the requested VPN routes; no additional Linux routing tables are created.
 
+On Linux and Windows, sessions that resolve to the same native endpoint route
+share its installation. The first session installs the host exception and the
+last session removes it. Closing another session or rolling back failed DNS
+setup does not remove a pin still in use. Linux keeps its replace/delete policy
+and does not restore routes that existed before the first installation.
+Route resolution, TUN creation and route installation are serialized with route
+cleanup within the daemon. DNS operations run outside that mutex.
+
 ## Linux desktop
 
 A graphical polkit agent can provide the elevation dialog:
@@ -128,12 +136,16 @@ signal ownership arrangement. Other processes of that UID can also send signals;
 this grants them no permission to create TUN sessions. Child DNS tools receive
 matching root UIDs and do not inherit the launcher's standard input.
 
-On macOS, route setup records the exact entries displaced by the session,
+On macOS, route setup records the exact entries displaced by the daemon,
 including endpoint exceptions and the default route. Snapshots distinguish
 prefixes and interface scopes and retain the gateway, source address, interface,
-flags and metrics. Cleanup removes the session's changes and restores the
-previous entries, including after a route or DNS setup failure. Each session
-keeps its own list of created and replaced routes.
+flags and metrics. Within a daemon process, a shared registry tracks each route's
+original snapshot and its active session owners. Closing a session preserves
+the most recent remaining owner's route; closing the last owner restores the
+original entry. This also applies after partial route or DNS setup failure.
+Endpoint lookups use the same mutex as route changes, so they cannot observe
+the gap between DELETE and ADD. Failed cleanup retains its snapshots for retry
+before a later lookup or setup, including configurations without endpoints.
 Cleanup leaves detected external route changes untouched and
 reports the conflict while continuing with other routes and DNS.
 
@@ -158,10 +170,11 @@ persistent ACLs are unsupported. The unelevated account that launched the daemon
 does not receive owner rights to change these permissions.
 
 Open handles prevent renaming the directory or writing, deleting, or replacing
-the DLL until the daemon and all sessions release it. Sessions fail if this
-protected DLL was not prepared. Normal cleanup removes the extracted files;
+the DLL until the daemon and all sessions release it. DLL preparation must
+succeed before the listener is bound. Normal cleanup removes the extracted files;
 forced process termination can leave protected files behind, which are never
-reused by subsequent launches. The elevated Windows tests in `wintun.rs` exercise
+reused by subsequent launches. The elevated Windows tests in
+`daemon/tests/unit/wintun_tests.rs` exercise
 file replacement, actual DLL loading, cleanup, and access through a linked
 unelevated UAC token without creating a TUN or installing a driver.
 
@@ -234,8 +247,8 @@ Session initialization runs on a blocking worker so OS and DNS operations do not
 occupy async executor threads. Its owning task completes cleanup even when the
 client disconnects before receiving Started.
 
-OS commands share a 20-second deadline for writing stdin, draining stdout and
-stderr, and waiting for process exit. On timeout or IO failure, the daemon kills
+OS commands run with closed stdin and share a 20-second deadline for draining
+stdout and stderr and waiting for process exit. On timeout or IO failure, the daemon kills
 and reaps the subprocess. It retains at most 1 MiB from each output while
 continuing to drain the pipes, and includes captured output in error diagnostics.
 
@@ -253,10 +266,11 @@ and can leave its temporary Unix socket directory behind.
 
 The daemon monitors its owner and begins shutdown when that app exits. Shutdown
 stops accepting connections and sends the same stop signal to the IPC handlers
-and session loops. Initialization keeps its own task through teardown, so
-cancelling socket writes cannot abandon an in-progress blocking worker.
+and session loops. Each connection task owns its session from initialization
+through teardown. A failed or cancelled socket writer closes the response queue;
+the session still waits for its blocking initialization and cleanup workers.
 Route/DNS cleanup also runs outside the async executor, and the daemon gives
-connections and sessions four seconds to drain.
+the connection tasks four seconds to drain, including their session cleanup.
 If that deadline expires, it records sessions_drained=false and exits with code
 1. The client retains independent force-kill control for a stuck daemon.
 
@@ -274,3 +288,6 @@ opening it requires a running registered daemon. Upgrade client and daemon toget
 old host/port properties, and the secret-based bootstrap are no longer supported.
 The build's IPC integration tests launch an unprivileged Rust fixture and never
 configure real TUN, route, or DNS state.
+After changing Rust code, add `--rerun-tasks` to the Gradle test command. The test
+task records the fixture's executable path and can reuse earlier JUnit results
+even when the fixture has been rebuilt.

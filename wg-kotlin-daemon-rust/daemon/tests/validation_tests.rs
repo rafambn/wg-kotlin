@@ -22,7 +22,7 @@ fn rejects_non_utun_interface() {
     let config = TunSessionConfig { interface_name: "wg0".to_string(), addresses: vec![cidr_v4(&[10, 0, 0, 1], 24)], ..Default::default() };
 
     let error = validate_config(&config).expect_err("config should be rejected");
-    assert!(error.contains("utun"));
+    assert!(error.to_string().contains("utun"));
 }
 
 #[cfg(target_os = "macos")]
@@ -40,12 +40,12 @@ fn checks_macos_interface_index_before_native_session_start() {
     ] {
         let mut config = TunSessionConfig { interface_name: name.to_string(), addresses: vec![cidr_v4(&[10, 0, 0, 1], 24)], ..Default::default() };
         assert_eq!(validate_config(&config).is_ok(), accepted, "{name}");
-        assert_eq!(daemon::session::is_supported_interface_name(name), accepted, "{name}");
+        assert_eq!(daemon::validation::validate_interface_name(name).is_ok(), accepted, "{name}");
         if !accepted {
             // A regression fails route resolution before it can create a TUN.
             config.peer_endpoints = vec![Ip { value: None }];
-            let error = daemon::session::SessionManager::start(&config).err().expect("invalid index must be rejected");
-            assert!(error.contains("4294967294"), "{name}: {error}");
+            let error = validate_config(&config).unwrap_err();
+            assert!(error.to_string().contains("4294967294"), "{name}: {error}");
         }
     }
 }
@@ -60,7 +60,7 @@ fn rejects_incomplete_dns() {
     };
 
     let error = validate_config(&config).expect_err("dns should be rejected");
-    assert!(error.contains("both searchDomains and servers"));
+    assert!(error.to_string().contains("both searchDomains and servers"));
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn rejects_ipv6_mtu_below_minimum() {
     };
 
     let error = validate_config(&config).expect_err("mtu should be rejected");
-    assert!(error.contains("at least 1280"));
+    assert_eq!(error.to_string(), "MTU must be between 1280 and 65535");
 }
 
 #[test]
@@ -89,24 +89,20 @@ fn accepts_valid_complete_config() {
     validate_config(&config).expect("config should be accepted");
 }
 
-    #[test]
-    fn rejects_empty_addresses() {
-        let config = TunSessionConfig { interface_name: "utun0".to_string(), addresses: vec![], ..Default::default() };
-
-        let error = validate_config(&config).expect_err("config should be rejected");
-        assert!(error.contains("at least one"));
-    }
-
-    #[test]
-    fn rejects_invalid_cidr_ip() {
-    let config = TunSessionConfig {
-        interface_name: "utun0".to_string(),
-        addresses: vec![Cidr { ip: None, prefix: 24 }],
-        ..Default::default()
-    };
+#[test]
+fn rejects_empty_addresses() {
+    let config = TunSessionConfig { interface_name: "utun0".to_string(), addresses: vec![], ..Default::default() };
 
     let error = validate_config(&config).expect_err("config should be rejected");
-    assert!(error.contains("invalid IP"));
+    assert!(error.to_string().contains("at least one"));
+}
+
+#[test]
+fn rejects_invalid_cidr_ip() {
+    let config = TunSessionConfig { interface_name: "utun0".to_string(), addresses: vec![Cidr { ip: None, prefix: 24 }], ..Default::default() };
+
+    let error = validate_config(&config).expect_err("config should be rejected");
+    assert!(error.to_string().contains("invalid IP"));
 }
 
 #[test]
@@ -117,15 +113,12 @@ fn rejects_dns_server_with_prefix() {
     let config = TunSessionConfig {
         interface_name: "utun0".to_string(),
         addresses: vec![cidr_v4(&[10, 0, 0, 1], 24)],
-        dns: Some(DnsConfig {
-            search_domains: vec!["corp.local".to_string()],
-            servers: vec![Ip { value: None }],
-        }),
+        dns: Some(DnsConfig { search_domains: vec!["corp.local".to_string()], servers: vec![Ip { value: None }] }),
         ..Default::default()
     };
 
     let error = validate_config(&config).expect_err("dns should be rejected");
-    assert!(error.contains("valid"));
+    assert!(error.to_string().contains("valid"));
 }
 
 #[test]
@@ -133,15 +126,12 @@ fn limits_dns_domains_before_normalization() {
     let mut config = TunSessionConfig {
         interface_name: "utun0".to_string(),
         addresses: vec![cidr_v4(&[10, 0, 0, 1], 24)],
-        dns: Some(DnsConfig {
-            search_domains: (0..64).map(|index| format!("domain{index}.test")).collect(),
-            servers: vec![ip_v4(&[1, 1, 1, 1])],
-        }),
+        dns: Some(DnsConfig { search_domains: (0..64).map(|index| format!("domain{index}.test")).collect(), servers: vec![ip_v4(&[1, 1, 1, 1])] }),
         ..Default::default()
     };
     validate_config(&config).unwrap();
     config.dns.as_mut().unwrap().search_domains.push("domain0.test".to_string());
-    assert!(validate_config(&config).unwrap_err().contains("dns.searchDomains supports at most 64"));
+    assert!(validate_config(&config).unwrap_err().to_string().contains("dns.searchDomains supports at most 64"));
 }
 
 #[test]
@@ -155,7 +145,7 @@ fn bounds_raw_domain_length_before_trimming() {
     };
     validate_config(&config).unwrap();
     config.dns.as_mut().unwrap().search_domains[0] = format!(" {domain}");
-    assert!(validate_config(&config).unwrap_err().contains("dns.searchDomains[0] must be at most 253"));
+    assert!(validate_config(&config).unwrap_err().to_string().contains("dns.searchDomains[0] must be at most 253"));
     config.dns.as_mut().unwrap().search_domains[0] = " .corp.test ".to_string();
     validate_config(&config).unwrap();
 }

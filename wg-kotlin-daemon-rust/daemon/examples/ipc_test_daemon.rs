@@ -37,7 +37,11 @@ async fn main() -> anyhow::Result<()> {
     }
     let owner = OwnerProcess::open(args.owner_pid, args.owner_start_time)?;
     let mut listener = LocalListener::bind(&args.endpoint, &owner)?;
-    let service = DaemonService::new(Logger::new(args.log_path.as_deref().map(std::path::Path::new))?);
+    #[cfg(not(windows))]
+    let factory = daemon::session::factory()?;
+    #[cfg(windows)]
+    let factory: daemon::session::SessionFactory = std::sync::Arc::new(|_| anyhow::bail!("Wintun DLL is not initialized"));
+    let service = std::sync::Arc::new(DaemonService::new(Logger::new(args.log_path.as_deref().map(std::path::Path::new))?, factory));
     let (shutdown, mut stopped) = watch::channel(false);
     let mut monitor = tokio::time::interval(std::time::Duration::from_millis(100));
     loop {

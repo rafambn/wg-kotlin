@@ -2,14 +2,10 @@ use prost::Message;
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-#[cfg(unix)]
-mod unix;
-#[cfg(unix)]
-pub use unix::LocalListener;
-#[cfg(windows)]
-mod windows;
-#[cfg(windows)]
-pub use windows::LocalListener;
+#[cfg_attr(unix, path = "unix.rs")]
+#[cfg_attr(windows, path = "windows.rs")]
+mod local;
+pub use local::LocalListener;
 
 pub const PROTOCOL_VERSION: u32 = 2;
 pub const MAX_FRAME_SIZE: usize = 4 * 1024 * 1024;

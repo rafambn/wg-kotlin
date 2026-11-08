@@ -19,9 +19,7 @@ impl Logger {
     pub fn new(path: Option<&Path>) -> io::Result<Self> {
         let writer: Box<dyn Write + Send> = match path {
             Some(path) => {
-                if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
-                    fs::create_dir_all(parent)?;
-                }
+                path.parent().filter(|parent| !parent.as_os_str().is_empty()).map_or(Ok(()), fs::create_dir_all)?;
                 Box::new(OpenOptions::new().create(true).append(true).open(path)?)
             }
             None => Box::new(io::stdout()),
@@ -32,19 +30,14 @@ impl Logger {
     fn with_writer(mut writer: impl Write + Send + 'static) -> io::Result<Self> {
         let (sender, receiver) = mpsc::sync_channel(256);
         std::thread::Builder::new().name("daemon-logs".into()).spawn(move || {
-            for message in receiver {
-                match message {
-                    Message::Line(line) => {
-                        if writeln!(writer, "{line}").is_err() {
-                            break;
-                        }
-                    }
-                    Message::Flush(done) => {
-                        let _ = writer.flush();
-                        let _ = done.send(());
-                    }
+            let _ = receiver.iter().try_for_each(|message| match message {
+                Message::Line(line) => writeln!(writer, "{line}"),
+                Message::Flush(done) => {
+                    let _ = writer.flush();
+                    let _ = done.send(());
+                    Ok(())
                 }
-            }
+            });
         })?;
         Ok(Self { sender })
     }
@@ -58,12 +51,11 @@ impl Logger {
     /// Best effort: logging must never hold up network cleanup or process exit.
     pub fn flush(&self) {
         let (done, completion) = mpsc::channel();
-        if self.sender.try_send(Message::Flush(done)).is_ok() {
-            let _ = completion.recv_timeout(Duration::from_millis(500));
-        }
+        let _ = self.sender.try_send(Message::Flush(done));
+        let _ = completion.recv_timeout(Duration::from_millis(500));
     }
 }
 
 #[cfg(test)]
-#[path = "logging_tests.rs"]
+#[path = "../tests/unit/logging_tests.rs"]
 mod tests;

@@ -1,21 +1,59 @@
-use super::{normalize_domains, resolve_endpoint_routes};
 use daemon_proto::pb::{Ip, TunSessionConfig};
+
+fn validated(config: &TunSessionConfig) -> crate::validation::Config {
+    let mut config = config.clone();
+    if config.interface_name.is_empty() {
+        config.interface_name = "utun0".into();
+    }
+    if config.addresses.is_empty() {
+        config.addresses =
+            vec![daemon_proto::pb::Cidr { ip: Some(Ip { value: Some(daemon_proto::pb::ip::Value::V4(vec![10, 0, 0, 1])) }), prefix: 24 }];
+    }
+    crate::validation::validate_config(&config).unwrap()
+}
 
 #[test]
 fn dns_normalization_deduplicates_without_reordering() {
-    let domains = [" .z.corp.test ", "a.corp.test", "z.corp.test", "..m.corp.test", "a.corp.test", " ", "..."].map(str::to_string);
-    assert_eq!(normalize_domains(&domains), ["z.corp.test", "a.corp.test", "m.corp.test"]);
+    let domains = [" .z.corp.test ", "a.corp.test", "z.corp.test", "..m.corp.test", "a.corp.test"].map(str::to_string);
+    let config = TunSessionConfig {
+        dns: Some(daemon_proto::pb::DnsConfig {
+            search_domains: domains.to_vec(),
+            servers: vec![Ip { value: Some(daemon_proto::pb::ip::Value::V4(vec![9, 9, 9, 9])) }],
+        }),
+        ..Default::default()
+    };
+    assert_eq!(validated(&config).dns_domains, ["z.corp.test", "a.corp.test", "m.corp.test"]);
 }
 
 #[test]
 fn no_endpoints_require_no_route_lookup() {
-    assert!(resolve_endpoint_routes(&TunSessionConfig::default()).unwrap().is_empty());
+    assert!(super::resolve_endpoint_routes(&validated(&TunSessionConfig::default())).unwrap().routes.is_empty());
 }
 
 #[test]
 fn malformed_endpoint_is_rejected_before_startup() {
     let config = TunSessionConfig { peer_endpoints: vec![Ip { value: None }], ..Default::default() };
-    assert!(resolve_endpoint_routes(&config).unwrap_err().contains("invalid peer endpoint"));
+    assert!(super::resolve_endpoint_routes(&validated(&config)).unwrap_err().to_string().contains("invalid peer endpoint"));
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn resolved_batch_keeps_other_setup_and_cleanup_out_until_it_is_dropped() {
+    use std::{sync::mpsc, time::Duration};
+    let resolved = super::resolve_endpoint_routes(&validated(&TunSessionConfig::default())).unwrap();
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (locked_tx, locked_rx) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        entered_tx.send(()).unwrap();
+        let pins = super::endpoint_pins().unwrap();
+        locked_tx.send(pins.0.len()).unwrap();
+    });
+    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let blocked = locked_rx.recv_timeout(Duration::from_millis(100));
+    drop(resolved); // Also covers dropping a resolved batch after TUN creation fails.
+    assert!(matches!(blocked, Err(mpsc::RecvTimeoutError::Timeout)));
+    assert_eq!(locked_rx.recv_timeout(Duration::from_secs(2)).unwrap(), 0);
+    worker.join().unwrap();
 }
 
 #[test]
@@ -29,12 +67,9 @@ fn endpoint_filter_preserves_subnets_and_other_hosts() {
             IpAddr::V6(address) => ip::Value::V6(address.octets().to_vec()),
         }),
     };
-    for (endpoint, other_host, prefix) in [
-        ("203.0.113.0", "203.0.113.1", 24),
-        ("2001:db8::", "2001:db8::1", 64),
-        ("0.0.0.0", "0.0.0.1", 0),
-        ("::", "::1", 0),
-    ] {
+    for (endpoint, other_host, prefix) in
+        [("203.0.113.0", "203.0.113.1", 24), ("2001:db8::", "2001:db8::1", 64), ("0.0.0.0", "0.0.0.1", 0), ("::", "::1", 0)]
+    {
         let endpoint: IpAddr = endpoint.parse().unwrap();
         let other_host: IpAddr = other_host.parse().unwrap();
         let host_prefix = if endpoint.is_ipv4() { 32 } else { 128 };
@@ -46,12 +81,12 @@ fn endpoint_filter_preserves_subnets_and_other_hosts() {
                 .collect(),
             ..Default::default()
         };
-        let (_, routes, _) = super::build_and_filter_routes(&config, "utun0", vec![]).unwrap();
+        let routes = super::vpn_routes(&validated(&config), "utun0");
         let destinations: Vec<_> = routes.iter().map(|route| (route.destination(), route.prefix())).collect();
         assert_eq!(destinations, [(endpoint, prefix as u8), (other_host, host_prefix as u8)]);
 
         config.peer_endpoints.clear();
-        let (_, routes, _) = super::build_and_filter_routes(&config, "utun0", vec![]).unwrap();
+        let routes = super::vpn_routes(&validated(&config), "utun0");
         assert_eq!(routes.len(), 3);
     }
 }
@@ -100,15 +135,20 @@ mod linux {
             peer_allowed_ips: vec![Cidr { ip: Some(Ip { value: Some(ip::Value::V4(vec![128, 0, 0, 0])) }), prefix: 1 }],
             ..Default::default()
         };
-        let endpoint_routes = resolve_endpoint_routes(&config).unwrap();
+        let endpoint_routes = super::super::resolve_endpoint_routes(&validated(&config)).unwrap();
         let device = DeviceBuilder::new().name("utun0").ipv4(Ipv4Addr::new(198, 51, 100, 20), 24, None).build_sync().unwrap();
         let name = device.name().unwrap();
-        let (mut manager, vpn_routes, endpoint_routes) = super::super::build_and_filter_routes(&config, &name, endpoint_routes).unwrap();
-        let setup = super::super::add_routes_with_predelete(&mut manager, &vpn_routes, &endpoint_routes);
+        let mut manager = route_manager::RouteManager::new().unwrap();
+        let vpn_routes = super::super::vpn_routes(&validated(&config), &name);
+        let setup = endpoint_routes
+            .routes
+            .iter()
+            .try_for_each(|route| route.replace())
+            .and_then(|_| super::super::add_routes_with_predelete(&mut manager, &vpn_routes));
         let selected_source = source();
         let selected_decision = decision();
-        let cleanup: Vec<_> = vpn_routes.iter().rev().map(|route| manager.delete(route)).collect();
-        let endpoint_cleanup: Vec<_> = endpoint_routes.iter().rev().map(|route| route.delete()).collect();
+        let cleanup: Vec<anyhow::Result<()>> = vpn_routes.iter().rev().map(|route| manager.delete(route).map_err(Into::into)).collect();
+        let endpoint_cleanup: Vec<_> = endpoint_routes.routes.iter().rev().map(|route| route.delete()).collect();
         drop(device);
         setup.unwrap();
         for result in cleanup.into_iter().chain(endpoint_cleanup) {
@@ -160,14 +200,14 @@ mod linux {
         ip(&["rule", "add", "to", "198.51.100.10/32", "uidrange", &owner_range, "table", "1000", "priority", "1000"]);
         let config = TunSessionConfig { peer_endpoints: vec![Ip { value: Some(ip::Value::V4(vec![198, 51, 100, 10])) }], ..Default::default() };
         let result = std::panic::catch_unwind(|| {
-            let routes = resolve_endpoint_routes(&config).unwrap();
-            routes[0].replace().unwrap();
+            let routes = super::super::resolve_endpoint_routes(&validated(&config)).unwrap();
+            routes.routes[0].replace().unwrap();
             let selected = decision();
             let host: serde_json::Value =
                 serde_json::from_slice(&ip(&["-j", "route", "show", "table", "1000", "exact", "198.51.100.10/32"])).unwrap();
             let main: serde_json::Value =
                 serde_json::from_slice(&ip(&["-j", "route", "show", "table", "main", "exact", "198.51.100.10/32"])).unwrap();
-            routes[0].delete().unwrap();
+            routes.routes[0].delete().unwrap();
             assert_eq!(host[0]["dev"], "utun1");
             assert!(main.as_array().unwrap().is_empty());
             assert_eq!(selected[0]["dev"], original[0]["dev"]);
@@ -235,15 +275,19 @@ mod linux {
             peer_allowed_ips: vec![Cidr { ip: Some(Ip { value: Some(ip::Value::V6(vec![0; 16])) }), prefix: 0 }],
             ..Default::default()
         };
-        let endpoint_routes = resolve_endpoint_routes(&config).unwrap();
+        let endpoint_routes = super::super::resolve_endpoint_routes(&validated(&config)).unwrap();
         let device = DeviceBuilder::new().name("utun0").ipv6("2001:db8:2::20".parse::<Ipv6Addr>().unwrap(), 64).build_sync().unwrap();
-        let (mut manager, vpn_routes, endpoint_routes) =
-            super::super::build_and_filter_routes(&config, &device.name().unwrap(), endpoint_routes).unwrap();
-        let setup = super::super::add_routes_with_predelete(&mut manager, &vpn_routes, &endpoint_routes);
+        let mut manager = route_manager::RouteManager::new().unwrap();
+        let vpn_routes = super::super::vpn_routes(&validated(&config), &device.name().unwrap());
+        let setup = endpoint_routes
+            .routes
+            .iter()
+            .try_for_each(|route| route.replace())
+            .and_then(|_| super::super::add_routes_with_predelete(&mut manager, &vpn_routes));
         let selected_source = source();
         let selected: serde_json::Value = serde_json::from_slice(&ip(&["-6", "-j", "route", "get", "2001:db8:2::10", "ipproto", "17"])).unwrap();
-        let cleanup: Vec<_> = vpn_routes.iter().map(|route| manager.delete(route)).collect();
-        let endpoint_cleanup: Vec<_> = endpoint_routes.iter().map(|route| route.delete()).collect();
+        let cleanup: Vec<anyhow::Result<()>> = vpn_routes.iter().map(|route| manager.delete(route).map_err(Into::into)).collect();
+        let endpoint_cleanup: Vec<_> = endpoint_routes.routes.iter().map(|route| route.delete()).collect();
         drop(device);
         setup.unwrap();
         for result in cleanup.into_iter().chain(endpoint_cleanup) {

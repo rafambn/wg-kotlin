@@ -1,135 +1,89 @@
-use crate::ip_util::{parse_proto_cidr, parse_proto_ip};
-use daemon_proto::pb::{Cidr, DnsConfig, TunSessionConfig};
+use anyhow::{Context, Result, ensure};
+use daemon_proto::pb::{Cidr, Ip, TunSessionConfig, ip};
+use itertools::Itertools;
+use std::{net::IpAddr, num::NonZeroU16};
 
-const MIN_MTU: i32 = 576;
-const MIN_IPV6_MTU: i32 = 1280;
-const MAX_MTU: i32 = 65535;
-const MAX_DNS_SERVERS: usize = 64;
-const MAX_DNS_DOMAINS: usize = 64;
-const MAX_ADDRESSES: usize = 64;
-const MAX_ROUTES: usize = 256;
-const MAX_INTERFACE_NAME_LENGTH: usize = 15;
-const MAX_DOMAIN_LENGTH: usize = 253;
-
-pub fn validate_config(config: &TunSessionConfig) -> Result<(), String> {
-    validate_interface_name(&config.interface_name)?;
-    validate_non_empty("addresses", &config.addresses)?;
-    validate_cidr_list("addresses", &config.addresses)?;
-    validate_max_count("addresses", config.addresses.len(), MAX_ADDRESSES)?;
-    validate_cidr_list("peer_allowed_ips", &config.peer_allowed_ips)?;
-    validate_max_count("peer_allowed_ips", config.peer_allowed_ips.len(), MAX_ROUTES)?;
-    if config.mtu != 0 {
-        validate_mtu_for_addresses(config.mtu, &config.addresses)?;
-    }
-    validate_dns(config.dns.as_ref().unwrap_or(&DnsConfig::default()))?;
-    Ok(())
+#[derive(Debug)]
+pub struct Config {
+    pub(crate) interface_name: String,
+    pub(crate) addresses: Vec<(IpAddr, u8)>,
+    pub(crate) peer_allowed_ips: Vec<(IpAddr, u8)>,
+    // Invalid endpoints remain None until route lookup, before TUN creation.
+    pub(crate) peer_endpoints: Vec<Option<IpAddr>>,
+    pub(crate) mtu: Option<NonZeroU16>,
+    pub(crate) dns_servers: Vec<String>,
+    pub(crate) dns_domains: Vec<String>,
 }
 
-pub(crate) fn validate_interface_name(interface_name: &str) -> Result<(), String> {
-    if interface_name.len() > MAX_INTERFACE_NAME_LENGTH {
-        return Err(format!("interface name must be at most {MAX_INTERFACE_NAME_LENGTH} characters and match `utun[0-9]+`",));
-    }
-    let Some(suffix) = interface_name.strip_prefix("utun") else {
-        return Err("interface name must be at most 15 characters and match `utun[0-9]+`".to_string());
-    };
-    if suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_digit()) {
-        return Err("interface name must be at most 15 characters and match `utun[0-9]+`".to_string());
-    }
-    #[cfg(target_os = "macos")]
-    if suffix.parse::<u32>().ok().and_then(|index| index.checked_add(1)).is_none() {
-        return Err(format!("macOS interface index must be between 0 and {}", u32::MAX - 1));
-    }
-    Ok(())
-}
-
-fn validate_mtu_for_addresses(mtu: i32, addresses: &[Cidr]) -> Result<(), String> {
-    if !(MIN_MTU..=MAX_MTU).contains(&mtu) {
-        return Err(format!("MTU must be between {MIN_MTU} and {MAX_MTU}"));
-    }
-    let has_ipv6 = addresses.iter().any(|addr| parse_proto_cidr(addr).map(|(ip, _)| ip.is_ipv6()).unwrap_or(false));
-
-    if has_ipv6 && mtu < MIN_IPV6_MTU {
-        return Err(format!("MTU must be at least {MIN_IPV6_MTU} when IPv6 addresses are configured"));
-    }
-
-    Ok(())
-}
-
-fn validate_dns(dns: &DnsConfig) -> Result<(), String> {
-    validate_max_count("dns.servers", dns.servers.len(), MAX_DNS_SERVERS)?;
-    validate_max_count("dns.searchDomains", dns.search_domains.len(), MAX_DNS_DOMAINS)?;
-
-    if (dns.search_domains.is_empty() && !dns.servers.is_empty()) || (!dns.search_domains.is_empty() && dns.servers.is_empty()) {
-        return Err("dns must provide both searchDomains and servers, or neither".to_string());
-    }
-
-    for (idx, domain) in dns.search_domains.iter().enumerate() {
-        validate_max_length(format!("dns.searchDomains[{idx}]").as_str(), domain, MAX_DOMAIN_LENGTH)?;
-        let domain = domain.trim().trim_start_matches('.');
-        if domain.is_empty() || !is_valid_hostname(domain) {
-            return Err(format!("dns.searchDomains[{idx}] must be a valid hostname"));
+pub fn validate_config(config: &TunSessionConfig) -> Result<Config> {
+    let interface_name = validate_interface_name(&config.interface_name)?;
+    ensure!(!config.addresses.is_empty(), "addresses must contain at least one entry");
+    let addresses = networks("addresses", &config.addresses, 64)?;
+    let peer_allowed_ips = networks("peer_allowed_ips", &config.peer_allowed_ips, 256)?;
+    let minimum_mtu = if addresses.iter().any(|(ip, _)| ip.is_ipv6()) { 1280 } else { 576 };
+    ensure!(config.mtu == 0 || (minimum_mtu..=65535).contains(&config.mtu), "MTU must be between {minimum_mtu} and 65535");
+    let mut servers = Vec::new();
+    let mut domains = Vec::new();
+    if let Some(dns) = &config.dns {
+        ensure!(dns.servers.len() <= 64, "dns.servers supports at most 64 entries (received: {})", dns.servers.len());
+        ensure!(dns.search_domains.len() <= 64, "dns.searchDomains supports at most 64 entries (received: {})", dns.search_domains.len());
+        ensure!(dns.servers.is_empty() == dns.search_domains.is_empty(), "dns must provide both searchDomains and servers, or neither");
+        for (index, domain) in dns.search_domains.iter().enumerate() {
+            ensure!(domain.len() <= 253, "dns.searchDomains[{index}] must be at most 253 characters");
+            let domain = domain.trim().trim_start_matches('.');
+            ensure!(hostname_validator::is_valid(domain), "dns.searchDomains[{index}] must be a valid hostname");
+            domains.push(domain.to_string());
+        }
+        for (index, address) in dns.servers.iter().enumerate() {
+            servers.push(parse_proto_ip(address).with_context(|| format!("dns.servers[{index}] must be a valid IPv4 or IPv6 address"))?.to_string());
         }
     }
-
-    for (idx, server) in dns.servers.iter().enumerate() {
-        if parse_proto_ip(server).is_none() {
-            return Err(format!("dns.servers[{idx}] must be a valid IPv4 or IPv6 address"));
-        }
-    }
-
-    Ok(())
+    Ok(Config {
+        interface_name,
+        addresses,
+        peer_allowed_ips,
+        peer_endpoints: config.peer_endpoints.iter().map(parse_proto_ip).collect(),
+        mtu: NonZeroU16::new(config.mtu as u16),
+        dns_servers: servers.into_iter().unique().collect(),
+        dns_domains: domains.into_iter().unique().collect(),
+    })
 }
 
-fn validate_cidr_list(field_name: &str, values: &[Cidr]) -> Result<(), String> {
-    for (idx, addr) in values.iter().enumerate() {
-        let (ip, prefix) = parse_proto_cidr(addr).ok_or_else(|| format!("{field_name}[{idx}] has an invalid IP address"))?;
+pub fn validate_interface_name(name: &str) -> Result<String> {
+    let suffix = name.strip_prefix("utun").unwrap_or("");
+    ensure!(
+        name.len() <= 15 && !suffix.is_empty() && suffix.bytes().all(|c| c.is_ascii_digit()),
+        "interface name must be at most 15 characters and match `utun[0-9]+`"
+    );
+    if cfg!(target_os = "macos") {
+        // Name validation permits at most eleven ASCII digits, which fit in u64.
+        let index = suffix.parse::<u64>()?;
+        ensure!(index < u64::from(u32::MAX), "macOS interface index must be between 0 and {}", u32::MAX - 1);
+        Ok(format!("utun{index}"))
+    } else {
+        Ok(name.into())
+    }
+}
 
+fn networks(field: &str, values: &[Cidr], max: usize) -> Result<Vec<(IpAddr, u8)>> {
+    let mut result = Vec::new();
+    for (index, value) in values.iter().enumerate() {
+        let ip = value.ip.as_ref().and_then(parse_proto_ip).with_context(|| format!("{field}[{index}] has an invalid IP address"))?;
         let max_prefix = if ip.is_ipv4() { 32 } else { 128 };
-        if prefix > max_prefix {
-            return Err(format!("{field_name}[{idx}] prefix must be between 0 and {max_prefix}"));
-        }
+        ensure!(value.prefix <= max_prefix, "{field}[{index}] prefix must be between 0 and {max_prefix}");
+        result.push((ip, value.prefix as u8));
     }
-    Ok(())
+    ensure!(values.len() <= max, "{field} supports at most {max} entries (received: {})", values.len());
+    Ok(result)
 }
 
-fn validate_non_empty(field_name: &str, values: &[Cidr]) -> Result<(), String> {
-    if values.is_empty() {
-        return Err(format!("{field_name} must contain at least one entry"));
+fn parse_proto_ip(address: &Ip) -> Option<IpAddr> {
+    match address.value.as_ref()? {
+        ip::Value::V4(bytes) => Some(IpAddr::from(<[u8; 4]>::try_from(bytes.as_slice()).ok()?)),
+        ip::Value::V6(bytes) => Some(IpAddr::from(<[u8; 16]>::try_from(bytes.as_slice()).ok()?)),
     }
-    Ok(())
 }
 
-fn validate_max_count(field_name: &str, count: usize, max: usize) -> Result<(), String> {
-    if count > max {
-        return Err(format!("{field_name} supports at most {max} entries (received: {count})"));
-    }
-    Ok(())
-}
-
-fn validate_max_length(field_name: &str, value: &str, max: usize) -> Result<(), String> {
-    if value.len() > max {
-        return Err(format!("{field_name} must be at most {max} characters"));
-    }
-    Ok(())
-}
-
-fn is_valid_hostname(domain: &str) -> bool {
-    if domain.is_empty() || domain.len() > MAX_DOMAIN_LENGTH {
-        return false;
-    }
-
-    for label in domain.split('.') {
-        if label.is_empty() || label.len() > 63 {
-            return false;
-        }
-        let bytes = label.as_bytes();
-        if bytes.first() == Some(&b'-') || bytes.last() == Some(&b'-') {
-            return false;
-        }
-        if !bytes.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'-') {
-            return false;
-        }
-    }
-
-    true
-}
+#[cfg(test)]
+#[path = "../tests/unit/validation_reference_tests.rs"]
+mod tests;

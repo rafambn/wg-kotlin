@@ -1,8 +1,6 @@
 use super::run_command;
 use anyhow::{Context, Result};
 use once_cell::sync::OnceCell;
-use route_manager::{Route, RouteManager};
-use std::{io, net::IpAddr};
 
 pub const REQUIRED_BINARIES: &[&str] = &["powershell"];
 const NRPT_COMMENT_PREFIX: &str = "kmpvpn-daemon:";
@@ -77,51 +75,6 @@ foreach ($rule in Get-DnsClientNrptRule) {
 }
 "#;
 
-#[derive(Clone, Debug)]
-pub struct EndpointRoute(Route);
-
-impl EndpointRoute {
-    pub(super) fn same_slot(&self, other: &Self) -> bool {
-        let key = |route: &Route| {
-            let zero = if route.destination().is_ipv4() { IpAddr::from([0; 4]) } else { IpAddr::from([0; 16]) };
-            (route.destination(), route.prefix(), route.gateway().unwrap_or(zero), route.luid())
-        };
-        key(&self.0) == key(&other.0)
-    }
-
-    pub fn lookup(ip: IpAddr) -> anyhow::Result<Self> {
-        // On Windows find_route uses GetBestRoute2, not an ordered route dump.
-        let found = RouteManager::new()?.find_route(&ip)?.ok_or_else(|| io::Error::other("no route to endpoint"))?;
-        anyhow::ensure!(found.luid().is_some_and(|luid| luid != 0), "endpoint route has no interface LUID");
-        Ok(Self::from_route(ip, found))
-    }
-
-    fn from_route(ip: IpAddr, found: Route) -> Self {
-        let mut route = Route::new(ip, if ip.is_ipv4() { 32 } else { 128 });
-        // Optional attributes contribute zero or one builder update.
-        route = found.gateway().into_iter().fold(route, Route::with_gateway);
-        route = found.if_name().cloned().into_iter().fold(route, Route::with_if_name);
-        route = found.if_index().into_iter().fold(route, Route::with_if_index);
-        route = found.metric().into_iter().fold(route, Route::with_metric);
-        route = found.luid().into_iter().fold(route, Route::with_luid);
-        Self(route)
-    }
-
-    pub fn replace(&self) -> anyhow::Result<()> {
-        let mut manager = RouteManager::new()?;
-        let _ = manager.delete(&self.0);
-        Ok(manager.add(&self.0)?)
-    }
-
-    pub fn delete(&self) -> anyhow::Result<()> {
-        Ok(RouteManager::new()?.delete(&self.0)?)
-    }
-}
-
 #[cfg(test)]
 #[path = "../../tests/unit/platform/dns_windows_tests.rs"]
 mod dns_tests;
-
-#[cfg(test)]
-#[path = "../../tests/unit/platform/routes_windows_tests.rs"]
-mod route_tests;

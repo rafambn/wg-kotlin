@@ -76,31 +76,57 @@ process to remain alive and checks the protocol's readiness identity as well.
 The application and its trusted launcher must preserve the supplied owner binding;
 a PID declared by an arbitrary connecting client is never accepted as proof.
 
-Before creating a TUN and assigning its addresses, the daemon resolves the
-existing egress routes to its WireGuard peer endpoints. The endpoint host routes
-preserve the prior egress path, including an existing VPN. Linux queries the
-kernel with RTM_GETROUTE/FIB_MATCH/LOOKUP_TABLE for the owner's real UID and UDP traffic, so
-existing policy rules select the route; native netlink messages preserve routing
-attributes such as onlink and full table IDs, while excluding dead multipath
-nexthops. macOS requests the route's interface and source address during lookup,
-then explicitly transmits the original interface in RTA_IFP and rtm_index
-when installing the exception. Windows uses GetBestRoute2. Missing routes and
-lookup errors fail session startup. The endpoint exceptions are installed before
-the requested VPN routes; no additional Linux routing tables are created.
+The daemon uses unmodified `talpid-routing` from the Mullvad repository at
+`95bc5f5cdeca6f7624b4a76499a5cc86f9480f80`, pinned in Cargo.toml and Cargo.lock.
+There are no bundled sources, local patches or native route adapters. The
+upstream dependency requires Rust 1.97.1 or newer. Its public
+`RouteManagerHandle` and network monitors run in a dedicated Tokio runtime that
+stays alive between requests. After creating a new TUN, the daemon restarts the
+shared manager before registering routes so its initial interface snapshot
+includes that TUN. Existing sessions' requests are reapplied through upstream.
 
-On Linux and Windows, sessions that resolve to the same native endpoint route
-share its installation. The first session installs the host exception and the
-last session removes it. Closing another session or rolling back failed DNS
-setup does not remove a pin still in use. Linux keeps its replace/delete policy
-and does not create separate routing tables.
-Route resolution, TUN creation and route installation are serialized with route
-cleanup within the daemon. DNS operations run outside that mutex.
+Endpoint exceptions are installed before VPN routes. Linux resolves each peer's
+selected output node through the upstream API before creating the TUN. macOS
+and Windows use upstream `DefaultNode`, which follows the monitored non-tunnel
+default route rather than preserving a per-destination route snapshot. VPN
+prefixes use the tunnel's actual interface name. The daemon does not copy complete
+native entries, route metrics, source selectors or all multipath next hops.
+The pinned upstream Linux lookup requests a FIB entry and cannot interpret a
+route containing only multipath next hops. Such endpoint lookups fail before
+TUN creation; single-path IPv4 and IPv6 endpoints are supported.
 
-On Linux, macOS and Windows, cleanup removes the session's routes without
-restoring entries that were replaced, including routes installed by an earlier
-session. This is intentional, including after setup fails. Users must understand
-and accept this impact before requesting routes: removing the VPN's route does
-not reconstruct the previous entry.
+The daemon tracks ownership of requested routes. Identical requests share one
+registration until the final session releases them. An exact prefix requested
+through a different node rejects the new session. Different prefixes can coexist.
+Resolution, TUN creation and route registration are serialized with cleanup;
+DNS commands run outside that lock.
+
+Upstream Linux `remove_routes` does not remove individual routes. Therefore one
+shared manager handles the daemon's routes: releasing the final reference to any
+route stops the current manager and creates a fresh manager for the remaining
+sessions' requests. Adding or removing a routed session can briefly interrupt the remaining
+sessions' routes.
+The daemon awaits upstream shutdown before creating the next manager, avoiding
+old route notifications affecting the new manager's bookkeeping. After the
+final route release, it only stops the manager and its runtime before dropping
+the TUN.
+
+Routing follows upstream's platform-specific policies. macOS manages scoped
+non-tunnel defaults and restores non-tunnel default routes during cleanup.
+This does not restore every arbitrary replaced route. Linux uses the main table
+and does not request policy-table routing or socket marking, but the upstream
+manager still runs its routing-rule cleanup when starting and stopping.
+Windows uses the upstream route records and LUID handling. Users must accept
+these effects and the differences between systems before requesting routes.
+The daemon does not coordinate ownership with external route managers.
+
+Errors returned by the library propagate through the protocol. Requests have a
+five-second response deadline; upstream initialization and shutdown follow its
+own completion behavior. Some upstream native cleanup failures are only logged,
+and the API does not guarantee a deletion acknowledgement or retain every failed
+removal for retry. Upstream logs at INFO, WARN and ERROR go to the same file or
+stdout as the daemon's logs. Setup rollback uses the same upstream cleanup and
+rebuilds the other sessions' requested routes.
 
 ## Linux desktop
 
@@ -141,19 +167,6 @@ owning user's app to send SIGKILL when the daemon is stuck. Linux uses the same
 signal ownership arrangement. Other processes of that UID can also send signals;
 this grants them no permission to create TUN sessions. Child DNS tools receive
 matching root UIDs and do not inherit the launcher's standard input.
-
-On macOS, a shared registry tracks only the currently installed version of each
-route and its users, identified by prefix and interface scope. Identical routes
-share the installation until the last user closes. Replacing a route gives the
-new installation a separate identity, so closing an earlier session cannot
-delete it. Closing the latest installation removes it without reinstalling an
-earlier session's route or any preexisting entry. Setup rollback follows the same
-policy and only cleans installations that the session registered.
-Endpoint lookups use the same mutex as route changes, so they cannot observe
-the gap between DELETE and ADD. Failed cleanup retains the pending removal for
-retry before a later lookup or setup, including configurations without endpoints.
-Cleanup leaves detected external route changes untouched and
-reports the conflict while continuing with other routes and DNS.
 
 DNS configuration uses SystemConfiguration directly. It checks native error
 codes, writes both resolver entries with SCDynamicStoreSetMultiple, and reads

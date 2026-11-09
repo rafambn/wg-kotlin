@@ -1,122 +1,44 @@
 use crate::validation::Config;
 use anyhow::{Context, Result, anyhow, ensure};
-use route_manager::Route;
-#[cfg(not(target_os = "macos"))]
-use route_manager::RouteManager;
-use std::process::Stdio;
-#[cfg(not(target_os = "macos"))]
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::process::Command;
+use std::{process::Stdio, time::Duration};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt},
+    process::Command,
+};
 
 #[cfg_attr(target_os = "linux", path = "linux.rs")]
 #[cfg_attr(target_os = "macos", path = "macos.rs")]
 #[cfg_attr(target_os = "windows", path = "windows.rs")]
 mod os;
+mod routes;
+pub use os::REQUIRED_BINARIES;
 #[cfg(windows)]
 pub(crate) use os::clear_stale_nrpt_rules_once;
-pub use os::{EndpointRoute, REQUIRED_BINARIES};
+pub use routes::{ResolvedEndpoints, resolve_endpoint_routes};
 
 pub type CleanupHook = Box<dyn FnOnce() -> Result<()> + Send + 'static>;
 
-#[derive(Debug)]
-pub struct ResolvedEndpoints {
-    routes: Vec<EndpointRoute>,
-    #[cfg(not(target_os = "macos"))]
-    pins: MutexGuard<'static, EndpointPins>,
-}
-
-#[cfg(not(target_os = "macos"))]
-#[derive(Debug, Default)]
-struct EndpointPins(Vec<(Arc<EndpointRoute>, usize)>);
-
-#[cfg(not(target_os = "macos"))]
-impl EndpointPins {
-    fn acquire(&mut self, route: EndpointRoute, leases: &mut Vec<Arc<EndpointRoute>>) -> Result<()> {
-        if let Some((saved, users)) = self.0.iter_mut().find(|(saved, _)| saved.same_slot(&route)) {
-            *users += 1;
-            leases.push(saved.clone());
-            return Ok(());
-        }
-        let route = Arc::new(route);
-        self.0.push((route.clone(), 1));
-        leases.push(route.clone()); // Register before a request that can fail after applying.
-        route.replace().context("failed to add endpoint route")
-    }
-
-    fn release(&mut self, leases: Vec<Arc<EndpointRoute>>) -> Result<()> {
-        cleanup_results(leases.into_iter().rev().map(|route| {
-            let index = self.0.iter().position(|(saved, _)| Arc::ptr_eq(saved, &route)).context("endpoint lease is not registered")?;
-            self.0[index].1 -= 1;
-            if self.0[index].1 == 0 { self.0.remove(index).0.delete() } else { Ok(()) }
-        }))
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn endpoint_pins() -> Result<MutexGuard<'static, EndpointPins>> {
-    static PINS: Mutex<EndpointPins> = Mutex::new(EndpointPins(Vec::new()));
-    PINS.lock().map_err(|_| anyhow!("endpoint registry poisoned"))
-}
-
 pub fn configure_session(config: &Config, interface: &str, endpoints: ResolvedEndpoints) -> Result<CleanupHook> {
-    let ResolvedEndpoints {
-        routes: endpoints,
-        #[cfg(not(target_os = "macos"))]
-        mut pins,
-    } = endpoints;
-    let routes = vpn_routes(config, interface);
-    #[cfg(not(target_os = "macos"))]
-    let mut manager = RouteManager::new().context("route manager")?;
-    #[cfg(not(target_os = "macos"))]
+    let ResolvedEndpoints { routes: endpoints, mut registry } = endpoints;
     let mut leases = Vec::new();
-    #[cfg(target_os = "macos")]
-    let mut saved = os::SessionRoutes::default();
-    let setup = (|| {
-        #[cfg(target_os = "macos")]
-        saved.install(&routes, &endpoints).context("failed to configure routes")?;
-        #[cfg(not(target_os = "macos"))]
-        {
-            endpoints.into_iter().try_for_each(|route| pins.acquire(route, &mut leases))?;
-            add_routes_with_predelete(&mut manager, &routes)?;
+    let setup = routes::vpn_routes(config, interface).and_then(|vpn| {
+        if !endpoints.is_empty() || !vpn.is_empty() {
+            registry.restart()?;
         }
-        Ok(())
-    })();
-    let cleanup_routes = move |#[cfg(not(target_os = "macos"))] pins: &mut EndpointPins| {
-        #[cfg(target_os = "macos")]
-        {
-            saved.clear()
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let mut manager = manager;
-            let vpn_results = routes.iter().rev().map(|route| manager.delete(route).map_err(Into::into));
-            cleanup_results([cleanup_results(vpn_results), pins.release(leases)])
-        }
-    };
+        endpoints.into_iter().chain(vpn).try_for_each(|route| registry.acquire(route, &mut leases))
+    });
     if let Err(error) = setup {
-        let result = cleanup_routes(
-            #[cfg(not(target_os = "macos"))]
-            &mut pins,
-        );
-        #[cfg(not(target_os = "macos"))]
-        drop(pins);
+        let result = registry.release(leases);
+        drop(registry);
         cleanup_results([result, os::clear_dns(interface)]).with_context(|| format!("{error:#}; cleanup failed"))?;
         return Err(error);
     }
-    #[cfg(not(target_os = "macos"))]
-    drop(pins);
-    let setup = os::clear_dns(interface).and_then(|_| {
-        // Validation keeps servers and domains either both empty or both populated.
-        if config.dns_servers.is_empty() { Ok(()) } else { os::set_dns(interface, &config.dns_servers, &config.dns_domains) }
-    });
-    let interface = interface.to_string();
+    drop(registry);
+    let setup = os::clear_dns(interface)
+        .and_then(|_| if config.dns_servers.is_empty() { Ok(()) } else { os::set_dns(interface, &config.dns_servers, &config.dns_domains) });
+    let interface = interface.to_owned();
     let cleanup = move || {
-        #[cfg(target_os = "macos")]
-        let result = cleanup_routes();
-        #[cfg(not(target_os = "macos"))]
-        let result = endpoint_pins().and_then(|mut pins| cleanup_routes(&mut pins));
+        let result = routes::registry().and_then(|mut registry| registry.release(leases));
         cleanup_results([result, os::clear_dns(&interface)])
     };
     if let Err(error) = setup {
@@ -182,48 +104,7 @@ async fn read_capped<R: AsyncRead + Unpin>(reader: R, output: &mut Vec<u8>, cont
     tokio::io::copy(&mut limited.into_inner(), &mut tokio::io::sink()).await.map(|_| ()).context(context)
 }
 
-/// Resolve before creating the TUN: assigning its addresses can install
-/// connected routes that would hide the endpoint's previous egress route.
-pub fn resolve_endpoint_routes(config: &Config) -> Result<ResolvedEndpoints> {
-    // Keep lookup, TUN creation and setup in one transaction with other sessions.
-    #[cfg(not(target_os = "macos"))]
-    let pins = endpoint_pins()?;
-    #[cfg(target_os = "macos")]
-    os::recover_routes()?;
-    let mut routes = Vec::new();
-    for &ip in &config.peer_endpoints {
-        let ip = ip.context("invalid peer endpoint address")?;
-        routes.push(EndpointRoute::lookup(ip).with_context(|| format!("failed to resolve route for endpoint {ip}"))?);
-    }
-    Ok(ResolvedEndpoints {
-        routes,
-        #[cfg(not(target_os = "macos"))]
-        pins,
-    })
-}
-
-pub(crate) fn vpn_routes(config: &Config, interface: &str) -> Vec<Route> {
-    config
-        .peer_allowed_ips
-        .iter()
-        .filter(|(ip, prefix)| *prefix != if ip.is_ipv4() { 32 } else { 128 } || !config.peer_endpoints.contains(&Some(*ip)))
-        .map(|&(ip, prefix)| Route::new(ip, prefix).with_if_name(interface.to_string()))
-        .collect()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn add_routes_with_predelete(mgr: &mut RouteManager, filtered_routes: &[Route]) -> Result<()> {
-    filtered_routes.iter().try_for_each(|route| {
-        let _ = mgr.delete(route);
-        mgr.add(route).context("failed to add route")
-    })
-}
-
 const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
-
-#[cfg(test)]
-#[path = "../../tests/unit/platform/route_tests.rs"]
-mod route_tests;
 
 #[cfg(test)]
 #[path = "../../tests/unit/platform/command_tests.rs"]

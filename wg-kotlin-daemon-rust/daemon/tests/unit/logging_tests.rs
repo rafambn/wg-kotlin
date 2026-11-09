@@ -55,7 +55,8 @@ fn finish(mut child: Child) -> Output {
 fn log_fixture() {
     let mode = std::env::var("WG_LOG_TEST_MODE").unwrap();
     let path = std::env::var_os("WG_LOG_TEST_PATH").unwrap();
-    let logger = Logger::new((mode == "file").then(|| Path::new(&path))).unwrap();
+    let logger = Logger::new(mode.ends_with("file").then(|| Path::new(&path))).unwrap();
+    logger.install().unwrap();
     if mode == "blocked" {
         logger.log("x".repeat(1024 * 1024));
         let service = DaemonService::new(logger.clone(), std::sync::Arc::new(|_| panic!("shutdown must not start a TUN")));
@@ -68,11 +69,33 @@ fn log_fixture() {
             tokio::time::timeout(Duration::from_secs(2), stopped.wait_for(|value| *value)).await.unwrap().unwrap();
             connection.await.unwrap().unwrap();
         });
+    } else if mode.starts_with("dependency") {
+        log::warn!(target: "talpid_routing", "native cleanup failed: route cause\nsecond line");
+        log::debug!(target: "talpid_routing", "debug message must be filtered");
     } else {
         logger.log("session started interface=utun7\nsecond line");
     }
     logger.flush();
     std::process::exit(0);
+}
+
+#[test]
+fn dependency_errors_use_the_same_destination_and_escape_newlines() {
+    let directory = LogDirectory::new();
+    let path = directory.0.join("daemon.log");
+    for mode in ["dependency-stdout", "dependency-file"] {
+        let output = finish(fixture(mode, &path));
+        assert!(output.stderr.is_empty());
+        let text = if mode.ends_with("file") {
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("native cleanup failed"));
+            fs::read_to_string(&path).unwrap()
+        } else {
+            assert!(!path.exists());
+            String::from_utf8(output.stdout).unwrap()
+        };
+        assert!(text.contains("WARN talpid_routing: native cleanup failed: route cause\\nsecond line"), "{text}");
+        assert!(!text.contains("debug message"));
+    }
 }
 
 #[test]

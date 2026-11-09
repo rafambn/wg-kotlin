@@ -16,6 +16,12 @@ enum Message {
 }
 
 impl Logger {
+    pub fn install(&self) -> Result<(), log::SetLoggerError> {
+        log::set_boxed_logger(Box::new(self.clone()))?;
+        log::set_max_level(log::LevelFilter::Info);
+        Ok(())
+    }
+
     pub fn new(path: Option<&Path>) -> io::Result<Self> {
         let writer: Box<dyn Write + Send> = match path {
             Some(path) => {
@@ -53,6 +59,22 @@ impl Logger {
         let (done, completion) = mpsc::channel();
         let _ = self.sender.try_send(Message::Flush(done));
         let _ = completion.recv_timeout(Duration::from_millis(500));
+    }
+}
+
+impl log::Log for Logger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            self.log(format_args!("{} {}: {}", record.level(), record.target(), record.args()));
+        }
+    }
+
+    fn flush(&self) {
+        self.flush();
     }
 }
 

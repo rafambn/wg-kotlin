@@ -38,6 +38,7 @@ fn main() -> std::process::ExitCode {
 }
 
 async fn run(cli: Cli, owner: OwnerProcess, logger: Logger) -> anyhow::Result<()> {
+    logger.install()?;
     platform::ensure_required_binaries(platform::REQUIRED_BINARIES)?;
     let service = Arc::new(DaemonService::new(logger.clone(), daemon::session::factory()?));
     let mut listener = LocalListener::bind(&cli.endpoint, &owner)?;

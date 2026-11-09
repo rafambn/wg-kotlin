@@ -30,6 +30,25 @@ fn reply(request: &[u8], payload: &[u8]) -> Vec<u8> {
     packet
 }
 
+#[test]
+fn setup_without_a_runtime_returns_an_error_before_locking_routes() {
+    let create = factory().unwrap();
+    let mut config = crate::validation::validate_config(&TunSessionConfig {
+        interface_name: "utun77".into(),
+        addresses: vec![Cidr { ip: Some(proto_ip(&[198, 18, 0, 1])), prefix: 32 }],
+        ..Default::default()
+    })
+    .unwrap();
+    config.peer_endpoints = vec![None]; // Stop the second attempt before native route or TUN operations.
+    let error = create(&config).err().expect("missing runtime must return an error");
+    assert!(error.to_string().contains("requires a Tokio runtime"), "{error:#}");
+
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let result = runtime.block_on(async { tokio::task::spawn_blocking(move || create(&config)).await });
+    let error = result.expect("setup must not panic").err().expect("malformed endpoint must be rejected");
+    assert!(error.to_string().contains("invalid peer endpoint"), "{error:#}");
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore = "isolated Linux container with NET_ADMIN, /dev/net/tun and systemd-resolved"]
@@ -190,5 +209,6 @@ async fn native_macos_tun_exchanges_packets_after_cancelling_an_idle_read_and_cl
     })
     .await
     .unwrap();
-    assert!(matching_routes().is_empty(), "session routes remain after cleanup");
+    let remaining = matching_routes();
+    assert!(remaining.is_empty(), "session routes remain after cleanup: {remaining:?}");
 }

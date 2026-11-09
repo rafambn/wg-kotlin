@@ -371,7 +371,7 @@ exec /usr/bin/resolvectl "$@"
     let output = Command::new("ip").args(["route", "del", "198.19.85.0/24", "dev", "utun85"]).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     write_frame(&mut stream, &ClientMessage { payload: Some(client_message::Payload::Config(config(85))) }).await.unwrap();
-    for code in [tonic::Code::InvalidArgument, tonic::Code::Internal] {
+    for code in [tonic::Code::InvalidArgument] {
         let error = timeout(Duration::from_secs(3), async {
             loop {
                 match read_frame::<ServerMessage>(&mut stream).await.unwrap().unwrap().payload {
@@ -384,9 +384,6 @@ exec /usr/bin/resolvectl "$@"
         .await
         .unwrap();
         assert_eq!(error.code, code.to_string());
-        if code == tonic::Code::Internal {
-            assert!(error.message.contains(&std::io::Error::from_raw_os_error(libc::ESRCH).to_string()), "{error:?}");
-        }
     }
     assert!(read_frame::<ServerMessage>(&mut stream).await.unwrap().is_none());
     wait_removed(85).await;
@@ -555,7 +552,7 @@ exec /usr/bin/resolvectl "$@"
 
 #[tokio::test]
 #[ignore = "isolated Linux container with NET_ADMIN, IPv6, /dev/net/tun and iproute2; run serially"]
-async fn shared_ipv6_multipath_pin_survives_one_session_and_is_removed_by_the_last() {
+async fn original_talpid_rejects_ipv6_multipath_and_shares_single_path_endpoints() {
     fn ip_command(args: &[&str]) -> Vec<u8> {
         let output = Command::new("ip").args(args).output().unwrap();
         assert!(output.status.success(), "ip {args:?}: {}", String::from_utf8_lossy(&output.stderr));
@@ -601,6 +598,22 @@ async fn shared_ipv6_multipath_pin_survives_one_session_and_is_removed_by_the_la
     let proto_ip = |address: &str| Ip { value: Some(ip::Value::V6(address.parse::<std::net::Ipv6Addr>().unwrap().octets().to_vec())) };
     let host =
         || -> serde_json::Value { serde_json::from_slice(&ip_command(&["-6", "-j", "route", "show", "exact", "2001:db8:78::77/128"])).unwrap() };
+    let mut daemon = Daemon::start(Some("exit 0"));
+    let mut rejected = config(68);
+    rejected.peer_endpoints = vec![Ip { value: Some(ip::Value::V6(endpoint.octets().to_vec())) }];
+    rejected.dns = None;
+    let mut stream = daemon.connect().await;
+    write_frame(&mut stream, &ClientMessage { payload: Some(client_message::Payload::Config(rejected)) }).await.unwrap();
+    let response = read_frame::<ServerMessage>(&mut stream).await.unwrap().unwrap();
+    let Some(server_message::Payload::Error(error)) = response.payload else { panic!("expected upstream multipath lookup failure") };
+    assert_eq!(error.code, tonic::Code::FailedPrecondition.to_string());
+    assert!(error.message.contains("Route without a valid node"), "{error:?}");
+    assert!(!PathBuf::from("/sys/class/net/utun68").exists(), "failed lookup must happen before TUN creation");
+    assert!(host().as_array().unwrap().is_empty());
+    daemon.stop().await;
+
+    // Keep the original upstream behavior and verify the supported single-path case.
+    ip_command(&["-6", "route", "replace", "2001:db8:78::/64", "via", "2001:db8:77::2", "dev", "wgshare6a", "metric", "1024"]);
     for first_to_close in [0, 1] {
         assert!(host().as_array().unwrap().is_empty());
         let mut daemon = Daemon::start(Some("exit 0"));
@@ -618,7 +631,8 @@ async fn shared_ipv6_multipath_pin_survives_one_session_and_is_removed_by_the_la
         }
         let installed = host();
         assert_eq!(installed[0]["metric"], 1024);
-        assert_eq!(installed[0]["nexthops"].as_array().unwrap().len(), 2, "{installed}");
+        assert_eq!(installed[0]["dev"], "wgshare6a", "{installed}");
+        assert!(installed[0].get("nexthops").is_none(), "{installed}");
         drop(sessions[first_to_close].take());
         wait_removed(68 + first_to_close as u8).await;
         assert_eq!(host(), installed);
@@ -627,4 +641,55 @@ async fn shared_ipv6_multipath_pin_survives_one_session_and_is_removed_by_the_la
         assert!(host().as_array().unwrap().is_empty());
         daemon.stop().await;
     }
+}
+
+#[tokio::test]
+#[ignore = "isolated Linux container with NET_ADMIN, /dev/net/tun and systemd-resolved; run serially"]
+async fn conflicting_prefix_is_rejected_and_the_active_session_keeps_its_routes() {
+    let mut daemon = Daemon::start(None);
+    let first_config = config(72);
+    let first = daemon.open(first_config.clone()).await;
+    let mut rejected_config = config(73);
+    rejected_config.peer_allowed_ips = first_config.peer_allowed_ips;
+    let mut rejected = daemon.connect().await;
+    write_frame(&mut rejected, &ClientMessage { payload: Some(client_message::Payload::Config(rejected_config)) }).await.unwrap();
+    let message = timeout(Duration::from_secs(3), read_frame::<ServerMessage>(&mut rejected)).await.unwrap().unwrap().unwrap();
+    let Some(server_message::Payload::Error(error)) = message.payload else { panic!("expected a route conflict") };
+    assert_eq!(error.code, tonic::Code::FailedPrecondition.to_string());
+    assert!(error.message.contains("already owned"), "{error:?}");
+    wait_removed(73).await;
+    let output = Command::new("ip").args(["-j", "route", "show", "exact", "198.19.72.0/24"]).output().unwrap();
+    let routes: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(routes[0]["dev"], "utun72");
+    drop(first);
+    wait_removed(72).await;
+    daemon.stop().await;
+}
+
+#[tokio::test]
+#[ignore = "isolated Linux container with NET_ADMIN, /dev/net/tun and iproute2; run serially"]
+async fn a_replaced_route_is_not_restored_after_session_cleanup() {
+    fn ip_command(args: &[&str]) -> Vec<u8> {
+        let output = Command::new("ip").args(args).output().unwrap();
+        assert!(output.status.success(), "ip {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        output.stdout
+    }
+    struct Link;
+    impl Drop for Link {
+        fn drop(&mut self) {
+            let _ = Command::new("ip").args(["link", "del", "wgprevious"]).output();
+        }
+    }
+    ip_command(&["link", "add", "wgprevious", "type", "dummy"]);
+    let _previous = Link;
+    ip_command(&["link", "set", "wgprevious", "up"]);
+    ip_command(&["route", "add", "198.19.74.0/24", "dev", "wgprevious"]);
+    let mut daemon = Daemon::start(None);
+    let session = daemon.open(config(74)).await;
+    let routes: serde_json::Value = serde_json::from_slice(&ip_command(&["-j", "route", "show", "exact", "198.19.74.0/24"])).unwrap();
+    assert_eq!(routes[0]["dev"], "utun74");
+    drop(session);
+    wait_removed(74).await;
+    assert!(ip_command(&["route", "show", "exact", "198.19.74.0/24"]).is_empty(), "replaced route was restored");
+    daemon.stop().await;
 }

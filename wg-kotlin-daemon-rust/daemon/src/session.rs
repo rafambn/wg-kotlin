@@ -22,6 +22,8 @@ pub fn factory() -> Result<SessionFactory> {
     #[cfg(windows)]
     let wintun = Arc::new(WintunDll::prepare()?);
     Ok(Arc::new(move |config| {
+        // AsyncDevice registers its FD with the caller's reactor, including on blocking workers.
+        tokio::runtime::Handle::try_current().context("TUN setup requires a Tokio runtime")?;
         let endpoint_routes = platform::resolve_endpoint_routes(config)?;
         #[cfg(windows)]
         platform::clear_stale_nrpt_rules_once().context("failed to prepare platform session")?;

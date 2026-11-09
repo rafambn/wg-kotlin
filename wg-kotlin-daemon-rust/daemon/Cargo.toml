@@ -19,9 +19,12 @@ which = "7.0.2"
 hostname-validator = "1.1.1"
 itertools = "0.14"
 daemon-proto = { path = "../daemon-proto" }
-route_manager = "0.2"
+talpid-routing = { git = "https://github.com/mullvad/mullvadvpn-app", rev = "95bc5f5cdeca6f7624b4a76499a5cc86f9480f80" }
+ipnetwork = "0.21.1"
+log = { version = "0.4", features = ["std"] }
 
 [dev-dependencies]
+route_manager = "0.2"
 serde_json = "1.0.145"
 tokio = { version = "1.48.0", features = ["test-util"] }
 
@@ -29,18 +32,11 @@ tokio = { version = "1.48.0", features = ["test-util"] }
 tempfile = { version = "=3.27.0", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-indexmap = "=2.14.0"
-nix = { version = "0.30.1", features = ["net", "socket"] }
+nix = { version = "0.31.2", features = ["net", "socket"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFArray", "CFDictionary", "CFString"] }
 objc2-system-configuration = { version = "0.3.2", default-features = false, features = ["std", "SCDynamicStore"] }
-socket2 = { version = "0.6", features = ["all"] }
-sysctl = "0.7.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-netlink-packet-core = "0.8"
-netlink-packet-route = "0.28"
-rtnetlink = "0.20"
-futures-util = "0.3"
 rustix = { version = "1", features = ["process", "event"] }
 procfs-core = { version = "0.18", default-features = false }
 

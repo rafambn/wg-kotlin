@@ -8,7 +8,6 @@ import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 
 class Vpn(
-    val interfaceName: String,
     engine: Engine = Engine.BORINGTUN
 ) {
 
@@ -28,20 +27,12 @@ class Vpn(
     private var currentParsedConfiguration: ParsedVpnConfiguration? = null
     private var originalConfiguration: VpnConfiguration? = null
 
-    init {
-        requireNonBlankInterfaceName(interfaceName)
-        requireValidRegex(interfaceName)
-    }
-
     fun isRunning(): Boolean {
         return interfaceManager.isRunning() && cryptoSessionManager.hasActiveSessions()
     }
 
     fun open(configuration: VpnConfiguration) {
         requireValidConfiguration(configuration)
-        require(configuration.interfaceName == interfaceName) {
-            "Configuration interface name `${configuration.interfaceName}` does not match this Vpn's interface name `$interfaceName`"
-        }
 
         val parsed = configuration.toParsedVpnConfiguration()
         stop()

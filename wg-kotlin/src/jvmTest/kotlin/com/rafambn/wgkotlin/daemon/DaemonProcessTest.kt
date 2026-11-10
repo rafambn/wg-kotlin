@@ -90,7 +90,7 @@ class DaemonProcessTest {
 
     @Test
     fun openWithoutDaemonFailsAndReleasesItsUdpSocket() {
-        val vpn = Vpn("utun0")
+        val vpn = Vpn()
         val port = DatagramSocket(0).use { it.localPort }
         val error = assertFailsWith<IllegalStateException> {
             vpn.open(VpnConfiguration(

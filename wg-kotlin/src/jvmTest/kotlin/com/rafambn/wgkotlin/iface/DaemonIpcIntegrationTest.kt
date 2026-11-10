@@ -22,8 +22,8 @@ import kotlin.test.assertFalse
 class DaemonIpcIntegrationTest {
     @Test
     fun existingVpnApiCanBeConstructedBeforeLaunchingTheDaemon() {
-        val first = Vpn(interfaceName = "utun10")
-        val second = Vpn(interfaceName = "utun11")
+        val first = Vpn()
+        val second = Vpn()
         IpcTestFixture("echo").use { fixture ->
             try {
                 fun configuration(name: String) = VpnConfiguration(
@@ -54,7 +54,7 @@ class DaemonIpcIntegrationTest {
     @Test
     fun ownedClientReachesRustConfigValidationWithoutRootOrCredentials() {
         IpcTestFixture().use { fixture ->
-            val vpn = Vpn("utun1")
+            val vpn = Vpn()
             val failure = assertFailsWith<IllegalStateException> {
                 vpn.open(VpnConfiguration(
                     interfaceName = "utun1", listenPort = 0,

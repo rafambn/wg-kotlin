@@ -38,25 +38,46 @@ class Vpn(
 
         val current = VpnExecution(configuration, engine)
         check(execution.compareAndSet(null, current)) { "Another VPN execution is already opening" }
-        val onFailure: (Throwable) -> Unit = { stop(current) }
-
-        operation("reconcileSessions") {
-            current.cryptoSessionManager.reconcileSessions(parsed)
+        val startupFailure = AtomicReference<Throwable?>(null)
+        val onFailure: (Throwable) -> Unit = { error ->
+            startupFailure.compareAndSet(null, error)
+            stop(current)
         }
-
-        operation("start") {
-            current.cryptoSessionManager.start(onFailure)
+        fun checkOpening() {
+            startupFailure.load()?.let { throw it }
+            check(execution.load() === current) { "VPN stopped during startup" }
         }
+        try {
+            operation("reconcileSessions") {
+                current.cryptoSessionManager.reconcileSessions(parsed)
+            }
+            checkOpening()
 
-        operation("socketStart") {
-            current.socketManager.start(
-                listenPort = configuration.listenPort ?: DEFAULT_PORT,
-                onFailure = onFailure,
-            )
-        }
+            operation("start") {
+                current.cryptoSessionManager.start(onFailure)
+            }
+            checkOpening()
 
-        operation("start") {
-            current.interfaceManager.start(parsed.toTunSessionConfig(), onFailure)
+            operation("socketStart") {
+                current.socketManager.start(
+                    listenPort = configuration.listenPort ?: DEFAULT_PORT,
+                    onFailure = onFailure,
+                )
+            }
+            checkOpening()
+
+            operation("start") {
+                current.interfaceManager.start(parsed.toTunSessionConfig(), onFailure)
+            }
+            checkOpening()
+        } catch (error: Throwable) {
+            execution.compareAndSet(current, null)
+            try {
+                cleanup(current)
+            } catch (cleanupError: Throwable) {
+                error.addSuppressed(cleanupError)
+            }
+            throw error
         }
     }
 
@@ -81,7 +102,10 @@ class Vpn(
     }
 
     private fun stop(current: VpnExecution) {
-        if (!execution.compareAndSet(current, null)) return
+        if (execution.compareAndSet(current, null)) cleanup(current)
+    }
+
+    private fun cleanup(current: VpnExecution) {
         var firstError: Throwable? = null
         try {
             operation("stop") { current.interfaceManager.stop() }

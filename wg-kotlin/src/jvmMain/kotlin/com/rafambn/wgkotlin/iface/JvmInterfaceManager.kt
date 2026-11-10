@@ -18,7 +18,10 @@ class JvmInterfaceManager(
         val failure = AtomicReference<Throwable?>()
     }
 
-    override fun isRunning(): Boolean = active.get()?.bridge?.get() != null
+    override fun isRunning(): Boolean {
+        val session = active.get() ?: return false
+        return session.failure.get() == null && session.bridge.get() != null
+    }
 
     override fun start(config: TunSessionConfig, onFailure: (Throwable) -> Unit) {
         val session = Session(config)
@@ -36,7 +39,7 @@ class JvmInterfaceManager(
                 },
             )
             session.bridge.set(bridge)
-            if (active.get() !== session) {
+            if (active.get() !== session || session.failure.get() != null) {
                 val error = session.failure.get() ?: IllegalStateException("IPC session stopped during opening")
                 runCatching { session.bridge.getAndSet(null)?.close() }.exceptionOrNull()?.let(error::addSuppressed)
                 throw error
@@ -60,7 +63,7 @@ class JvmInterfaceManager(
 
     override fun information(): VpnInterfaceInformation? {
         val session = active.get() ?: return null
-        if (session.bridge.get() == null) return null
+        if (session.failure.get() != null || session.bridge.get() == null) return null
         val config = session.config
         return VpnInterfaceInformation(
             interfaceName = config.interfaceName,

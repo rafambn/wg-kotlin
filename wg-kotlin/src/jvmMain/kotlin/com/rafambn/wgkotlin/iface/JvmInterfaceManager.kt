@@ -5,51 +5,63 @@ import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.util.toCidrString
 import com.rafambn.wgkotlin.util.toPlainString
+import java.util.concurrent.atomic.AtomicReference
 
 class JvmInterfaceManager(
     private val sessionBridge: SessionBridge,
     private val tunPipe: DuplexChannelPipe<ByteArray>,
 ) : InterfaceManager {
-    private var currentConfig: TunSessionConfig? = null
-    private var activeBridge: AutoCloseable? = null
+    private val active = AtomicReference<Session?>()
 
-    override fun isRunning(): Boolean = activeBridge != null
+    private class Session(val config: TunSessionConfig) {
+        val bridge = AtomicReference<AutoCloseable?>()
+        val failure = AtomicReference<Throwable?>()
+    }
+
+    override fun isRunning(): Boolean = active.get()?.bridge?.get() != null
 
     override fun start(config: TunSessionConfig, onFailure: (Throwable) -> Unit) {
-        stop()
-
-        val bridge = try {
-            sessionBridge.openSession(
+        val session = Session(config)
+        runCatching { active.getAndSet(session)?.bridge?.getAndSet(null)?.close() }
+        try {
+            val bridge = sessionBridge.openSession(
                 config = config,
                 pipe = tunPipe,
-                onFailure = { throwable ->
-                    runCatching { activeBridge?.close() }
-                    activeBridge = null
-                    currentConfig = null
-                    onFailure(throwable)
+                onFailure = { error ->
+                    session.failure.compareAndSet(null, error)
+                    if (active.compareAndSet(session, null)) {
+                        runCatching { session.bridge.getAndSet(null)?.close() }
+                        onFailure(error)
+                    }
                 },
             )
+            session.bridge.set(bridge)
+            if (active.get() !== session) {
+                val error = session.failure.get() ?: IllegalStateException("IPC session stopped during opening")
+                runCatching { session.bridge.getAndSet(null)?.close() }.exceptionOrNull()?.let(error::addSuppressed)
+                throw error
+            }
         } catch (error: Throwable) {
-            try {
-                onFailure(error)
-            } catch (cleanupError: Throwable) {
-                error.addSuppressed(cleanupError)
+            if (active.compareAndSet(session, null)) {
+                runCatching { session.bridge.getAndSet(null)?.close() }.exceptionOrNull()?.let(error::addSuppressed)
+                try {
+                    onFailure(error)
+                } catch (cleanupError: Throwable) {
+                    if (cleanupError !== error) error.addSuppressed(cleanupError)
+                }
             }
             throw error
         }
-
-        activeBridge = bridge
-        currentConfig = config
     }
 
     override fun stop() {
-        runCatching { activeBridge?.close() }
-        activeBridge = null
-        currentConfig = null
+        runCatching { active.getAndSet(null)?.bridge?.getAndSet(null)?.close() }
     }
 
     override fun information(): VpnInterfaceInformation? {
-        val config = currentConfig ?: return null
+        val session = active.get() ?: return null
+        if (session.bridge.get() == null) return null
+        val config = session.config
         return VpnInterfaceInformation(
             interfaceName = config.interfaceName,
             isUp = isRunning(),

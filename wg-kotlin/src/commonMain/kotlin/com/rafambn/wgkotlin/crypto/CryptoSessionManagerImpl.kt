@@ -6,6 +6,7 @@ import com.rafambn.wgkotlin.crypto.factory.BoringTunPeerSessionFactory
 import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
 import com.rafambn.wgkotlin.crypto.factory.QuicPeerSessionFactory
 import com.rafambn.wgkotlin.network.io.UdpDatagram
+import com.rafambn.wgkotlin.daemon.proto.Ip
 
 import com.rafambn.wgkotlin.requireDistinctAllowedIpOwnership
 import com.rafambn.wgkotlin.requireUniqueParsedPeerPublicKeys
@@ -13,6 +14,7 @@ import com.rafambn.wgkotlin.requireUserspacePeerEndpoints
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.util.matches
 import com.rafambn.wgkotlin.util.parsePacketDestination
+import com.rafambn.wgkotlin.util.parsePacketSource
 import com.rafambn.wgkotlin.util.toCidrString
 import com.rafambn.wgkotlin.util.toPlainString
 import kotlinx.coroutines.CancellationException
@@ -235,8 +237,8 @@ internal class CryptoSessionManagerImpl(
                                     .transmittedBytes += result.packet.size.toLong()
                                 pendingNetwork += UdpDatagram(payload = result.packet, remoteEndpoint = selected.peerEndpoint())
                             }
-                            is PacketAction.WriteToTunIpv4 -> pendingTun += result.packet
-                            is PacketAction.WriteToTunIpv6 -> pendingTun += result.packet
+                            is PacketAction.WriteToTunIpv4 -> if (acceptsSource(result.packet, selected)) pendingTun += result.packet
+                            is PacketAction.WriteToTunIpv6 -> if (acceptsSource(result.packet, selected)) pendingTun += result.packet
                             PacketAction.Done -> Unit
                             is PacketAction.Error -> throw IllegalStateException(
                                 "Session `${selected.session.peerPublicKey}` returned error code `${result.code}` for `decryptToRawPacket`",
@@ -312,6 +314,15 @@ internal class CryptoSessionManagerImpl(
         sessionEntries: Iterable<PeerSessionEntry>,
     ): PeerSessionEntry? {
         val destination = try { parsePacketDestination(packet) } catch (_: Exception) { return null }
+        return selectSessionForAddress(destination, sessionEntries)
+    }
+
+    private fun acceptsSource(packet: ByteArray, authenticatedPeer: PeerSessionEntry): Boolean {
+        val source = try { parsePacketSource(packet) } catch (_: Exception) { return false }
+        return selectSessionForAddress(source, sessionEntriesByPeer.values) === authenticatedPeer
+    }
+
+    private fun selectSessionForAddress(destination: Ip, sessionEntries: Iterable<PeerSessionEntry>): PeerSessionEntry? {
         return sessionEntries
             .mapNotNull { entry ->
                 val match = entry.peer.allowedIps

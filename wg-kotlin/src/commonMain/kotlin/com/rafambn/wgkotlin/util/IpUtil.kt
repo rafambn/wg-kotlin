@@ -76,17 +76,21 @@ internal fun Ip.toPlainString(): String {
 internal fun Cidr.toCidrString(): String = "${ip.toPlainString()}/$prefix"
 
 // extracts the destination IP from a raw IPv4/IPv6 packet header
-internal fun parsePacketDestination(packet: ByteArray): Ip {
+internal fun parsePacketDestination(packet: ByteArray): Ip = parsePacketAddress(packet, 16, 24)
+
+internal fun parsePacketSource(packet: ByteArray): Ip = parsePacketAddress(packet, 12, 8)
+
+private fun parsePacketAddress(packet: ByteArray, ipv4Offset: Int, ipv6Offset: Int): Ip {
     if (packet.isEmpty()) error("packet is empty")
 
     val value: Ip.Value = when (val version = ((packet[0].toInt() ushr 4) and 0x0f)) {
         4 -> {
             require(packet.size >= 20) { "IPv4 packet too short: ${packet.size} bytes" }
-            Ip.Value.V4(ByteString(packet.copyOfRange(16, 20)))
+            Ip.Value.V4(ByteString(packet.copyOfRange(ipv4Offset, ipv4Offset + 4)))
         }
         6 -> {
             require(packet.size >= 40) { "IPv6 packet too short: ${packet.size} bytes" }
-            Ip.Value.V6(ByteString(packet.copyOfRange(24, 40)))
+            Ip.Value.V6(ByteString(packet.copyOfRange(ipv6Offset, ipv6Offset + 16)))
         }
         else -> error("unsupported IP version: $version")
     }

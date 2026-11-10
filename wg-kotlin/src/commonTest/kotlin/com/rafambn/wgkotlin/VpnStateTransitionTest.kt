@@ -1,5 +1,6 @@
 package com.rafambn.wgkotlin
 
+import com.rafambn.wgkotlin.util.resolveToIp
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -66,7 +67,7 @@ class VpnStateTransitionTest {
             interfaceName = interfaceName,
             listenPort = 0,
             privateKey = privateKey,
-            peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1", endpointPort = 51820)),
+            peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1".resolveToIp(), endpointPort = 51820)),
         )
     }
 }

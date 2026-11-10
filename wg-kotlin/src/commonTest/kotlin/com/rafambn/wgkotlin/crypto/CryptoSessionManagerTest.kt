@@ -1,7 +1,7 @@
 package com.rafambn.wgkotlin.crypto
 
-import com.rafambn.wgkotlin.ParsedVpnConfiguration
-import com.rafambn.wgkotlin.ParsedVpnPeer
+import com.rafambn.wgkotlin.VpnConfiguration
+import com.rafambn.wgkotlin.VpnPeer
 import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.network.io.UdpEndpoint
@@ -51,8 +51,8 @@ class CryptoSessionManagerTest {
         val manager = createManager(factory)
 
         manager.reconcileSessions(
-            configurationWithParsedPeer(
-                ParsedVpnPeer(
+            configurationWithPeer(
+                VpnPeer(
                     publicKey = "peer-a",
                     endpointAddress = "10.0.0.1".resolveToIp(),
                     endpointPort = 51820,
@@ -61,8 +61,8 @@ class CryptoSessionManagerTest {
         )
 
         manager.reconcileSessions(
-            configurationWithParsedPeer(
-                ParsedVpnPeer(
+            configurationWithPeer(
+                VpnPeer(
                     publicKey = "peer-a",
                     endpointAddress = "10.0.0.2".resolveToIp(),
                     endpointPort = 51821,
@@ -84,9 +84,9 @@ class CryptoSessionManagerTest {
     fun duplicatePeerKeysAreRejected() {
         val manager = createManager(RecordingSessionFactory())
 
-        val duplicated = configurationWithParsedPeer(
-            ParsedVpnPeer(publicKey = "peer-a"),
-            ParsedVpnPeer(publicKey = "peer-a"),
+        val duplicated = configurationWithPeer(
+            VpnPeer(publicKey = "peer-a"),
+            VpnPeer(publicKey = "peer-a"),
         )
 
         assertFailsWith<IllegalArgumentException> {
@@ -143,12 +143,12 @@ class CryptoSessionManagerTest {
         assertEquals(1, factory.createdSessions.first().closeCalls)
     }
 
-    private fun configurationWithPeers(vararg peerKeys: String): ParsedVpnConfiguration {
-        return ParsedVpnConfiguration(
+    private fun configurationWithPeers(vararg peerKeys: String): VpnConfiguration {
+        return VpnConfiguration(
             interfaceName = "wg-test",
             privateKey = "private-key",
             peers = peerKeys.mapIndexed { index, key ->
-                ParsedVpnPeer(
+                VpnPeer(
                     publicKey = key,
                     endpointAddress = "198.51.100.${index + 1}".resolveToIp(),
                     endpointPort = 51820 + index,
@@ -157,8 +157,8 @@ class CryptoSessionManagerTest {
         )
     }
 
-    private fun configurationWithParsedPeer(vararg peers: ParsedVpnPeer): ParsedVpnConfiguration {
-        return ParsedVpnConfiguration(
+    private fun configurationWithPeer(vararg peers: VpnPeer): VpnConfiguration {
+        return VpnConfiguration(
             interfaceName = "wg-test",
             privateKey = "private-key",
             peers = peers.toList(),
@@ -181,8 +181,8 @@ class CryptoSessionManagerTest {
         val createdSessions: MutableList<TestPeerSession> = mutableListOf()
 
         override fun create(
-            config: ParsedVpnConfiguration,
-            peer: ParsedVpnPeer,
+            config: VpnConfiguration,
+            peer: VpnPeer,
             peerIndex: Int,
         ): PeerSession {
             if (peer.publicKey == failOnPeer) {
@@ -215,8 +215,8 @@ class CryptoSessionManagerTest {
             peerSessionFactory = factory,
         )
         manager.reconcileSessions(
-            configurationWithParsedPeer(
-                ParsedVpnPeer(
+            configurationWithPeer(
+                VpnPeer(
                     publicKey = "peer-a",
                     endpointAddress = "198.51.100.1".resolveToIp(),
                     endpointPort = 51820,
@@ -248,8 +248,8 @@ class CryptoSessionManagerTest {
             peerSessionFactory = factory,
         )
         manager.reconcileSessions(
-            configurationWithParsedPeer(
-                ParsedVpnPeer(
+            configurationWithPeer(
+                VpnPeer(
                     publicKey = "peer-a",
                     endpointAddress = "198.51.100.1".resolveToIp(),
                     endpointPort = 51820,
@@ -285,8 +285,8 @@ class CryptoSessionManagerTest {
             peerSessionFactory = factory,
         )
         manager.reconcileSessions(
-            configurationWithParsedPeer(
-                ParsedVpnPeer(
+            configurationWithPeer(
+                VpnPeer(
                     publicKey = "peer-a",
                     endpointAddress = "198.51.100.1".resolveToIp(),
                     endpointPort = 51820,
@@ -323,8 +323,8 @@ class CryptoSessionManagerTest {
             peerSessionFactory = factory,
         )
         manager.reconcileSessions(
-            configurationWithParsedPeer(
-                ParsedVpnPeer(
+            configurationWithPeer(
+                VpnPeer(
                     publicKey = "peer-a",
                     endpointAddress = "198.51.100.1".resolveToIp(),
                     endpointPort = 51820,
@@ -353,7 +353,7 @@ class CryptoSessionManagerTest {
     }
 
     private class DataPlaneSessionFactory : PeerSessionFactory {
-        override fun create(config: ParsedVpnConfiguration, peer: ParsedVpnPeer, peerIndex: Int): PeerSession {
+        override fun create(config: VpnConfiguration, peer: VpnPeer, peerIndex: Int): PeerSession {
             return DataPlanePeerSession(peerPublicKey = peer.publicKey, peerIndex = peerIndex)
         }
     }

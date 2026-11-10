@@ -301,6 +301,11 @@ not been exercised in this validation.
 
 Use `Vpn(engine)` and `open(configuration)`. The interface name comes from
 `configuration.interfaceName` and is validated when opening the VPN.
+Supply parsed `Cidr` values in `VpnConfiguration.addresses` and `VpnPeer.allowedIps`,
+and `Ip` values in `VpnPeer.endpointAddress` and `DnsConfig.servers`. These types
+are in `com.rafambn.wgkotlin.daemon.proto`. The caller resolves hostnames and parses
+IP addresses and CIDRs before calling `open()`; the VPN consumes the configuration
+directly.
 `DaemonProcess.launch(...)` registers the first running daemon for JVM VPN sessions.
 Further launches do not replace that active registration. Closing or killing the
 registered daemon removes it. Constructing a VPN does not require a daemon yet;

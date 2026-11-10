@@ -25,7 +25,7 @@ kotlin {
                 implementation(libs.ktor.network)
                 implementation(libs.ktor.io)
                 implementation(libs.kotlinx.rpc.grpc.core)
-                implementation(libs.kotlinx.rpc.protobuf)
+                api(libs.kotlinx.rpc.protobuf)
             }
         }
 

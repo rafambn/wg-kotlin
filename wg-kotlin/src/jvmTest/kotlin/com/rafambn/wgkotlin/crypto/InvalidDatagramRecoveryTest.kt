@@ -1,7 +1,7 @@
 package com.rafambn.wgkotlin.crypto
 
-import com.rafambn.wgkotlin.ParsedVpnConfiguration
-import com.rafambn.wgkotlin.ParsedVpnPeer
+import com.rafambn.wgkotlin.VpnConfiguration
+import com.rafambn.wgkotlin.VpnPeer
 import com.rafambn.wgkotlin.crypto.factory.BoringTunPeerSessionFactory
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.network.io.UdpEndpoint
@@ -28,17 +28,17 @@ class InvalidDatagramRecoveryTest {
         val serverKey = generateSecretKey()
         val factory = BoringTunPeerSessionFactory()
         val client = factory.create(
-            ParsedVpnConfiguration(interfaceName = "utun1", privateKey = base64(clientKey)),
-            ParsedVpnPeer(publicKey = base64(checkNotNull(generatePublicKey(serverKey)))), 1,
+            VpnConfiguration(interfaceName = "utun1", privateKey = base64(clientKey)),
+            VpnPeer(publicKey = base64(checkNotNull(generatePublicKey(serverKey)))), 1,
         )
         val (tun, cryptoTun) = DuplexChannelPipe.create<ByteArray>()
         val (network, cryptoNetwork) = DuplexChannelPipe.create<UdpDatagram>()
         val manager = CryptoSessionManagerImpl(cryptoTun, cryptoNetwork)
         val failure = CompletableDeferred<Throwable>()
         val endpoint = UdpEndpoint("192.0.2.1", 51820)
-        manager.reconcileSessions(ParsedVpnConfiguration(
+        manager.reconcileSessions(VpnConfiguration(
             interfaceName = "utun1", privateKey = base64(serverKey),
-            peers = listOf(ParsedVpnPeer(
+            peers = listOf(VpnPeer(
                 publicKey = base64(checkNotNull(generatePublicKey(clientKey))),
                 endpointAddress = endpoint.address.resolveToIp(), endpointPort = endpoint.port,
                 allowedIps = listOf("10.0.0.0/24".toCidr()),

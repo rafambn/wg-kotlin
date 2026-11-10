@@ -1,7 +1,7 @@
 package com.rafambn.wgkotlin.crypto
 
-import com.rafambn.wgkotlin.ParsedVpnConfiguration
-import com.rafambn.wgkotlin.ParsedVpnPeer
+import com.rafambn.wgkotlin.VpnConfiguration
+import com.rafambn.wgkotlin.VpnPeer
 import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.network.io.UdpEndpoint
@@ -22,7 +22,7 @@ class InboundSourceAuthorizationTest {
         val (tun, cryptoTun) = DuplexChannelPipe.create<ByteArray>()
         val (network, cryptoNetwork) = DuplexChannelPipe.create<UdpDatagram>()
         val factory = object : PeerSessionFactory {
-            override fun create(config: ParsedVpnConfiguration, peer: ParsedVpnPeer, peerIndex: Int): PeerSession =
+            override fun create(config: VpnConfiguration, peer: VpnPeer, peerIndex: Int): PeerSession =
                 object : PeerSession {
                     override val peerPublicKey = peer.publicKey
                     override val peerIndex = peerIndex
@@ -38,13 +38,13 @@ class InboundSourceAuthorizationTest {
         }
         val manager = CryptoSessionManagerImpl(cryptoTun, cryptoNetwork, peerSessionFactory = factory)
         val failure = CompletableDeferred<Throwable>()
-        manager.reconcileSessions(ParsedVpnConfiguration(
+        manager.reconcileSessions(VpnConfiguration(
             interfaceName = "utun1",
             privateKey = "test-key",
             peers = listOf(
-                ParsedVpnPeer(publicKey = "a", endpointAddress = "192.0.2.1".resolveToIp(), endpointPort = 51820,
+                VpnPeer(publicKey = "a", endpointAddress = "192.0.2.1".resolveToIp(), endpointPort = 51820,
                     allowedIps = listOf("10.0.0.0/24".toCidr(), "2001:db8::/64".toCidr())),
-                ParsedVpnPeer(publicKey = "b", endpointAddress = "192.0.2.2".resolveToIp(), endpointPort = 51820,
+                VpnPeer(publicKey = "b", endpointAddress = "192.0.2.2".resolveToIp(), endpointPort = 51820,
                     allowedIps = listOf("10.0.0.3/32".toCidr(), "2001:db8::3/128".toCidr())),
             ),
         ))

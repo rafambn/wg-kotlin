@@ -1,10 +1,10 @@
 package com.rafambn.wgkotlin.crypto
 
-import com.rafambn.wgkotlin.ParsedVpnConfiguration
+import com.rafambn.wgkotlin.VpnConfiguration
 
 internal interface CryptoSessionManager {
 
-    fun reconcileSessions(config: ParsedVpnConfiguration)
+    fun reconcileSessions(config: VpnConfiguration)
 
     fun start(onFailure: (Throwable) -> Unit)
 

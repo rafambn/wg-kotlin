@@ -4,7 +4,6 @@ import com.rafambn.wgkotlin.DnsConfig
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.util.toCidrString
-import com.rafambn.wgkotlin.util.toPlainString
 
 class JvmInterfaceManager(
     private val sessionBridge: SessionBridge,
@@ -56,7 +55,7 @@ class JvmInterfaceManager(
             addresses = config.addresses.map { it.toCidrString() },
             dns = DnsConfig(
                 searchDomains = config.dns.searchDomains,
-                servers = config.dns.servers.map { it.toPlainString() },
+                servers = config.dns.servers,
             ),
             mtu = if (config.mtu == 0) null else config.mtu,
         )

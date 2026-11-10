@@ -1,7 +1,7 @@
 package com.rafambn.wgkotlin.crypto
 
 import com.rafambn.wgkotlin.Engine
-import com.rafambn.wgkotlin.ParsedVpnConfiguration
+import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.crypto.factory.BoringTunPeerSessionFactory
 import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
 import com.rafambn.wgkotlin.crypto.factory.QuicPeerSessionFactory
@@ -9,7 +9,7 @@ import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.daemon.proto.Ip
 
 import com.rafambn.wgkotlin.requireDistinctAllowedIpOwnership
-import com.rafambn.wgkotlin.requireUniqueParsedPeerPublicKeys
+import com.rafambn.wgkotlin.requireUniquePeerPublicKeys
 import com.rafambn.wgkotlin.requireUserspacePeerEndpoints
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.util.matches
@@ -42,19 +42,12 @@ internal class CryptoSessionManagerImpl(
 
     private var scope: CoroutineScope? = null
 
-    override fun reconcileSessions(config: ParsedVpnConfiguration) {
-        requireUniqueParsedPeerPublicKeys(config.peers)
+    override fun reconcileSessions(config: VpnConfiguration) {
+        requireUniquePeerPublicKeys(config.peers)
         requireUserspacePeerEndpoints(config.peers)
         requireDistinctAllowedIpOwnership(config.peers)
 
-        val resolvedPeers = config.peers.map { peer ->
-            when {
-                peer.endpointAddress != null -> peer
-                else -> error("Peer `${peer.publicKey}` has no endpoint address")
-            }
-        }
-
-        val desiredPeers = resolvedPeers.associateBy { peer -> peer.publicKey }
+        val desiredPeers = config.peers.associateBy { peer -> peer.publicKey }
         val desiredIndexes = desiredPeers.keys
             .toSortedSet()
             .mapIndexed { index, key -> key to (index + 1) }

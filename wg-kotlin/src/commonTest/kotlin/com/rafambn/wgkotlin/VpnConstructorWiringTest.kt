@@ -1,5 +1,6 @@
 package com.rafambn.wgkotlin
 
+import com.rafambn.wgkotlin.util.resolveToIp
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertNotSame
@@ -27,7 +28,7 @@ class VpnConstructorWiringTest {
                 peers = listOf(
                     VpnPeer(
                         publicKey = peerKey,
-                        endpointAddress = "198.51.100.1",
+                        endpointAddress = "198.51.100.1".resolveToIp(),
                         endpointPort = 51820,
                     ),
                 ),
@@ -52,7 +53,7 @@ class VpnConstructorWiringTest {
                 peers = listOf(
                     VpnPeer(
                         publicKey = peerKey,
-                        endpointAddress = "198.51.100.1",
+                        endpointAddress = "198.51.100.1".resolveToIp(),
                         endpointPort = 51820,
                     ),
                 ),

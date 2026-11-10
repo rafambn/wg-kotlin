@@ -1,7 +1,7 @@
 package com.rafambn.wgkotlin.crypto.factory
 
-import com.rafambn.wgkotlin.ParsedVpnConfiguration
-import com.rafambn.wgkotlin.ParsedVpnPeer
+import com.rafambn.wgkotlin.VpnConfiguration
+import com.rafambn.wgkotlin.VpnPeer
 import com.rafambn.wgkotlin.crypto.PacketAction
 import uniffi.wg_kotlin_uniffi_boringtun.convertX25519KeyToBase64
 import uniffi.wg_kotlin_uniffi_boringtun.generatePublicKey
@@ -19,10 +19,10 @@ class JvmBoringTunPeerSessionFactoryTest {
     @Test
     fun quicStrategyIsExplicitlyUnsupported() {
         val factory = QuicPeerSessionFactory()
-        val config = ParsedVpnConfiguration(
+        val config = VpnConfiguration(
             interfaceName = "wg-test",
             privateKey = "private-key",
-            peers = listOf(ParsedVpnPeer(publicKey = "peer-key")),
+            peers = listOf(VpnPeer(publicKey = "peer-key")),
         )
 
         assertFailsWith<UnsupportedOperationException> {
@@ -39,10 +39,10 @@ class JvmBoringTunPeerSessionFactoryTest {
         val localPrivateKey = toBase64(generateSecretKey())
         val remotePublicKey = toBase64(checkNotNull(generatePublicKey(generateSecretKey())))
 
-        val config = ParsedVpnConfiguration(
+        val config = VpnConfiguration(
             interfaceName = "wg-test",
             privateKey = localPrivateKey,
-            peers = listOf(ParsedVpnPeer(publicKey = remotePublicKey)),
+            peers = listOf(VpnPeer(publicKey = remotePublicKey)),
         )
 
         val factory = BoringTunPeerSessionFactory()
@@ -71,19 +71,19 @@ class JvmBoringTunPeerSessionFactoryTest {
         val responderKey = generateSecretKey()
         val factory = BoringTunPeerSessionFactory()
         val initiator = factory.create(
-            config = ParsedVpnConfiguration(
+            config = VpnConfiguration(
                 interfaceName = "wg-test",
                 privateKey = toBase64(initiatorKey),
             ),
-            peer = ParsedVpnPeer(publicKey = toBase64(checkNotNull(generatePublicKey(responderKey)))),
+            peer = VpnPeer(publicKey = toBase64(checkNotNull(generatePublicKey(responderKey)))),
             peerIndex = 1,
         )
         val responder = factory.create(
-            config = ParsedVpnConfiguration(
+            config = VpnConfiguration(
                 interfaceName = "wg-test",
                 privateKey = toBase64(responderKey),
             ),
-            peer = ParsedVpnPeer(publicKey = toBase64(checkNotNull(generatePublicKey(initiatorKey)))),
+            peer = VpnPeer(publicKey = toBase64(checkNotNull(generatePublicKey(initiatorKey)))),
             peerIndex = 2,
         )
 

@@ -1,5 +1,6 @@
 package com.rafambn.wgkotlin
 
+import com.rafambn.wgkotlin.util.resolveToIp
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 
@@ -18,8 +19,8 @@ class VpnContractInvariantsTest {
     @Test
     fun rejectsDuplicatePeerPublicKeysOnOpen() {
         val duplicatedPeers = listOf(
-            VpnPeer(publicKey = "peer-a", endpointAddress = "198.51.100.1", endpointPort = 51820),
-            VpnPeer(publicKey = "peer-a", endpointAddress = "198.51.100.2", endpointPort = 51821),
+            VpnPeer(publicKey = "peer-a", endpointAddress = "198.51.100.1".resolveToIp(), endpointPort = 51820),
+            VpnPeer(publicKey = "peer-a", endpointAddress = "198.51.100.2".resolveToIp(), endpointPort = 51821),
         )
 
         val vpn = testVpn()

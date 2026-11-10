@@ -1,5 +1,7 @@
 package com.rafambn.wgkotlin.iface
 
+import com.rafambn.wgkotlin.util.toCidr
+import com.rafambn.wgkotlin.util.resolveToIp
 import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.Vpn
 import com.rafambn.wgkotlin.VpnPeer
@@ -29,11 +31,11 @@ class DaemonIpcIntegrationTest {
                 fun configuration(name: String) = VpnConfiguration(
                     interfaceName = name,
                     listenPort = 0,
-                    addresses = mutableListOf("10.0.0.2/32"),
+                    addresses = listOf("10.0.0.2/32".toCidr()),
                     privateKey = "oA8gY5Yg7R6pujISiFDUFxIr05o2IaNbS1Ry6j3TzXs=",
                     peers = listOf(VpnPeer(
                         publicKey = "6fX3drXr/7L0KleChX2NDSSSXWMQZnIcXtNCmieYw0I=",
-                        endpointAddress = "198.51.100.1", endpointPort = 51820,
+                        endpointAddress = "198.51.100.1".resolveToIp(), endpointPort = 51820,
                     )),
                 )
                 first.open(configuration("utun10"))

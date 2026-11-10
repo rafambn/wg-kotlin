@@ -24,7 +24,6 @@ class Vpn(
     )
     private val socketManager = SocketManagerImpl(networkPipe = networkPipePair.first)
     private val interfaceManager = PlatformInterfaceFactory.create(tunPipePair.first)
-    private var currentParsedConfiguration: ParsedVpnConfiguration? = null
     private var originalConfiguration: VpnConfiguration? = null
 
     fun isRunning(): Boolean {
@@ -32,16 +31,16 @@ class Vpn(
     }
 
     fun open(configuration: VpnConfiguration) {
-        requireValidConfiguration(configuration)
+        requireNonBlankInterfaceName(configuration.interfaceName)
+        requireValidRegex(configuration.interfaceName)
+        requireUniquePeerPublicKeys(configuration.peers)
 
-        val parsed = configuration.toParsedVpnConfiguration()
         stop()
 
-        currentParsedConfiguration = parsed
         originalConfiguration = configuration
 
         operation("reconcileSessions") {
-            cryptoSessionManager.reconcileSessions(parsed)
+            cryptoSessionManager.reconcileSessions(configuration)
         }
 
         operation("start") {
@@ -56,7 +55,7 @@ class Vpn(
         }
 
         operation("start") {
-            interfaceManager.start(parsed.toTunSessionConfig()) { stop() }
+            interfaceManager.start(configuration.toTunSessionConfig()) { stop() }
         }
     }
 
@@ -92,7 +91,6 @@ class Vpn(
         } catch (error: Throwable) {
             if (firstError == null) firstError = error
         }
-        currentParsedConfiguration = null
         originalConfiguration = null
         if (firstError != null) throw firstError
     }

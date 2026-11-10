@@ -1,11 +1,11 @@
 package com.rafambn.wgkotlin.crypto
 
-import com.rafambn.wgkotlin.ParsedVpnPeer
+import com.rafambn.wgkotlin.VpnPeer
 import com.rafambn.wgkotlin.network.io.UdpEndpoint
 import com.rafambn.wgkotlin.util.toPlainString
 
 internal data class PeerSessionEntry(
-    val peer: ParsedVpnPeer,
+    val peer: VpnPeer,
     val session: PeerSession,
 ) {
     fun peerEndpoint(): UdpEndpoint {

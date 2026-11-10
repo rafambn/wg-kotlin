@@ -23,8 +23,12 @@ class Vpn(
 
     private val tunPipePair = DuplexChannelPipe.create<ByteArray>()
     private val networkPipePair = DuplexChannelPipe.create<UdpDatagram>()
-    private val cryptoSessionManager = CryptoSessionManagerImpl(tunPipePair.second, networkPipePair.second, engine)
-    private val socketManager = SocketManagerImpl(networkPipePair.first)
+    private val cryptoSessionManager = CryptoSessionManagerImpl(
+        tunPipe = tunPipePair.second,
+        networkPipe = networkPipePair.second,
+        engine = engine,
+    )
+    private val socketManager = SocketManagerImpl(networkPipe = networkPipePair.first)
     private val interfaceManager = PlatformInterfaceFactory.create(tunPipePair.first)
     // Lifecycle operations are blocking and run one at a time, including failure cleanup.
     private val lifecycleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
@@ -40,37 +44,40 @@ class Vpn(
         interfaceManager.isRunning() && cryptoSessionManager.hasActiveSessions()
     }
 
-    fun open(configuration: VpnConfiguration) {
+    fun open(configuration: VpnConfiguration): Unit = onLifecycle {
         requireValidConfiguration(configuration)
         require(configuration.interfaceName == interfaceName) {
             "Configuration interface name `${configuration.interfaceName}` does not match this Vpn's interface name `$interfaceName`"
         }
 
         val parsed = configuration.toParsedVpnConfiguration()
-        onLifecycle {
-            stopManagers()
-            currentParsedConfiguration = parsed
-            originalConfiguration = configuration
-            val onFailure: (Throwable) -> Unit = {
-                lifecycleScope.launch {
-                    if (currentParsedConfiguration === parsed) stopManagers()
-                }
+        stopManagers()
+
+        currentParsedConfiguration = parsed
+        originalConfiguration = configuration
+        val onFailure: (Throwable) -> Unit = {
+            lifecycleScope.launch {
+                if (currentParsedConfiguration === parsed) stopManagers()
             }
-            try {
-                operation("reconcileSessions") { cryptoSessionManager.reconcileSessions(parsed) }
-                operation("start") { cryptoSessionManager.start(onFailure) }
-                operation("socketStart") {
-                    socketManager.start(configuration.listenPort ?: DEFAULT_PORT, onFailure)
-                }
-                operation("start") { interfaceManager.start(parsed.toTunSessionConfig(), onFailure) }
-            } catch (error: Throwable) {
-                try {
-                    stopManagers()
-                } catch (cleanupError: Throwable) {
-                    error.addSuppressed(cleanupError)
-                }
-                throw error
-            }
+        }
+
+        operation("reconcileSessions") {
+            cryptoSessionManager.reconcileSessions(parsed)
+        }
+
+        operation("start") {
+            cryptoSessionManager.start(onFailure)
+        }
+
+        operation("socketStart") {
+            socketManager.start(
+                listenPort = configuration.listenPort ?: DEFAULT_PORT,
+                onFailure = onFailure,
+            )
+        }
+
+        operation("start") {
+            interfaceManager.start(parsed.toTunSessionConfig(), onFailure)
         }
     }
 

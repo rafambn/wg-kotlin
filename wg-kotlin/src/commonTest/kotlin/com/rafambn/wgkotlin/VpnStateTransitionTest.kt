@@ -11,7 +11,7 @@ class VpnStateTransitionTest {
 
     @Test
     fun lifecycleTransitionsFollowContract() {
-        val vpn = testVpn(interfaceName = "utun130")
+        val vpn = testVpn()
 
         assertFalse(vpn.isRunning())
 

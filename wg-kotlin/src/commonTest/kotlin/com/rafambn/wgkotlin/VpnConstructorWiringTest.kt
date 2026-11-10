@@ -12,8 +12,8 @@ class VpnConstructorWiringTest {
 
     @Test
     fun secondaryConstructorBuildsIndependentInstances() {
-        val first = Vpn(interfaceName = "utun101")
-        val second = Vpn(interfaceName = "utun102")
+        val first = Vpn()
+        val second = Vpn()
 
         assertNotSame(first, second)
         assertFalse(first.isRunning())
@@ -41,7 +41,6 @@ class VpnConstructorWiringTest {
     @Test
     fun explicitEngineStillSupportsLifecycle() {
         val vpn = Vpn(
-            interfaceName = "utun103",
             engine = Engine.BORINGTUN,
         )
 

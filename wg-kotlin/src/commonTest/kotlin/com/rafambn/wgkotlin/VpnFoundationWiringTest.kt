@@ -14,7 +14,7 @@ class VpnFoundationWiringTest {
 
     @Test
     fun inMemoryLifecycleStillWorks() {
-        val vpn = testVpn(interfaceName = "utun120")
+        val vpn = testVpn()
 
         assertFalse(vpn.isRunning())
 
@@ -35,7 +35,7 @@ class VpnFoundationWiringTest {
 
     @Test
     fun repeatedStartKeepsVpnRunning() {
-        val vpn = testVpn(interfaceName = "utun121")
+        val vpn = testVpn()
 
         vpn.open(
             VpnConfiguration(
@@ -59,7 +59,7 @@ class VpnFoundationWiringTest {
 
     @Test
     fun stopThenOpenWithNewConfigUpdatesConfiguration() {
-        val vpn = testVpn(interfaceName = "utun122")
+        val vpn = testVpn()
 
         vpn.open(
             VpnConfiguration(

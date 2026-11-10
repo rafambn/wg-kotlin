@@ -11,7 +11,7 @@ class VpnContractInvariantsTest {
     @Test
     fun rejectsBlankInterfaceName() {
         assertFailsWith<IllegalArgumentException> {
-            testVpn(interfaceName = " ")
+            testVpn().open(VpnConfiguration(interfaceName = " ", privateKey = privateKey))
         }
     }
 
@@ -22,7 +22,7 @@ class VpnContractInvariantsTest {
             VpnPeer(publicKey = "peer-a", endpointAddress = "198.51.100.2", endpointPort = 51821),
         )
 
-        val vpn = testVpn(interfaceName = "utun110")
+        val vpn = testVpn()
 
         assertFailsWith<IllegalArgumentException> {
             vpn.open(
@@ -36,13 +36,13 @@ class VpnContractInvariantsTest {
     }
 
     @Test
-    fun openRejectsMismatchedInterfaceName() {
-        val vpn = testVpn(interfaceName = "utun112")
+    fun openRejectsInvalidInterfaceName() {
+        val vpn = testVpn()
 
         assertFailsWith<IllegalArgumentException> {
             vpn.open(
                 VpnConfiguration(
-                    interfaceName = "utun113",
+                    interfaceName = "wg0",
                     privateKey = privateKey,
                 ),
             )

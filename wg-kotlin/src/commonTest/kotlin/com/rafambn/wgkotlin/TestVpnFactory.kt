@@ -1,11 +1,9 @@
 package com.rafambn.wgkotlin
 
 internal fun testVpn(
-    interfaceName: String,
     engine: Engine = Engine.BORINGTUN,
 ): Vpn {
     return Vpn(
-        interfaceName = interfaceName,
         engine = engine,
     )
 }

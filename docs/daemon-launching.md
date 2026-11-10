@@ -11,7 +11,7 @@ connection to that endpoint. Closing one session leaves other sessions running.
 val daemon = DaemonProcess.launch(logPath = applicationLogPath) { arguments ->
     applicationPrivilegedLauncher(arguments)
 }
-val vpn = Vpn(interfaceName = "utun0")
+val vpn = Vpn()
 try {
     vpn.open(configuration)
 } finally {
@@ -299,7 +299,8 @@ exit, clients that stop reading, route/DNS cleanup failures, and an unresponsive
 resolver with a single async worker. Privileged macOS and Windows shutdown have
 not been exercised in this validation.
 
-Use the existing `Vpn(interfaceName, engine)` constructor and `open(configuration)`.
+Use `Vpn(engine)` and `open(configuration)`. The interface name comes from
+`configuration.interfaceName` and is validated when opening the VPN.
 `DaemonProcess.launch(...)` registers the first running daemon for JVM VPN sessions.
 Further launches do not replace that active registration. Closing or killing the
 registered daemon removes it. Constructing a VPN does not require a daemon yet;

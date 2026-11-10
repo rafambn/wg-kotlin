@@ -260,7 +260,7 @@ class CryptoSessionManagerTest {
 
         manager.start(onFailure = { throw it })
 
-        val encryptedPayload = byteArrayOf(0x01, 0x02, 0x03)
+        val encryptedPayload = fakeIpv4Packet()
         testNet.send(
             UdpDatagram(
                 payload = encryptedPayload,

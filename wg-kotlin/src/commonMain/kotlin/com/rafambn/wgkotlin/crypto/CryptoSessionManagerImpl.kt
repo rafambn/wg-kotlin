@@ -238,9 +238,8 @@ internal class CryptoSessionManagerImpl(
                             is PacketAction.WriteToTunIpv4 -> pendingTun += result.packet
                             is PacketAction.WriteToTunIpv6 -> pendingTun += result.packet
                             PacketAction.Done -> Unit
-                            is PacketAction.Error -> throw IllegalStateException(
-                                "Session `${selected.session.peerPublicKey}` returned error code `${result.code}` for `decryptToRawPacket`",
-                            )
+                            // A rejected datagram does not invalidate the peer's session.
+                            is PacketAction.Error -> break
                             is PacketAction.NotSupported -> throw IllegalStateException(
                                 "Session `${selected.session.peerPublicKey}` does not support `${result.operation}`",
                             )

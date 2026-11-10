@@ -8,6 +8,7 @@ internal interface CryptoSessionManager {
 
     fun start(onFailure: (Throwable) -> Unit)
 
+    /** Waits for workers before closing peer sessions. Call outside the failure callback. */
     fun stop()
 
     fun peerStats(): List<VpnPeerStats>

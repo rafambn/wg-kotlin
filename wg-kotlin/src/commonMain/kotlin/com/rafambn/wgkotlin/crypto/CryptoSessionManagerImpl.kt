@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
@@ -118,6 +119,7 @@ internal class CryptoSessionManagerImpl(
 
     override fun start(onFailure: (Throwable) -> Unit) {
         scope?.cancel("CryptoSessionManager restarted")
+        runBlocking { scope?.coroutineContext?.job?.join() }
         peerStatsByPublicKey.clear()
 
         val coroutineLabel = "kmpvpn-crypto"
@@ -139,6 +141,7 @@ internal class CryptoSessionManagerImpl(
 
     override fun stop() {
         scope?.cancel("CryptoSessionManager stopped")
+        runBlocking { scope?.coroutineContext?.job?.join() }
         scope = null
         sessionEntriesByPeer.values.forEach { entry -> entry.session.close() }
         sessionEntriesByPeer = emptyMap()

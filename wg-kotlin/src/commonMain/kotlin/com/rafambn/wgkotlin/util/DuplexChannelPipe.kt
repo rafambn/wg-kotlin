@@ -22,6 +22,12 @@ class DuplexChannelPipe<T> internal constructor(
         return receiveChannel.receive()
     }
 
+    /** Discards both directions after all producers and consumers have stopped. */
+    internal fun discardPending() {
+        while (sendChannel.tryReceive().isSuccess) { }
+        while (receiveChannel.tryReceive().isSuccess) { }
+    }
+
     companion object {
         const val DEFAULT_CAPACITY: Int = 64
 

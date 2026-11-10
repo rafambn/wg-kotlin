@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
@@ -114,6 +115,7 @@ internal class SocketManagerImpl(
         runCatching { ipv6Socket?.close() }
         selectorManager?.close()
         scope?.cancel("SocketManager stopped")
+        runBlocking { scope?.coroutineContext?.job?.join() }
         ipv4Socket = null
         ipv6Socket = null
         selectorManager = null

@@ -15,7 +15,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.io.bytestring.ByteString
 
 /** One authenticated IPC connection owns one TUN session. */
@@ -43,9 +45,11 @@ internal class DaemonSessionBridge : SessionBridge {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("wg-kotlin-ipc-session"))
         val closed = AtomicBoolean()
         fun close() {
-            if (closed.compareAndSet(false, true)) {
-                connection.close()
+            try {
+                if (closed.compareAndSet(false, true)) connection.close()
+            } finally {
                 scope.cancel()
+                runBlocking { scope.coroutineContext.job.join() }
             }
         }
         fun fail(error: Throwable) {

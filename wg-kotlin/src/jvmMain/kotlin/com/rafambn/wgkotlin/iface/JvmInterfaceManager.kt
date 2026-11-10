@@ -22,12 +22,7 @@ class JvmInterfaceManager(
             sessionBridge.openSession(
                 config = config,
                 pipe = tunPipe,
-                onFailure = { throwable ->
-                    runCatching { activeBridge?.close() }
-                    activeBridge = null
-                    currentConfig = null
-                    onFailure(throwable)
-                },
+                onFailure = onFailure,
             )
         } catch (error: Throwable) {
             try {

@@ -18,7 +18,8 @@ interface SocketManager {
     fun start(listenPort: Int, onFailure: (Throwable) -> Unit)
 
     /**
-     * Closes the UDP socket and cancels worker coroutines.
+     * Closes the UDP socket and waits for worker coroutines to stop.
+     * Call from the lifecycle owner, outside the workers and their failure callbacks.
      */
     fun stop()
 

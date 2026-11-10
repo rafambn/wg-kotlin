@@ -1,41 +1,884 @@
-Simplificação do daemon
+Objetivo atual: usar somente talpid-routing original nas três plataformas,
+sem vendor, patches ou acesso a implementações privadas. A integração mantém
+somente a coordenação de sessões e usa o gerenciador público da biblioteca.
 
-Objetivo: reduzir a complexidade e buscar uma redução de aproximadamente 4 mil
-linhas. As três refatorações abaixo são melhorias locais e não atingem essa
-meta sozinhas. Uma redução maior exige rever as responsabilidades do daemon e
-o código de configuração de rede de cada plataforma, mantendo explícitos os
-comportamentos que forem preservados ou abandonados.
+Contagem atual: 1.102 linhas de código. A base anterior ao Talpid tinha 1.513.
+A versão intermediária com fork tinha 1.282 e foi substituída nesta etapa.
 
-Medir linhas de produção e testes separadamente. Excluir código gerado, builds,
-Cargo.lock e documentação da meta de redução de código. Mover código entre
-arquivos ou excluir testes úteis não conta como simplificação do comportamento.
+[x] Em 09/11/2026, substituir o fork local pelo talpid-routing original a pedido
+    do usuário. A dependência Git fica fixada na revisão
+    95bc5f5cdeca6f7624b4a76499a5cc86f9480f80, com Cargo.lock atualizado.
+    Remover vendor/mullvad, upstream.patch, a API direta e seus testes internos.
+    Usar RouteManagerHandle, RequiredRoute e Node públicos. Um runtime persistente
+    mantém os atores e monitores originais ativos entre operações.
+    A integração compartilha pedidos idênticos e rejeita prefixos conflitantes.
+    Após criar a TUN, reinicia o gerenciador para que o snapshot de interfaces
+    inclua a nova interface. Isso evita ENODEV ao abrir várias sessões.
+    Ao liberar rotas, stop + spawn + add_routes reconstrói o conjunto restante;
+    no Linux a remoção individual pública é um no-op. Isso pode interromper
+    brevemente as rotas das outras sessões, assim como a abertura de outra VPN.
+    A última liberação para o gerenciador.
+    macOS/Windows usam DefaultNode para os endpoints e seguem a rota padrão
+    externa monitorada. Linux consulta o nó selecionado antes de criar a TUN.
+    A restauração de defaults macOS e a limpeza de regras Linux seguem o upstream.
+    Falhas de limpeza que a biblioteca apenas registra ficam no log do daemon;
+    não prometemos confirmação de exclusão nem retentativa que ela não oferece.
+    O lookup Linux original não interpreta FIB multipath-only e devolve erro
+    antes de criar a TUN. Manter essa limitação, sem fallback nativo local.
+    A suíte nativa Linux atualizada confirmou troca de pacotes, DNS, rollback,
+    compartilhamento e conflitos nas ordens de fechamento. A compilação e a
+    análise dos três alvos usam a dependência Git original. Em 09/11, o usuário
+    executou os dois testes nativos macOS desta versão com privilégios. Ambos
+    confirmaram endpoint compartilhado, VPN restante após cada ordem de
+    fechamento, troca de pacotes, DNS e limpeza final. A execução nativa Windows
+    continua pendente. A validação do fork não foi reutilizada como prova da
+    integração original.
 
-[ ] 1. Dar um único dono ao ciclo de vida de cada sessão.
-    Concentrar criação, transporte, encerramento, limpeza e liberação da reserva
-    em um fluxo principal. Reduzir o compartilhamento do estado de limpeza por
-    Arc, Mutex e AtomicBool. Toda saída, inclusive falha durante a inicialização,
-    deve concluir a limpeza e liberar a reserva uma única vez.
-    Alvos: daemon/src/server.rs e daemon/src/session.rs.
-    Estimativa após retirar o Scribe: 20 a 60 linhas de produção removidas.
+A métrica escolhida pelo usuário conta apenas código, sem comentários e linhas
+vazias. A medição usa cloc 2.08 no código de produção em daemon/src, nas três
+plataformas. O código original das dependências fica fora da contagem.
+Exclui arquivos *_tests.rs e as seções de teste ao final dos módulos,
+além de exemplos, código gerado, builds, Cargo.lock e documentação. Imports e
+declarações de módulos fazem parte do código. Mover código de produção para
+outro arquivo ou módulo não conta como redução.
 
-[ ] 2. Experimentar a TUN assíncrona da tun-rs.
-    Verificar suporte e cancelamento nas três plataformas antes de migrar.
-    Substituir SyncDevice, o leitor bloqueante, InterruptEvent, Handle::block_on
-    e os canais usados exclusivamente para coordenar essa leitura quando a API
-    assíncrona permitir. Manter as operações bloqueantes de configuração e
-    limpeza de rede fora do executor assíncrono.
-    Alvos: daemon/src/server.rs e daemon/src/session.rs.
-    Estimativa: 40 a 100 linhas de produção removidas, com sobreposição ao item 1.
+[x] Revisar a implementação completa com o Astra e corrigir as rotas compartilhadas.
+    No macOS, a posse passa a ser coordenada por processo: fechar sessões fora
+    da ordem de criação preserva os outros proprietários e a rota original.
+    Falhas parciais mantêm as informações necessárias à limpeza posterior.
+    Linux e Windows compartilham o pin de endpoint até a última sessão fechar;
+    uma falha de DNS em outra sessão não remove esse pin. No Linux, a primeira
+    aquisição substitui e a última remove, sem restaurar rotas anteriores.
+    A resolução e a instalação são serializadas com a limpeza de rotas, mas
+    soltam o mutex antes das operações DNS. O Astra reavaliou as correções e
+    não encontrou novos achados confirmados. Os testes incluem ordens de
+    fechamento, rollback, payloads nativos e DNS deliberadamente bloqueado.
+    A execução privilegiada macOS fornecida pelo usuário confirmou as duas
+    ordens de fechamento, a preservação do pin compartilhado, a restauração
+    da rota original e de seu MTU e a remoção das interfaces temporárias.
+    Windows foi verificado por compilação estática; não houve execução nativa.
 
-[ ] 3. Unificar cancelamento e espera pelas tarefas.
-    Definir um mecanismo explícito para solicitar o encerramento e acompanhar
-    conexões e sessões até o término da limpeza. Substituir a consulta repetida
-    a active_sessions em wait_for_sessions por acompanhamento das tarefas.
-    Preservar os prazos de encerramento e a limpeza quando o cliente desconecta
-    durante a inicialização ou deixa de consumir respostas.
-    Alvos: daemon/src/main.rs e daemon/src/server.rs.
-    Estimativa: pode acrescentar 10 linhas ou remover até 20 linhas de produção.
-    O ganho principal é tornar o encerramento mais fácil de compreender.
+Os testes unitários ficam em daemon/tests/unit, incluindo os módulos de cada
+plataforma e o fixture PowerShell. Os testes de integração ficam diretamente
+em daemon/tests. Os vínculos #[cfg(test)] em src preservam o acesso aos membros
+privados e os nomes dos testes. Essa organização não muda a contagem de produção.
 
-As estimativas não são cumulativas. As três mudanças juntas devem remover
-aproximadamente 50 a 140 linhas de produção. Nenhuma delas está implementada.
+O script wg-kotlin-daemon-rust/scripts/count_production_loc.py reproduz a medida
+com Python 3 e cloc. Aceita também --cloc perl /caminho/para/cloc, sem instalar
+o executável no sistema. O campo code do JSON é o usado na meta.
+
+Antes da troca de métrica, a contagem física caiu de 2.685 para 1.723 linhas,
+redução de 962. Essa medida inclui comentários e vazias e não é usada na meta atual.
+As reduções anteriores registradas abaixo mantêm essa unidade; novas revisões
+declaram explicitamente quando a medida é de código.
+
+[x] Buscar a rota na captura do macOS sem coletar todas as entradas.
+    A busca guarda a primeira correspondência e continua validando as mensagens
+    seguintes. Mantidos os bytes originais, escopo, métricas e os erros de uma
+    captura truncada ou inválida, inclusive depois da correspondência. A chave
+    usa os bytes emprestados; apenas a rota encontrada é copiada. Redução de
+    5 linhas de código, de 1.497 para 1.492.
+
+[x] 1. Dar um único dono ao ciclo de vida de cada sessão.
+    Cada tarefa de conexão acompanha criação, transporte, limpeza e liberação
+    da reserva. TunSession não usa Arc/Mutex/AtomicBool para compartilhar o
+    encerramento. A limpeza consome a sessão e, no macOS, seu registro de rotas.
+    A desconexão durante a inicialização não abandona o trabalhador bloqueante.
+    As conexões compartilham o serviço inteiro por Arc, com um único registro
+    de sessões, sem cópias do serviço que compartilhem apenas esse registro.
+    O ciclo de vida da sessão fica junto da reserva e de sua remoção, retirando o
+    helper run_session e seus parâmetros. Nomes bruto, reservado e real seguem
+    distintos; transferência e limpeza mantêm relatos independentes. O receiver
+    de shutdown pertence a esse escopo e cai antes da remoção da reserva.
+    O percurso contíguo mantém todas as esperas e retira 5 linhas de código.
+
+[x] Representar a criação de sessões por uma factory.
+    SessionManager só configurava a criação. SessionFactory captura os recursos
+    prontos e elimina Option<DLL> e sua falha impossível no daemon Windows.
+    A DLL continua preparada antes do listener e guardada após o dispositivo
+    no último campo da sessão. O exemplo Windows injeta apenas a falha de
+    criação, mantendo o serviço real e a integração sem privilégios.
+    Novos ensaios conferem que desconexão/desligamento aguardam o inicializador
+    e que erros nativos e panics preservam código, causa e liberação da reserva.
+    Há uma alocação adicional por daemon e despacho por inicialização, sem custo
+    por pacote. Redução de 7 linhas de código, de 1.489 para 1.482.
+    A criação da factory também prepara a DLL no Windows. O main usa a mesma
+    chamada nas três plataformas, mantendo a falha anterior à abertura do
+    listener e a referência da DLL após o dispositivo em cada sessão. Redução
+    adicional de 4 linhas de código.
+
+[x] 2. Usar a TUN assíncrona da tun-rs.
+    AsyncDevice substitui SyncDevice, leitor bloqueante, InterruptEvent e canais
+    usados apenas para coordenar a leitura. Um leitor permanece ativo em cada
+    direção para não cancelar parcialmente um frame IPC a cada pacote recebido.
+    A fila de saída continua limitada a 64 respostas. Configuração e limpeza de
+    rede continuam em trabalhadores bloqueantes.
+    As implementações da dependência foram conferidas nas três plataformas.
+    Troca de pacotes e encerramento foram exercitados com TUN real no Linux.
+
+[x] 3. Unificar cancelamento e espera pelas tarefas.
+    watch solicita o encerramento e JoinSet acompanha as conexões até o fim da
+    limpeza. Removida a consulta repetida a active_sessions em wait_for_sessions.
+    Mantidos os prazos de escrita, inicialização IPC e encerramento do daemon.
+    Filas cheias e sequências de I/O imediatamente pronto não impedem parada.
+    A criação e o pin do future de sinais usam std::pin::pin! em uma declaração,
+    com mutabilidade explícita. Redução de uma linha de código. Um teste nativo
+    Linux envia SIGTERM e SIGINT com duas sessões reais abertas; espera o handler
+    do kernel estar instalado e confere saída bem-sucedida e limpeza de ambas.
+
+[x] Validar e converter a configuração uma vez.
+    Config mantém CIDRs tipados e DNS normalizado. A validação é comparada com
+    a implementação anterior em testes que preservam a ordem e os erros.
+    O validador do nome também devolve sua forma final, usando uma única leitura
+    do índice no macOS. Linux e Windows preservam o nome recebido, inclusive zeros.
+    A escolha da forma final usa uma única condição cfg!, com dois ramos de
+    código portátil, no lugar de atributos cfg separados. Retirada uma linha
+    de código; mantidas as mesmas alocações, regras, mensagens e formas finais
+    dos nomes. Linux e Windows continuam preservando todos os zeros recebidos.
+    Itertools::unique substitui o helper local de deduplicação, preservando a
+    primeira ocorrência e a ordem. A versão 0.14.0 já estava no lockfile e não mudou.
+    MTU zero vira None; valores explícitos ficam em NonZeroU16. O builder é
+    montado sem estado mutável e mantém o padrão da plataforma quando ausente.
+    Um ensaio com TUN real comparou o padrão e os MTUs explícitos antes e depois.
+    A validação usa uma única faixa de MTU, com mínimo 576 para IPv4 ou 1280
+    quando há IPv6. Mantidos zero como padrão, máximo 65535, etapa da falha e
+    InvalidArgument. A mensagem padronizada informa a faixa aplicável. A
+    comparação com a referência congelada percorre todos os valores 0..65536,
+    extremos de i32 e quatro combinações/ordens de famílias. Um ensaio IPC
+    confere código e causa sem inicializar a sessão. Redução de 3 linhas de código.
+    Os endpoints são convertidos uma vez; inválidos permanecem None até a
+    resolução, preservando a etapa de falha e o código do protocolo. Retirados
+    a segunda conversão e o vetor temporário usado pelo filtro de rotas.
+    Laços explícitos substituem map/collect na validação das redes e na resolução
+    dos endpoints. As três checagens de quantidade ficam nos seus percursos,
+    sem helper genérico. Mantidas a primeira falha, a ordem das consultas e as
+    mensagens comparadas com a referência. Redução de 9 linhas de código.
+    No Mac, até onze dígitos ASCII cabem em u64; ler nesse tipo e conferir o
+    limite elimina o Option/filter intermediário. Mantidos 0..=4294967294 e a
+    canonicalização do nome. Redução adicional de 3 linhas de código.
+    O parser de IP do protobuf tem um único consumidor de produção e agora
+    pertence ao validador como função privada. A conversão é a mesma; foram
+    retirados o módulo auxiliar e os imports entre módulos. Redução de 3 linhas
+    de código, incluindo os imports finais, sem excluir a função da contagem.
+    Arrays de quatro ou dezesseis bytes passam diretamente para IpAddr, sem
+    criar explicitamente Ipv4Addr/Ipv6Addr antes da conversão final. A std faz
+    os mesmos construtores internamente; mantidos comprimento, família e
+    octetos. Com menos tipos concretos, os imports std ficam reunidos, retirando
+    mais uma linha de código.
+
+[x] Compartilhar a sequência de configuração e limpeza das plataformas.
+    Mantidos os comandos e políticas próprios de cada sistema, a restauração
+    de rotas no macOS e a tentativa de todas as etapas de limpeza após falhas.
+    No Linux, rtnetlink assume transporte, sequência e codificação netlink;
+    a seleção por UID/UDP e os atributos das rotas continuam explícitos.
+    A família da consulta usa a conversão From<IpAddr> já fornecida por
+    netlink-packet-route 0.28, com os mesmos Inet/Inet6. Retirados a seleção
+    manual e seu import, sem mudar os outros campos. Redução de 3 linhas de código.
+    A configuração devolve diretamente o resultado de set_dns quando há
+    servidores. O validador já garante o par servidores/domínios, sem outro
+    produtor de Config no código de produção. A limpeza prévia e os erros de
+    configuração/recuperação permanecem iguais. Redução de 3 linhas de código.
+
+[x] Substituir wrappers manuais por APIs já usadas pelo projeto.
+    socket2 cria o socket de rotas e codifica sockaddr no macOS. rustix mantém
+    a posse e a consulta do pidfd no Linux. O SDK Windows libera as alocações
+    locais e os tokens por tipos de posse, sem blocos manuais de retorno.
+    A identificação da aplicação pertence ao fluxo principal, sem Arc onde
+    não há compartilhamento.
+    TempPath remove o socket Unix no lugar do Drop manual do listener. É criado
+    somente após bind e descartado antes de fechar o listener; o diretório é
+    removido por último, sem recursão. Ensaios no Mac e Linux conferem colisões,
+    falha de bind, arquivos alheios e conexões já aceitas após fechar o listener.
+    O listener Unix é inicializado diretamente como primeiro campo avaliado
+    do objeto. Mantidos bind antes de TempPath, o guard prévio do diretório e
+    a ordem de descarte declarada nos campos. No Windows, a instância inicial
+    também é criada antes das cópias de texto, diretamente no objeto; a próxima
+    entra diretamente em mem::replace. Uma falha na criação mantém a instância
+    antiga intacta. Retirados três intermediários usados uma única vez, com
+    redução de 3 linhas de código e sem mudar chamadas ou argumentos nativos.
+    tempfile 3.27.0 já estava no lock e agora é dependência direta Unix, sem
+    features padrão. Nenhum pacote mudou de versão. Redução de 4 linhas de código.
+
+[x] Compartilhar a representação das mensagens de rota do macOS.
+    Endpoints, rotas da TUN e cópias da tabela do kernel usam RouteMessage.
+    A representação, seu transporte e o histórico da sessão ficam juntos em
+    macos.rs, selecionado como backend nativo. RouteMessage mantém uma única
+    implementação. Retirados
+    imports cruzados/duplicados e a declaração do módulo separado. Os helpers
+    agora são privados ao módulo. Redução de 8 linhas de código, incluindo o
+    chamador, sem retirar produção da contagem. As suítes de bytes de referência
+    e histórico continuam separadas e usam os mesmos percursos de produção.
+    O encoder também escreve e alinha cada endereço diretamente em seu laço,
+    retirando append, que tinha um único consumidor. As três operações de
+    escrita permanecem iguais. Os testes de histórico constroem as entradas
+    usando o append já existente na referência congelada, sem depender desse
+    trecho do encoder atual. Redução de 3 linhas de código.
+    A comparação reúne os cabeçalhos esquerdo/direito e seus atributos em
+    pares nomeados. Mantidas a ordem de leitura e a primeira falha, com
+    redução adicional de 2 linhas de código, sem trocar nomes por índices.
+    Um único montador aplica interface, flags e métricas ao enviar ADD/DELETE.
+    A criação e o reenvio compartilham a codificação dos endereços, do tamanho
+    e da máscara de atributos da mensagem, sem perder o cabeçalho original.
+    A comparação com a implementação anterior cobre IPv4/IPv6, gateways,
+    origem, mensagens de consulta, métricas completas, padding e endereços
+    adicionais. A restauração continua protegendo alterações externas.
+    Seu registro guarda a rota tentada como Option, sem um booleano separado.
+    Mesmo sem tentativa de inclusão, restaura o backup quando a entrada some
+    após uma falha de remoção; se a entrada ainda existe, permanece intacta.
+    O parser percorre apenas os bits presentes, mantendo ordem, padding e os
+    mesmos erros para atributos truncados. A origem opcional é acrescentada por
+    extend e a restauração devolve diretamente o resultado do backup opcional.
+    Essas simplificações retiraram 11 linhas sem alterar as mensagens comparadas
+    byte a byte nem os percursos de falha e proteção contra mudanças externas.
+    O parser também foi comparado em todos os bitmaps de atributos, incluindo
+    comprimentos zero, bits desconhecidos e truncamentos de cada payload e padding.
+    HOST_FLAGS compartilha a definição das flags de consulta e fixação do host.
+    A chave não guarda a família em duplicidade: o comprimento normalizado de
+    4/16 bytes já a distingue. A validação nativa continua igual. O contrato de
+    busca confere separação entre famílias, inclusive endereços e máscaras zerados.
+    Redução adicional de 2 linhas de código.
+    A máscara opcional distingue host de rede sem outro booleano nem alocar
+    bytes 255 para hosts. Redes /32 e /128 continuam distintas de hosts. Nas
+    redes, uma máscara ausente na mensagem continua normalizada com zeros.
+    A normalização devolve um iterador; comparações não criam vetores e a chave
+    coleta o destino com um match explícito entre host e rede. Preservados
+    zero-fill, FE80/10 e erros, inclusive com endereços parciais, comparados com
+    o normalizador anterior. Redução adicional de 2 linhas de código.
+    find devolve somente a chave exata, e a rota tentada guarda os bytes usados
+    para registrá-la. same_egress verifica só interface, flags, gateway e origem,
+    sem repetir a chave. Mantidos os erros e a proteção contra mudanças externas.
+    O histórico usa IndexMap para unicidade e ordem de inserção, restaurada ao
+    contrário. Uma duplicata mantém a posição e o primeiro backup. O registro
+    continua anterior a DELETE e a tentativa anterior a ADD. A versão 2.14.0
+    já estava no lock, sem upgrade; a dependência é direta só no Mac. A tabela
+    de índices/hash tem custo adicional de memória. Redução conjunta de 6 linhas
+    de código, incluindo o novo import.
+    A restauração de cada entrada fica no percurso inverso desse mesmo histórico,
+    eliminando o método intermediário de RouteChange. A agregação continua
+    tentando todas as entradas, mesmo após falhas. Redução de 3 linhas de código.
+    ALL_ROUTE_METRICS nomeia a seleção das oito métricas configuráveis. O valor
+    0xff corresponde aos oito bits RTV_* de net/route.h, de 0x01 a 0x80. A
+    referência independente continua enumerando os símbolos do SDK e comparando
+    os bytes completos de ADD/DELETE. GET mantém a máscara zero. Redução de
+    7 linhas de código.
+
+[x] Remover validação e normalização duplicadas de domínios DNS.
+    hostname-validator mantém as regras de hostname antes implementadas no
+    daemon. Os domínios são normalizados no mesmo percurso da validação.
+    A comparação com o validador anterior cobre caracteres, comprimentos,
+    erros e a ordem dos resultados. Os limites brutos continuam anteriores
+    à normalização.
+
+[x] Compartilhar a consulta da criação de processos no Windows.
+    A identidade do aplicativo e os comentários das regras NRPT usam a mesma
+    leitura de FILETIME. A conversão para época em milissegundos permanece
+    apenas na verificação do aplicativo; NRPT conserva os ticks completos.
+
+[x] Usar bindings tipados para o DNS do macOS.
+    objc2-core-foundation e objc2-system-configuration substituem declarações
+    FFI e conversões de ponteiro mantidas pelo daemon. As operações usam a
+    sessão padrão da API, sem um wrapper próprio de criação e posse. Sessões
+    explícitas ficam nos testes que precisam de chaves temporárias. Mantidas
+    a confirmação após gravação e remoção e as causas nativas dos erros.
+
+[x] Reduzir as ramificações de erro na validação e nas rotas nativas.
+    ensure! e Context, já usados na inicialização, expressam as regras sem
+    repetir a construção e o retorno dos erros. As regras de validação e a
+    ordem das falhas continuam iguais às anteriores. O macOS mantém os erros
+    de I/O nativos disponíveis para reconhecer ESRCH e continuar a restauração.
+    Foram conferidos o erro real de uma consulta GET inválida, os diagnósticos
+    de mensagens truncadas e a limpeza das outras rotas após falhas.
+    O usuário confirmou preferência por ensure! nas validações.
+
+[x] Unificar as consultas de tokens do Windows em nt-token.
+    Elevação e SID usam os mesmos TOKEN_QUERY, TokenElevation e TokenUser
+    da implementação anterior. A biblioteca assume o buffer do usuário,
+    a cópia do SID e a liberação dos recursos. O SDK Windows agora tem uma
+    única versão, 0.61, compartilhada com o gerenciador de rotas e nt-token.
+    A consulta do SID agora fica no próprio bloco Windows de OwnerProcess::open,
+    retirando o helper privado de uso único windows_sid. Mantidas as chamadas,
+    os flags, o HRESULT e os detalhes do SDK. drop(token) conserva o fechamento
+    antes da construção do proprietário; nas falhas, o token continua caindo
+    antes do processo. Redução de três linhas de código, de 1.360 para 1.357.
+    O teste preparado compara owner.sid com a implementação independente do
+    SDK. Outro compara a falha real de OwnerProcess::open para PID inválido com
+    OpenProcess, incluindo código e texto; não substitui a antiga cobertura de
+    handle inválido do helper removido. A conferência local continua estática,
+    sem execução Windows. A closure de vida permanece no campo nomeado do
+    proprietário, depois da consulta do SID.
+
+[x] Retirar os estados parciais do objeto WintunDll.
+    Os dois locks são arquivos obrigatórios. Um guard separado remove os
+    caminhos apenas depois de ambos serem fechados. A falha em qualquer
+    etapa da extração também libera os recursos na mesma ordem, sem Option
+    para os handles nem inicialização mutável do objeto final.
+    A remoção opcional do diretório usa map, depois da tentativa do arquivo,
+    retirando duas linhas de código. Um probe do Drop extraído no Mac e Linux
+    confirmou limpeza com arquivo ausente e preservação de arquivos alheios.
+    A compilação Windows foi conferida; a execução nativa continua pendente.
+    O GUID usado uma vez na preparação entra diretamente no nome do diretório.
+    A consulta nativa e sua causa permanecem iguais, sem a variável intermediária.
+    Redução adicional de uma linha de código.
+
+[x] Colocar valores de uso único junto das operações que os usam.
+    O executor recebe Duration::from_secs(20) diretamente, retirando
+    COMMAND_TIMEOUT. A escrita da DLL usa include_bytes! no próprio argumento,
+    retirando DLL_BYTES; o teste compara o arquivo com o mesmo recurso embutido.
+    Os valores, prazos, guardas e bytes permanecem iguais. Redução de duas
+    linhas de código, de 1.357 para 1.355.
+
+[x] Usar o handle de posse do SDK para OwnerProcess no Windows.
+    Como o processo dono permanece na tarefa principal, as consultas podem
+    usar o handle do SDK diretamente. Foram removidas as conversões para
+    handles de arquivo do Rust, mantendo as mesmas permissões e APIs nativas.
+    O token também nasce em Owned<HANDLE>, recebe diretamente a saída de
+    OpenProcessToken e é emprestado a nt-token para ler o SID. O processo e
+    TOKEN_QUERY são os mesmos; o guard fecha o token antes da verificação de
+    vida. Comparação com SDK e teste de HRESULT continuam presentes. Redução
+    de 3 linhas de código, compilada para Windows sem execução nativa.
+
+[x] Simplificar a normalização dos endereços nas rotas do macOS.
+    A construção dos bytes normalizados usa um percurso único, mantendo o
+    preenchimento de máscaras compactadas e a exclusão da zona embutida
+    apenas para endereços IPv6 link-local.
+
+[x] Usar ensure! nas confirmações do DNS do macOS.
+    As regras de leitura, gravação e remoção ficam junto dos respectivos
+    erros. Os detalhes nativos e as mensagens permanecem iguais. A limpeza
+    continua tentando as duas entradas mesmo quando uma delas falha.
+    Removido o helper que apenas acrescentava SCError aos dois pontos de erro.
+    A leitura devolve o valor já retido pela API, sem outra retenção temporária.
+    A remoção usa a mesma condição curta da leitura: sucesso ou NoKey. SCError
+    apenas consulta o status da thread, e a formatação das chaves não o altera.
+    Mantidos os códigos, textos nativos e a confirmação posterior da remoção;
+    retiradas três linhas de código.
+    As duas chaves compartilham um único modelo de caminho. A remoção só entra
+    no bloco de alteração quando há valor e tem um único retorno de sucesso,
+    mantendo a sequência de consultas e remoções. Redução adicional de 2 linhas
+    de código, conferida pelos testes nativos de DNS sem privilégios.
+    A remoção e sua confirmação ficam no percurso de cada chave, sem helper
+    de uso único. A agregação continua tentando todas as chaves após falhas,
+    na mesma ordem. Redução adicional de uma linha de código.
+
+[x] Centralizar a política de erros dos scripts Windows.
+    run_powershell define Stop uma vez para as três operações. Os dois catches
+    vazios de processo encerrado compartilham o mesmo handler, preservando o
+    tratamento separado de Win32Exception e o finally. Redução de 3 linhas de
+    código, sem retirar comentários para obter o ganho.
+    PowerShell 7.6.9 portátil no Mac reproduziu a propriedade das regras e os
+    erros das três operações. Partindo de Continue, a versão antiga e a nova
+    param antes do próximo comando; o controle sem política continua. O contrato
+    permanente foi executado com o wrapper Rust atual e o executor real do daemon,
+    usando cmdlets simulados, sem alterar DNS. O analisador aceitou sintaxe 5.1;
+    isso não substitui execução de Windows PowerShell 5.1 ou de seus getters nativos.
+
+[x] Declarar uma vez os módulos que variam por sistema operacional.
+    cfg_attr seleciona um backend único por sistema para DNS e rotas:
+    linux.rs, macos.rs e windows.rs. A exportação de EndpointRoute e dos
+    executáveis exigidos pertence a esse mesmo backend. Retirados o segundo
+    conjunto de atributos, a declaração de endpoint e imports duplicados,
+    com redução adicional de 7 linhas de código. Os blocos de DNS e rotas
+    permanecem contíguos, com testes separados no fim de cada módulo.
+    O IPC mantém sua seleção comum entre Unix e Windows. Mantidas as
+    implementações nativas e as políticas de cada sistema, sem dependências novas.
+
+[x] Retirar o controle manual da limpeza inicial de NRPT no Windows.
+    OnceCell substitui Mutex<bool>, a recuperação do lock e a marcação de
+    sucesso. Uma falha continua permitindo nova tentativa; após sucesso,
+    chamadas concorrentes não repetem a limpeza. once_cell já fazia parte
+    do lockfile e agora é uma dependência direta apenas no Windows.
+    A chamada fica no caminho Windows da sessão, sem uma função intermediária
+    de preparação que não executava nenhuma operação no Unix.
+
+[x] Simplificar a leitura dos dados do processo dono.
+    No Linux, procfs-core fornece Status.ruid e Stat.starttime. O daemon mantém
+    a leitura UTF-8 estrita e o pidfd que fixa a instância do processo. Ensaios
+    isolados confirmaram UID real diferente do efetivo, nomes com espaços e
+    parênteses, rejeição de nomes não UTF-8 e revogação após a saída do filho.
+    No Windows, os quatro FILETIMEs da mesma consulta são inicializados juntos,
+    mantendo os mesmos parâmetros nativos.
+    A abertura agora reúne a identidade nativa e sua verificação de vida em
+    uma captura que conserva o pidfd ou handle até o descarte do dono. Mantida
+    a consulta de self.pid no Mac. Há uma alocação por daemon. Ensaios no Mac
+    conferem dono vivo, zumbi e já recolhido.
+    O dono permanece na tarefa principal; as tarefas de conexão não o capturam.
+    Unificada a função de verificação nas três plataformas, retirando a garantia
+    Send + Sync da API Rust Unix que não é usada pelo daemon. A execução e o
+    descarte nativos continuam iguais. Redução de 3 linhas de código.
+    A abertura compartilha a validação da faixa de PID e o retorno final. A
+    confirmação posterior de vida continua só no Linux/Windows, sem acrescentar
+    chamada nativa no Mac. Redução adicional de 2 linhas de código, mantendo
+    mensagens, limites e ordem das verificações.
+    A leitura estrita anterior ao parser é necessária: Stat::from_read aceita
+    nomes com bytes inválidos por from_utf8_lossy. Um probe isolado no Linux
+    confirmou essa aceitação e o InvalidData do leitor estrito nos mesmos bytes.
+    ProcError também não encadeia os erros de I/O; a leitura atual mantém a causa
+    nativa disponível. Essas conversões não foram removidas.
+
+[x] Usar a consulta tipada de PID do cliente no IPC do macOS.
+    nix executa LOCAL_PEERPID sem o buffer e os ponteiros mantidos pelo daemon.
+    A dependência já estava no lockfile. Conexões reais confirmam o PID do dono,
+    a rejeição de outro processo e a continuidade após uma desconexão.
+    A mesma biblioteca também resolve nomes de interface em índices, retirando
+    a conversão manual para CString e a consulta insegura do montador de rotas.
+
+[x] Propagar erros com contexto até a resposta IPC e o log.
+    Configuração, DNS, rotas, subprocessos e limpeza usam anyhow, sem converter
+    cada causa para String a cada camada. Os textos podem ser padronizados,
+    conforme autorizado pelo usuário; os códigos do protocolo e os detalhes
+    das causas são preservados. A limpeza tenta todas as etapas após falhas.
+    Ensaios com daemon e TUN reais no Linux confirmaram a presença conjunta
+    das causas de configuração e limpeza, a liberação da interface e os códigos
+    FailedPrecondition, InvalidArgument e Internal nos respectivos caminhos.
+    report_failure reúne o registro e o envio da falha nos dois pontos do
+    servidor, dispensando a montagem separada da resposta. Transferência e
+    limpeza continuam relatadas independentemente, com os mesmos nomes de
+    interface, códigos e causas. Redução de 3 linhas de código.
+    A abertura e a aceitação do listener usam o mesmo tipo de erro nas três
+    plataformas, conservando o io::Error como causa. Os mesmos códigos de
+    desconexão permitem nova tentativa no Windows. Ensaios no Mac e no Linux
+    conferem caminhos inválidos, EEXIST e preservação do listener existente;
+    a comparação de falhas do named pipe foi compilada, sem execução no Windows.
+
+[x] Usar strings do SDK nas chamadas de caminhos e permissões do Windows.
+    HSTRING substitui vetores UTF-16 terminados manualmente e conversões de
+    ponteiros no Wintun e na criação do named pipe, preservando as ACLs.
+    A criação do pipe monta atributos e opções em código seguro; unsafe fica
+    somente na conversão SDDL, na posse do descritor e na chamada nativa. O
+    Wintun também propaga o Result fora do bloco inseguro. Argumentos, ACLs,
+    causas e duração do guard permanecem iguais. Redução de 5 linhas de código.
+    O handle da DLL passa diretamente para File::from_raw_handle. A std já
+    cria o mesmo OwnedHandle internamente; retirado o intermediário explícito,
+    mantendo um único proprietário e o mesmo CloseHandle nos retornos de erro
+    e no drop do escritor. Essa simplificação não altera a contagem de linhas.
+    As operações de NRPT compartilham o envio ao PowerShell, com os mesmos
+    argumentos, variáveis de ambiente, prazos e diagnósticos de subprocessos.
+    A regra de processo vivo avança para a próxima entrada sem guardar $alive.
+    O finally continua descartando todos os donos adquiridos; Remove permanece
+    fora dos catches para não capturar suas falhas. Contratos portáteis compararam
+    as versões e sintaxe 5.1, sem execução nativa Windows. Redução de uma linha
+    de código, mantendo os comentários do script.
+    Capturas nomeadas e conversão com -as retiram a inicialização dos parâmetros
+    de saída de TryParse. A identidade inválida vira null e é ignorada antes de
+    consultar o processo, mantendo tick zero válido. Comparações incluem faixas,
+    culturas, consultas, remoções, descartes e estados de saída. O teste permanente
+    termina no foreach para não mascarar $? com outro comando. Redução de uma
+    linha de código, sem execução nativa Windows.
+    A criação recebe os domínios diretamente pelo pipeline, sem guardar outra
+    coleção em $namespaces. Mantidos filtragem, ordem, duplicatas, argumentos e
+    interrupção na primeira falha. Redução de uma linha de código, conferida
+    por contratos portáteis e pelo perfil de sintaxe 5.1, sem execução Windows.
+    O executor recebe argumentos e ambiente por &str. Os chamadores de DNS
+    não precisam copiar strings apenas para montar a chamada; um ensaio com
+    processo filho confere a preservação literal de valores com quebras de linha,
+    aspas, Unicode e caracteres de shell.
+
+[x] Reutilizar o gerenciador na limpeza de rotas do Linux e Windows.
+    O valor criado na configuração acompanha a sessão até a limpeza. Dois
+    iteradores substituem o vetor intermediário de resultados e a reconstrução
+    do gerenciador. Mantidas a ordem inversa e a tentativa de todas as etapas.
+    Um ensaio no Linux removeu externamente uma rota da VPN e confirmou o erro
+    Internal, a remoção do endpoint, a limpeza de DNS e da TUN e a reutilização
+    da interface em outra sessão.
+    O percurso fica na própria função de limpeza da sessão. Seu bloco consome
+    e descarta o gerenciador antes da limpeza de DNS, retirando um helper usado
+    uma única vez. Redução adicional de uma linha de código.
+
+[x] Unificar a rejeição de primeira mensagem sem configuração.
+    Payload ausente ou de outro tipo recebe InvalidArgument com o requisito
+    de configuração. Shutdown(true) continua reservado à conexão de controle.
+    Um único match agora extrai o nome bruto e o resultado da configuração,
+    eliminando a segunda inspeção do mesmo payload. Retiradas duas linhas de
+    código; mantidas as mensagens, a ordem de validação e a posse do outgoing.
+
+[x] Simplificar o transporte das mensagens de rota do macOS.
+    sysctl substitui a consulta manual de tamanho e a alocação do dump, mantendo
+    as tentativas limitadas após ENOMEM e os bytes completos de cada rota.
+    O socket PF_ROUTE entrega um registro por leitura; a resposta continua
+    validando tamanho, versão, tipo, PID, sequência e errno. Ensaios nativos
+    compararam o dump e conferiram respostas enfileiradas em leituras separadas.
+    Erros de sysctl seguem a conversão comum da biblioteca, que encadeia o
+    io::Error nativo. Um teste com OID inválido no kernel confere código, tipo,
+    mensagem e contexto. Mantidas as três tentativas após ENOMEM e o tratamento
+    direto dos erros de DELETE. Redução de uma linha de código.
+
+[x] Propagar diretamente os erros de netlink.
+    Removidas conversões intermediárias para io::Error nas operações de
+    endpoint. O chamador mantém o código do protocolo e recebe a causa nativa
+    completa. Um ensaio no kernel Linux confirmou ESRCH ao repetir uma remoção.
+
+[x] Deixar a conclusão do escritor liberar seu receptor de respostas.
+    Removido o controle manual de drop no servidor. Um ensaio com socket real
+    no Linux fechou apenas a leitura do cliente e confirmou a limpeza da sessão
+    e a reutilização da interface, sem depender do EOF na escrita do cliente.
+
+[x] Usar o resultado da escrita para encerrar o trabalhador de logs.
+    try_for_each substitui o laço com interrupção manual. Falhas de escrita
+    encerram o trabalhador; falhas de flush continuam recebendo confirmação e
+    permitem as linhas seguintes. Ensaios no Mac e no Linux conferem esses casos,
+    a ordem das linhas, o destino dos logs e o encerramento do IPC com stdout bloqueado.
+    A criação opcional do diretório devolve diretamente seu Result, mantendo a
+    filtragem do pai vazio e a mesma causa de I/O. Retiradas duas linhas de código.
+    O flush descarta a mensagem quando a fila está cheia ou fechada; isso
+    desconecta a confirmação e a espera termina imediatamente. A mesma espera
+    limitada serve aos três casos, dispensando uma condição. Redução de uma
+    linha de código, mantendo a ordem e o prazo de confirmação.
+
+[x] Separar o diagnóstico da falha ao abrir o log da saída antecipada.
+    inspect_err registra a causa original no logger de stdout; let-else encerra
+    o processo quando a abertura falha. Mantidas a precedência dessa falha sobre
+    a preparação do dono, a confirmação do flush e a saída FAILURE. Redução de
+    2 linhas de código. Um ensaio com o executável real cobre um diretório no
+    lugar do log e um arquivo no lugar do diretório pai, antes e depois da
+    mudança, sem alterar os caminhos ocupados.
+
+[x] Retirar a função de inicialização de sistema não suportado.
+    Seu cfg excluía Linux, macOS e Windows. Os módulos de IPC e de identidade
+    já impediam compilar o daemon nos demais sistemas, tornando o ramo inacessível.
+
+[x] Encurtar os percursos de configuração que param no primeiro erro.
+    try_for_each mantém os endpoints antes das rotas da VPN e a primeira causa
+    de falha. A checagem de executáveis preserva o primeiro ausente e a causa da
+    busca em PATH. O builder acumula os endereços na mesma ordem com fold.
+    No macOS, push_mut substitui push e a consulta ao último item, mantendo o
+    registro da mudança anterior à remoção da rota. A limpeza continua tentando
+    todas as etapas em ordem inversa e agregando os erros.
+    A sequência de DNS Linux também usa try_for_each, com os mesmos argumentos,
+    servidores antes dos domínios e interrupção na primeira falha.
+
+[x] Simplificar as condições de recuperação de erros nativos.
+    A remoção de rotas do macOS continua ignorando somente ESRCH. Um ensaio
+    distingue esse caso de EIO, EPERM e ENOENT, conserva os detalhes nativos e confere
+    quando o backup é restaurado. No Windows, a aceitação repete apenas após
+    os mesmos códigos de desconexão e usa PID zero quando a consulta falha.
+
+[x] Centralizar o código de saída e os diagnósticos dos subprocessos.
+    O executor privado devolve o resultado da operação, sem montar Output
+    apenas para que o chamador confira o status. Uma única formatação serve
+    aos erros de saída e execução, preservando códigos e causas nativas.
+    Mantidos o prazo total, stdin fechado, o limite de 1 MiB por saída e a
+    drenagem do excedente. Ensaios no Mac e no Linux conferem também saída
+    contínua e filhos que fecham ambos os pipes antes de terminar, com kill/reap.
+    Retirados os match aninhados do executor. A falha é propagada após kill/reap,
+    com os diagnósticos ao redor da execução e a causa original preservada.
+    Os leitores recebem os pipes diretamente e acrescentam o contexto estático
+    de cada saída. O join rotativo devolve seu resultado conjunto, conferido
+    antes do status final. Erros durante captura e drenagem preservam a causa
+    nativa e os bytes retidos. Redução adicional de 3 linhas de código.
+
+[x] Retirar a interface de mocks do transporte de produção.
+    transfer usa AsyncDevice diretamente no daemon. PacketIo e seus adaptadores
+    ficam somente na compilação dos testes, que executam o mesmo corpo de
+    transporte. Nenhuma lógica de pacotes foi movida ou duplicada. A mudança
+    retira 12 linhas de produção e acrescenta suporte apenas aos mocks.
+    Removidos Send e 'static das funções que não despacham o stream ou reader
+    para outra tarefa. O chamador que cria uma tarefa continua exigindo esses
+    limites do futuro concreto; os alvos foram compilados com os mesmos chamadores.
+    A tabela de rotas segue o mesmo padrão: a produção usa SystemRoutes
+    concretamente, e RouteTable existe como interface apenas nos testes. Todos
+    os métodos nativos permanecem na produção e são usados pelos adaptadores dos
+    testes. Redução adicional de 2 linhas de código.
+
+[x] Reunir as checagens de privilégios na preparação do dono.
+    OwnerProcess::prepare reúne privilégios, identidade e credenciais de
+    sinalização, nessa ordem e antes de logger/runtime. Main guarda seu Result
+    para registrar a falha pelo destino solicitado; open permanece disponível
+    sem privilégios para os fixtures. Não há helpers de passagem no main nem
+    função separada para setreuid. Redução de 5 linhas de código no conjunto.
+    Testes no Mac e Linux conferem recusa, ordem de validação, UIDs intactos após
+    falha e diagnóstico no arquivo. No Linux isolado, o daemon fica com UID real
+    do dono e efetivo root; um processo desse UID, sem capacidades efetivas, o
+    encerra por SIGKILL. O teste Windows compara a preparação com o SDK anterior.
+
+[x] Aplicar os atributos opcionais da rota Windows com o mesmo percurso.
+    Option::into_iter e fold substituem cinco blocos if-let. Cada atributo
+    aplica zero ou um setter, mantendo ordem, clonagem do nome e Some(0).
+    O módulo passou de 44 para 35 linhas. A matriz de atributos, com IPv4/IPv6,
+    ausências, zeros e nomes Unicode, foi executada em um probe portátil com
+    o mesmo modelo e a mesma conversão pura. As APIs nativas não foram trocadas;
+    a execução Windows continua pendente.
+
+[ ] Continuar a redução até aproximar a meta, sem compactar a formatação,
+    esconder código próprio em dependências locais ou retirar comportamentos.
+    O código nativo concentra o maior volume restante. As substituições de
+    rotas precisam preservar escopo, origem, métricas e alterações externas.
+
+[x] Exercitar a nova TUN assíncrona no macOS com privilégios.
+    O usuário executou o teste nativo preparado neste Mac e forneceu a saída
+    de sucesso, repetida em 06/11/2026 após as simplificações de DNS e rotas.
+    Houve troca de pacotes após cancelar uma leitura ociosa, com MTU e DNS
+    configurados. A inspeção posterior confirmou a ausência de utun64, do
+    domínio de teste no DNS e das rotas associadas à interface.
+
+[ ] Exercitar a nova TUN assíncrona e o encerramento no Windows.
+    O usuário informou que não há Windows disponível. A verificação atual é
+    por compilação e análise das APIs, sem execução nativa.
+    Também foi preparado e compilado o teste de recuperação após clientes que
+    abandonam o named pipe, identificação do próximo cliente e proteção do nome
+    pela instância pendente. Ele está em daemon/tests/ipc_tests.rs e ainda não
+    foi executado no Windows.
+
+Cortes avaliados e descartados nesta rodada:
+- Um helper de trabalhador bloqueante com propagação direta de JoinError
+  retiraria os contextos distintos de inicialização e encerramento, permitidos
+  pela padronização dos textos. Incluindo o helper, o servidor passaria de 153
+  para 151 linhas de código. A redução de duas linhas não justifica acrescentar
+  o helper genérico; mantido o tratamento explícito. Apenas formatado e contado.
+- Representar falhas do servidor diretamente por SessionError, com construtor
+  comum, aumentou o módulo de 153 para 156 linhas de código. Um par privado
+  (Code, String) ficou em 154. As conversões continuam nos mesmos pontos, e
+  os protótipos ainda exigiriam preservar o formato atual dos logs. Foram
+  apenas formatados e contados; mantido Status, sem alterações de produção.
+- Trocar os acumuladores de resolve_endpoint_routes e networks por map/collect
+  aumentou os módulos em duas e três linhas, respectivamente, após rustfmt.
+  Mantidos os laços explícitos, inclusive a checagem do limite após a validação
+  de todos os CIDRs. Protótipos apenas formatados, sem adoção.
+- Importar localmente oito variantes de RouteAttribute, mantendo os nomes,
+  reduziu o protótipo de 67 para 57 linhas ao reunir o filtro em uma linha.
+  O algoritmo não muda. A lista vertical foi mantida por enquanto, pendente
+  de preferência opcional do usuário sobre a leitura das duas formas.
+- Um helper genérico para aguardar os trabalhadores de inicialização/limpeza
+  reduziu o servidor só de 153 para 152 linhas, já incluindo o helper. Exigiria
+  padronizar os contextos de falha de join. Não justifica a indireção adicional;
+  o protótipo foi apenas formatado e contado.
+- CreateFile2 com CREATEFILE2_EXTENDED_PARAMETERS reduziu Wintun de 90 para
+  87 linhas. Preserva no protótipo as opções documentadas de criação, mas
+  introduz outro objeto de parâmetros e conversão de ponteiro mutável para
+  economizar três linhas. Mantida a chamada CreateFileW explícita. O protótipo
+  foi formatado e contado, sem compilação ou execução Windows.
+- Reavaliar win-authorization-sys usando só SecurityDescriptor evita casts
+  entre SECURITY_ATTRIBUTES de SDKs diferentes. Porém from_sddl reconstrói o
+  descritor com MakeAbsoluteSD/MakeSelfRelativeSD, acrescentando chamadas,
+  alocações e falhas. Pipe + Wintun passam de 138 para 132 linhas com conversão
+  simples; preservar também os novos estágios e o HRESULT/io anterior leva a
+  135. O ganho não compensa a reconstrução e as dependências. A variante simples
+  foi compilada para Windows; a preservação de estágios só foi medida.
+- windows-permissions 0.2.4 conserva a alocação retornada pela conversão SDDL,
+  sem reconstruí-la, e mantém SDK attrs com apenas conversão de ponteiro void.
+  Pipe + Wintun ficam em 133 contra 138 linhas de código. O wrapper e str::parse
+  deram o mesmo total, mantendo a conversão de erros via windows::core::Error.
+  Acrescenta winapi 0.3.9, bitflags 1.3.2 e pacotes GNU do winapi. As duas formas
+  passaram pela compilação Windows, mas o ganho não justifica outras bindings.
+- fs_at 0.2.1 oferece security_descriptor na criação, mas fixa compartilhamento
+  READ/WRITE/DELETE, sem setter para FILE_SHARE_NONE. Assim não preserva o lock
+  exclusivo da DLL. Também copia SECURITY_DESCRIPTOR por valor, exigindo formato
+  absoluto em vez do blob self-relative atual. Rejeitado na leitura da fonte,
+  sem adaptar ou compilar uma substituição incompatível.
+- nlink 0.33.0 não substitui o endpoint Linux preservando os atributos atuais.
+  Seu lookup não inclui FIB_MATCH/LookupTable, UID real ou UDP; RouteMessage
+  descarta atributos desconhecidos e o encoder multipath omite flow/encap_type.
+  send_request/send_ack são privados. O socket raw exigiria implementar de novo
+  correlação, ACK, erros e deadline. blocking acrescenta um worker/runtime e não
+  oferece prazo público para requisição raw. O tarball oficial foi conferido;
+  nenhuma dependência foi alterada nem protótipo incompatível medido.
+- process_control 5.2.0 aplica PipeFilter depois de read_to_end no Unix,
+  podendo acumular saída sem limite antes de descartá-la. O leitor tem join
+  sem deadline após saída normal e fica desacompanhado em timeout/erro; no
+  Windows usa WaitForMultipleObjects(INFINITE). A limpeza encadeia kill e wait,
+  sem tentar reap após falha de kill, e não mantém sua falha junto da causa
+  primária. Não há guard equivalente ao kill_on_drop. A fonte publicada foi
+  inspecionada; manter os contratos exigiria supervisão própria novamente.
+- Mutex síncrono com recuperação de poison e scopeguard para a reserva retirou
+  o async lifecycle_result, mas o guard e o import reduziram o servidor só de
+  153 para 152 linhas de código, antes da nova dependência direta. A troca não
+  compensa para esse ganho; o protótipo foi formatado e contado, sem compilação.
+- CancellationToken no lugar de watch<bool> reduziu server + main + lib de 253
+  para 252 linhas com token próprio, ou 251 emprestando o token aos dois futuros.
+  O ganho de uma ou duas linhas não compensa acrescentar tokio-util com feature
+  rt ao lockfile atual. O protótipo foi formatado e contado, sem compilação.
+- A reserva baseada no retorno de HashSet::insert reduziu o servidor em uma
+  linha, mas tornou a guarda de capacidade dependente da existência do nome.
+  Mantida a sequência direta duplicado, capacidade e inserção por clareza.
+  O protótipo foi formatado; a prioridade dos erros foi revisada, sem adoção.
+- OnceLock::get_or_try_init continua instável na std instalada do Rust 1.98.1,
+  com feature once_cell_try. Mantida once_cell para garantir nova tentativa
+  após falha sem exigir recursos instáveis do compilador.
+- Tuple structs para Logger e SessionRoutes retirariam quatro linhas, mas
+  trocariam os nomes sender e changes por .0 sem simplificar o estado ou o
+  comportamento. Mantidos os campos nomeados para facilitar a leitura.
+- Guardar DeviceBuilder no Config reduziu validation + session de 125 para
+  123 linhas. Porém tun-rs 2.8.3 não oferece Clone, Debug nem getters nesse tipo;
+  seria preciso consumir Config e usar mem::take antes de emprestar seus outros
+  campos à plataforma. O ganho não compensa o estado vazio temporário nem perder
+  a inspeção dos valores normalizados. Os limites do tipo foram conferidos por
+  probes de compilação; o protótipo consumidor só foi formatado e contado.
+- Retornar (DeviceBuilder, Config) pela validação evita o estado temporário
+  vazio do protótipo anterior. A factory passa a receber o builder por valor
+  e os dados de rede por referência. Validation + session + server passam de
+  279 para 277 linhas de código, incluindo o import condicional planejado para
+  preservar a inspeção nos testes. O builder continua sem Debug ou getters;
+  comparar os valores normalizados exigiria um adaptador de teste que também
+  encaminhasse as chamadas reais. O ganho de duas linhas não compensa essa
+  interface e a perda de inspeção direta. Apenas formatado e contado, sem
+  compilar, adaptar os testes ou alterar a produção.
+- Guardar a plataforma diretamente em TunSession, usando close no rollback,
+  aumentou main + server + session + platform de 426 para 440 linhas de código.
+  Incorporar a closure na factory manteve 426, mas ampliou a factory de 48 para
+  84 linhas e expôs seus módulos nativos ao irmão session. As duas variantes
+  foram medidas e rejeitadas antes de adaptar testes ou compilar.
+- Mutar o nome bruto dentro do async de inicialização para retirar o Result
+  intermediário manteve o servidor em 153 linhas de código após rustfmt.
+  Trocar o for de flags dos nexthops por for_each só compactaria a sintaxe,
+  sem retirar estado, operação ou duplicação; o laço explícito permanece.
+- Integrar SIGINT e SIGTERM ao select principal reduziu main de 93 para 91
+  linhas de código, preservando um future por sinal. Porém estendeu o laço
+  e exigiu pending no Windows. O helper shutdown_signal mantém melhor a leitura;
+  o protótipo foi apenas formatado e contado, sem compilação ou adoção.
+- Trocar TryParse por casts e capturar PSInvalidCastException reduzia NRPT de
+  69 para 67 linhas, mas uma identidade fora da faixa ao final do foreach deixa
+  $? falso e produz exit 1, mesmo sem stderr. Um comando posterior bem-sucedido
+  mascara a falha. A variante foi rejeitada e o teste de regressão confirmou
+  sua rejeição pelo executor real com PowerShell portátil.
+- Retornar o Result do trabalhador do logger em vez de ignorá-lo e retirar o
+  bloco da closure de get_or_try_init não reduziram logging + Windows: ambos
+  os protótipos ficaram nas mesmas 121 linhas de código após a formatação.
+  ExitStatus::exit_ok também foi conferido no compilador atual e permanece
+  instável; o daemon continua usando a API estável de status.
+- veilway-macos 0.3.14 expõe transporte PF_ROUTE, mas seu encoder zera o
+  cabeçalho, o decoder aceita endereços parciais e a escrita aceita contagem
+  parcial. A leitura usa 2 s, sem prazo de escrita ou deadline completo. Corrigir
+  esses contratos mantém a supervisão e validação atuais; não foi adicionada.
+- Um SessionRoutes comum às plataformas reduziu configure_session, mas o
+  construtor e o estado do backend Linux/Windows aumentaram o conjunto de
+  311 para 314 linhas de código. Mantinha as ordens de instalação e limpeza,
+  sem boxing adicional. Foi medido e descartado antes da compilação.
+- Juntar a criação das sessões ao serviço manteve main + server + session em
+  332 linhas de código. Exigir DLL já preparada no construtor reduziu para 322,
+  mas o exemplo ipc_test_daemon usa o serviço real sem privilégios no Windows.
+  Um mock nesse exemplo reduziria a cobertura da integração Kotlin. A variante
+  menor compilou como biblioteca/binário no Mac e para Windows; não foi adotada.
+- Uma fila de closures para o logger reduziu o protótipo de 53 para 49 linhas
+  de código. Porém adiciona uma alocação por registro e despacho dinâmico,
+  tornando genérica uma fila que possui apenas Line e Flush. O protótipo foi
+  formatado e contado, sem compilação; mantidos os eventos explícitos.
+- O protótipo com um trabalhador único para start, transporte e close aumentou
+  o servidor de 163 para 188 linhas de código. Distinguir as falhas de join,
+  manter os dois relatos de erro e registrar o encerramento após panic exige
+  fase compartilhada, clones e supervisão adicionais. Também mantém uma thread
+  bloqueante por sessão. Foi medido, mas não compilado ou adotado.
+- Em 07/11/2026, as bibliotecas de rotas permaneciam nas versões já avaliadas.
+  tun-rs 2.8.18 traz mudanças de I/O, mas nenhuma API que substitua o codec de
+  pacotes vazios, a restauração de rotas Mac ou a proteção da DLL Wintun.
+  A atualização não oferece redução de código e altera prazos e tarefas de I/O;
+  depende também de versões novas de Tokio e libloading. Mantida a 2.8.3 do lock.
+  As correções de leak nas tarefas poll_* não correspondem ao caminho usado pelo
+  daemon, que chama recv/send inerentes. Os métodos e guards desse trecho Windows
+  são iguais nas duas versões. A liberação real ainda precisa ser exercitada em Windows.
+- RouteMessageBuilder do rtnetlink 0.20 aplica table main, protocolo static e
+  tipo unicast. A consulta atual começa com os campos zerados para a seleção
+  por políticas. Um probe Linux comparou IPv4/IPv6 e confirmou igualdade exata
+  somente após repor table/protocol/kind. A versão equivalente ficou em 13 linhas
+  contra 12 da montagem direta, antes dos imports. Não foi adotada.
+- interprocess 2.4.7 reduziu o protótipo Unix de 63 para 58 linhas, devolvendo
+  o UnixStream do Tokio para manter shutdown real e a consulta nativa de PID.
+  Ensaios no Mac e Linux compararam permissões, colisões, cancelamento de accept,
+  troca de bytes, half-close e limpeza sem fechar streams já aceitos.
+  No Windows, accept não recria a instância após 109/232/233 e o descarte pode
+  iniciar tarefas de FlushFileBuffers. A troca não preserva o listener atual.
+  Seu SecurityDescriptor também copia o grupo usando set_owner, perdendo o
+  grupo BA explícito do Wintun. A alternativa só com esse RAII mediu 172 para
+  168 linhas Rust antes de dependências, mas não é equivalente e não foi compilada.
+  O ganho Unix isolado não compensa outra biblioteca e a seleção de backend.
+  Nenhuma dependência ou implementação de IPC foi trocada.
+- Um helper por callback para o SDDL Windows foi medido novamente depois da
+  unificação de erros. Pipe e Wintun somam 172 linhas; a versão anyhow ficou em
+  173 e a genérica, que mantém as conversões nativas, em 172. As medidas incluem
+  imports e declaração do módulo, com o descritor vivo durante extract_at inteiro.
+  Os protótipos foram apenas formatados e contados, sem compilação ou adoção.
+- Trocar ambos os DNS por APIs nativas aumentou o conjunto no protótipo.
+  O Linux com zbus ficou em 56 linhas, contra 15 com resolvectl, incluindo
+  prazo de 20 segundos, índice, conversão de IPs, routeOnly e fallback network1.
+  Autenticação com UID real diferente do efetivo e timeout do handshake foram
+  exercitados com D-Bus real e socket sem resposta, mas não com resolved real.
+  O protótipo ainda usa SetLinkDNS em vez da tentativa SetLinkDNSEx/UnknownMethod
+  feita pelo resolvectl. A exigência de resolvectl na inicialização permanece.
+  O Windows com WMI ficou em 110 linhas e compilou para Windows, ainda sem
+  prazo para Add/Get/Remove e sem execução nativa. Juntos, somam 166 linhas,
+  contra 146 de Linux, Windows e executor atuais. O custo do prazo aumentaria
+  essa diferença.
+  Mantidos os comandos externos; nenhuma dessas dependências foi adicionada.
+- Os codecs de IPC avaliados não preservam diretamente o protocolo atual.
+  async-prost 0.4.0 e async-prost-stream 0.4.0 usam Prost 0.10, não limitam o
+  frame e devolvem BrokenPipe para truncamentos. prost-codec 0.4.0 e
+  prost-stream 0.1.3 usam varint, em vez do prefixo BE de quatro bytes.
+  O LengthDelimitedCodec 0.7.18 padrão aceita cabeçalho completo sem corpo como EOF
+  limpo, frame zero e retorna Other no cabeçalho parcial. Essas diferenças
+  foram reproduzidas com a biblioteca; a correção exigiria adaptações de EOF,
+  limite e tamanho bruto. Mantido o enquadramento atual, com testes de todas
+  as posições de truncamento, causas e mensagens com só campos desconhecidos.
+  Um adaptador com num_skip(0), length_adjustment(4) e decode_eof preservou
+  esses contratos, mas IPC + servidor aumentaram de 193 para 210 linhas de
+  código com FramedRead. A variante com Framed ficou em 212. Sem ganho, ambas
+  ficaram fora do projeto.
+- Um endpoint Windows com MIB_IPFORWARD_ROW2 aumentou de 44 para 92 linhas.
+  A equivalência exige conservar a validação de nome/índice, reconstruir o
+  gateway sem porta/flowinfo/scope e aplicar defaults novos à rota de host.
+  RouteManager::new não cria recurso nativo nessa plataforma. O lock mantém
+  route_manager 0.2.11; a versão 0.2.17 foi somente inspecionada.
+- getifs 0.8.0 não expõe mensagens completas nem transporte PF_ROUTE. Sua rota
+  pública perde origem, escopo, métricas e atributos; gateways AF_LINK viram
+  None e o parser descarta alguns tipos de rota necessários ao backup.
+- tracing-appender 0.2.5 reduz o logger de 61 para 45 linhas sem equivalência:
+  flush não aguarda confirmação, falhas de escrita não encerram o trabalhador
+  e falha ao criar a thread causa panic. Preservar esses comportamentos exige
+  manter o controle de escrita e flush que seria removido.
+- DeviceFramed com BytesCodec, da tun-rs 2.8.3, reduz o servidor de 193 para
+  189 linhas, mas trata pacote vazio como término do Stream. Repetir a leitura
+  depois de None depende de comportamento fora do contrato. Um codec que
+  preserva os vazios e os demais casos aumenta o servidor para 200 linhas.
+- SCDynamicStore::set_multiple pode remover duas chaves, mas valida todas as
+  permissões antes de remover qualquer uma e devolve só uma causa. Preservar
+  tentativa independente, confirmação e causas aumenta o DNS de 71 para 94
+  linhas. O laço de remoções individuais permanece.
+- libproc 0.15.0 aceita qualquer retorno positivo de proc_pidinfo, sem exigir
+  o tamanho completo como a consulta atual da identidade do dono. Foi somente
+  inspecionado, sem adicionar a biblioteca.
+- RouteManager 0.2.17, net-route 0.4.6 e net-lattice 1.0.4 não representam todos os atributos
+  necessários à restauração atual no macOS, como as métricas nativas completas.
+  A atualização ou troca dessas APIs não substitui o registro de rotas atual.
+  As operações brutas necessárias são privadas nas duas últimas bibliotecas.
+- arcbox-route 0.11.3 também foi conferido no código publicado. Seu GetReply
+  fornece índice, flags, destino e máscara IPv4, sem a origem, gateway ou métricas
+  de que os endpoints precisam. O dump bruto da tabela não é público.
+- O protótipo com subprocess 1.2.3 exige captura limitada por fluxo, verificação
+  do prazo durante saída contínua e espera com o tempo restante após EOF.
+  Preservando a causa primária e a proteção durante unwind, ficou em 59 linhas
+  equivalentes, contra 57 com Tokio naquela avaliação. A versão Tokio perdeu
+  outras sete linhas desde então. A alternativa ainda depende de uma thread
+  para reap durante unwind e não o garante se a criação dessa thread falhar.
+  A biblioteca não foi adicionada ao projeto.
+- Um protótipo com cabeçalho e endereços de rota já decodificados no macOS
+  aumentou de 404 para 408 linhas o conjunto de transporte e restauração.
+  Foi descartado antes de adaptar os testes; a representação anterior permanece.
+- Uma segunda revisão guardou os bytes do cabeçalho e atributos decodificados.
+  O array aumentou o conjunto de 387 para 392 linhas. Um BTreeMap chegou a 384,
+  mas exigia sincronizar o mapa com os campos antigos do cabeçalho ao serializar.
+  O ganho de três linhas não compensou esses dois estados relacionados.
+  Guardar apenas bytes + chave calculada também aumentou o conjunto: de 315
+  para 317 linhas de código. A comparação de origem e gateway precisa continuar
+  falível, pois famílias desconhecidas só são rejeitadas se forem comparadas.
+- Trocar os atributos temporários por fatias emprestadas aumentou endpoint +
+  routes de 314 para 315 linhas de código. Elimina cópias, mas precisa manter
+  um buffer IFP vivo ao serializar. Foi medido e não foi adotado.
+- Um helper para SECURITY_ATTRIBUTES aumentou pipe + Wintun de 180 para 183
+  linhas; um objeto proprietário aumentou para 184. Ambos preservavam as ACLs,
+  mas a remoção da repetição não compensou o código de posse e duração do helper.
+- Um helper que devolve o descritor proprietário e SECURITY_ATTRIBUTES em par
+  reduziu Wintun + pipe + lib de 149 para 148 linhas de código. Foi formatado e
+  medido, sem compilação. O ganho de uma linha não compensa expor aos chamadores
+  o vínculo de vida entre o descritor e os atributos. Não foi adotado.
+- Um protótipo com win-authorization-sys reduziu pipe + Wintun de 180 para 168
+  linhas, mas exigia converter ponteiros entre os tipos de windows e windows-sys
+  e acrescentar outra dependência para esse ganho. Foi apenas formatado e medido;
+  a implementação direta permanece por ser mais clara nas chamadas Win32.
+- A instalação de endpoints e rotas da VPN não foi unificada: no Linux, a
+  primeira usa substituição atômica e a segunda usa remoção seguida de inclusão
+  exclusiva. Uma única operação alteraria o comportamento com rotas existentes.
+
+O teste nativo do macOS em session_io_tests.rs está preparado para conferir
+cancelamento de uma leitura ociosa, troca de pacotes, MTU, configuração de DNS
+e limpeza da TUN e das rotas de teste. Ele recusa nomes e rotas já ocupados e
+foi executado com root pelo usuário neste Mac. O alocador do teste escolhe
+utun64..utun255 livres, pois o PID pode ultrapassar o limite nativo da unidade.
+O executável de teste deve ser recriado por substituição atômica, sem sobrescrever
+um Mach-O já executado, para evitar rejeição do cache de assinatura do macOS.

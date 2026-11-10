@@ -1,3 +1,5 @@
+#![cfg(target_os = "linux")]
+
 use route_manager::Route;
 use std::net::IpAddr;
 
@@ -6,11 +8,7 @@ mod linux_tests {
     use super::*;
 
     fn filter_routes_for_endpoints(routes: &[Route], endpoint_ips: &[IpAddr]) -> Vec<Route> {
-        routes
-            .iter()
-            .filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination()))
-            .cloned()
-            .collect()
+        routes.iter().filter(|route| !endpoint_ips.iter().any(|ep| *ep == route.destination())).cloned().collect()
     }
 
     #[test]

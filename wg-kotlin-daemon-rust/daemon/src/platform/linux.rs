@@ -1,37 +1,16 @@
-use crate::platform::{
-    CleanupHook, add_routes_with_predelete, build_and_filter_routes, into_cleanup_hook, ips_to_args, normalize_domains, run_command,
-};
-use daemon_proto::pb::TunSessionConfig;
-use super::EndpointRoute;
+use super::run_command;
+use anyhow::Result;
 
-pub fn configure_session(config: &TunSessionConfig, interface_name: &str, endpoint_routes: Vec<EndpointRoute>) -> Result<CleanupHook, String> {
-    let (mut mgr, filtered_routes, endpoint_routes) = build_and_filter_routes(config, interface_name, endpoint_routes)?;
+pub const REQUIRED_BINARIES: &[&str] = &["resolvectl"];
 
-    let dns_servers = ips_to_args(config.dns.as_ref().map(|dns| &dns.servers[..]).unwrap_or(&[]));
-    let dns_domains: Vec<String> = normalize_domains(&config.dns.as_ref().map(|dns| dns.search_domains.clone()).unwrap_or_default())
-        .into_iter()
-        .map(|domain| format!("~{domain}"))
-        .collect();
-
-    let setup_result = (|| -> Result<(), String> {
-        add_routes_with_predelete(&mut mgr, &filtered_routes, &endpoint_routes)?;
-
-        revert_dns(interface_name)?;
-        if !dns_servers.is_empty() && !dns_domains.is_empty() {
-            let mut dns_args = vec!["dns".to_string(), interface_name.to_string()];
-            dns_args.extend(dns_servers.clone());
-            run_command("set-dns", "resolvectl", &dns_args, None, &[], &[])?;
-
-            let mut domains_args = vec!["domain".to_string(), interface_name.to_string()];
-            domains_args.extend(dns_domains.clone());
-            run_command("set-domains", "resolvectl", &domains_args, None, &[], &[])?;
-        }
-        Ok(())
-    })();
-
-    into_cleanup_hook(setup_result, filtered_routes, endpoint_routes, interface_name.to_string(), revert_dns)
+pub(super) fn set_dns(interface: &str, servers: &[String], domains: &[String]) -> Result<()> {
+    let domains: Vec<_> = domains.iter().map(|domain| format!("~{domain}")).collect();
+    [("dns", servers), ("domain", &domains)].into_iter().try_for_each(|(operation, values)| {
+        let args: Vec<_> = [operation, interface].into_iter().chain(values.iter().map(String::as_str)).collect();
+        run_command(&format!("set-{operation}"), "resolvectl", &args, &[])
+    })
 }
 
-fn revert_dns(interface_name: &str) -> Result<(), String> {
-    run_command("revert-dns", "resolvectl", &["revert".to_string(), interface_name.to_string()], None, &[], &[]).map(|_| ())
+pub(super) fn clear_dns(interface: &str) -> Result<()> {
+    run_command("revert-dns", "resolvectl", &["revert", interface], &[])
 }

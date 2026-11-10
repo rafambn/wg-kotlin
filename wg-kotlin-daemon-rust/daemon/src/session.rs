@@ -1,127 +1,63 @@
-use crate::ip_util::parse_proto_cidr;
 use crate::platform::{self, CleanupHook};
+use crate::validation::Config;
 #[cfg(target_os = "windows")]
 use crate::wintun::WintunDll;
-use daemon_proto::pb::TunSessionConfig;
+use anyhow::{Context, Result};
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
-#[cfg(target_os = "windows")]
-use std::sync::{OnceLock, Weak};
-use tun_rs::{DeviceBuilder, InterruptEvent, SyncDevice};
+use std::sync::Arc;
+use tun_rs::{AsyncDevice, DeviceBuilder};
 
-#[cfg(target_os = "windows")]
-static WINTUN_DLL: OnceLock<Weak<WintunDll>> = OnceLock::new();
+pub type SessionFactory = Arc<dyn Fn(&Config) -> Result<TunSession> + Send + Sync>;
 
-#[cfg(target_os = "windows")]
-pub fn set_wintun_dll(dll: &Arc<WintunDll>) -> Result<(), String> {
-    WINTUN_DLL.set(Arc::downgrade(dll)).map_err(|_| "Wintun DLL already initialized".to_string())
-}
-
-pub struct SessionManager;
-
-#[derive(Clone)]
 pub struct TunSession {
-    interface_name: String,
-    device: Arc<SyncDevice>,
-    interrupt: Arc<InterruptEvent>,
-    closed: Arc<AtomicBool>,
-    cleanup_hook: Arc<StdMutex<Option<CleanupHook>>>,
+    pub(crate) interface_name: String,
+    pub(crate) device: AsyncDevice,
+    cleanup: CleanupHook,
     // Drop after the device so that the DLL stays protected until it unloads.
     #[cfg(target_os = "windows")]
     _wintun: Arc<WintunDll>,
 }
 
-impl SessionManager {
-    pub fn start(config: &TunSessionConfig) -> Result<TunSession, String> {
-        crate::validation::validate_interface_name(&config.interface_name)?;
-
-        #[cfg(target_os = "windows")]
-        let wintun = WINTUN_DLL.get().and_then(Weak::upgrade).ok_or("Wintun DLL is not initialized")?;
-
+pub fn factory() -> Result<SessionFactory> {
+    #[cfg(windows)]
+    let wintun = Arc::new(WintunDll::prepare()?);
+    Ok(Arc::new(move |config| {
+        // AsyncDevice registers its FD with the caller's reactor, including on blocking workers.
+        tokio::runtime::Handle::try_current().context("TUN setup requires a Tokio runtime")?;
         let endpoint_routes = platform::resolve_endpoint_routes(config)?;
-        platform::prepare_session_start().map_err(|error| format!("failed to prepare platform session: {error}"))?;
+        #[cfg(windows)]
+        platform::clear_stale_nrpt_rules_once().context("failed to prepare platform session")?;
 
-        let mut builder = DeviceBuilder::new().name(config.interface_name.clone());
-        for addr in &config.addresses {
-            let (ip, prefix) = parse_proto_cidr(addr).unwrap();
-            let prefix = u8::try_from(prefix).unwrap();
-            builder = match ip {
-                IpAddr::V4(v4) => builder.ipv4(v4, prefix, None),
-                IpAddr::V6(v6) => builder.ipv6(v6, prefix),
-            };
-        }
-        if config.mtu > 0 {
-            builder = builder.mtu(config.mtu as u16);
-        }
+        let builder = DeviceBuilder::new().name(config.interface_name.clone());
+        let builder = config.addresses.iter().fold(builder, |builder, &(ip, prefix)| match ip {
+            IpAddr::V4(v4) => builder.ipv4(v4, prefix, None),
+            IpAddr::V6(v6) => builder.ipv6(v6, prefix),
+        });
+        let builder = config.mtu.into_iter().fold(builder, |builder, mtu| builder.mtu(mtu.get()));
 
         #[cfg(target_os = "windows")]
-        {
-            builder = builder.wintun_file(wintun.path().to_str().ok_or("Wintun DLL path is not Unicode")?.to_owned());
-        }
+        let builder = builder.wintun_file(wintun.path().to_str().context("Wintun DLL path is not Unicode")?.to_owned());
 
-        let device = builder.build_sync().map_err(|error| format!("failed to create TUN device: {error}"))?;
-
-        #[cfg(unix)]
-        device.set_nonblocking(true).map_err(|error| format!("failed to configure non-blocking TUN: {error}"))?;
-
+        let device = builder.build_async().context("failed to create TUN device")?;
         let interface_name = device.name().unwrap_or_else(|_| config.interface_name.clone());
-
-        let interrupt = InterruptEvent::new().map_err(|error| format!("failed to create TUN interrupt event: {error}"))?;
-
-        let cleanup_hook = platform::configure_session(config, &interface_name, endpoint_routes).map_err(|error| {
-            let _ = interrupt.trigger();
-            format!("failed to configure platform session: {error}")
-        })?;
+        let cleanup = platform::configure_session(config, &interface_name, endpoint_routes).context("failed to configure platform session")?;
 
         Ok(TunSession {
             interface_name,
-            device: Arc::new(device),
-            interrupt: Arc::new(interrupt),
-            closed: Arc::new(AtomicBool::new(false)),
-            cleanup_hook: Arc::new(StdMutex::new(Some(cleanup_hook))),
+            device,
+            cleanup,
             #[cfg(target_os = "windows")]
-            _wintun: wintun,
+            _wintun: wintun.clone(),
         })
-    }
+    }))
 }
 
 impl TunSession {
-    pub fn interface_name(&self) -> &str {
-        &self.interface_name
-    }
-
-    pub fn read_packet(&self) -> std::io::Result<Vec<u8>> {
-        let mut buffer = vec![0_u8; 65536];
-        let bytes = self.device.recv_intr(&mut buffer, &self.interrupt)?;
-        buffer.truncate(bytes);
-        Ok(buffer)
-    }
-
-    pub fn write_packet(&self, packet: &[u8]) -> std::io::Result<()> {
-        let _ = self.device.send_intr(packet, &self.interrupt)?;
-        Ok(())
-    }
-
-    pub fn close(&self) -> Result<(), String> {
-        if self.closed.swap(true, Ordering::SeqCst) {
-            return Ok(());
-        }
-        let _ = self.interrupt.trigger();
-
-        let cleanup = match self.cleanup_hook.lock() {
-            Ok(mut guard) => guard.take(),
-            Err(poisoned) => poisoned.into_inner().take(),
-        };
-
-        if let Some(cleanup) = cleanup {
-            cleanup()?;
-        }
-
-        Ok(())
+    pub fn close(self) -> Result<()> {
+        (self.cleanup)()
     }
 }
 
-pub fn is_supported_interface_name(interface_name: &str) -> bool {
-    crate::validation::validate_interface_name(interface_name).is_ok()
-}
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[path = "../tests/unit/session_io_tests.rs"]
+mod tests;

@@ -6,14 +6,11 @@ import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
 import com.rafambn.wgkotlin.network.SocketManagerImpl
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 class Vpn(
     val interfaceName: String,
@@ -29,9 +26,8 @@ class Vpn(
     private val cryptoSessionManager = CryptoSessionManagerImpl(tunPipePair.second, networkPipePair.second, engine)
     private val socketManager = SocketManagerImpl(networkPipePair.first)
     private val interfaceManager = PlatformInterfaceFactory.create(tunPipePair.first)
-    // Blocking public calls and asynchronous failures must finish cleanup before reopening.
-    private val lifecycleMutex = Mutex()
-    private val failureScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Lifecycle operations are blocking and run one at a time, including failure cleanup.
+    private val lifecycleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
     private var currentParsedConfiguration: ParsedVpnConfiguration? = null
     private var originalConfiguration: VpnConfiguration? = null
 
@@ -40,7 +36,7 @@ class Vpn(
         requireValidRegex(interfaceName)
     }
 
-    fun isRunning(): Boolean = withLifecycleLock {
+    fun isRunning(): Boolean = onLifecycle {
         interfaceManager.isRunning() && cryptoSessionManager.hasActiveSessions()
     }
 
@@ -51,19 +47,13 @@ class Vpn(
         }
 
         val parsed = configuration.toParsedVpnConfiguration()
-        withLifecycleLock {
+        onLifecycle {
             stopManagers()
             currentParsedConfiguration = parsed
             originalConfiguration = configuration
-            val failure = CompletableDeferred<Throwable>()
-            val onFailure: (Throwable) -> Unit = { error ->
-                if (failure.complete(error)) {
-                    // Cleanup joins the workers, so it cannot run inside the worker that failed.
-                    failureScope.launch {
-                        lifecycleMutex.withLock {
-                            if (currentParsedConfiguration === parsed) stopManagers()
-                        }
-                    }
+            val onFailure: (Throwable) -> Unit = {
+                lifecycleScope.launch {
+                    if (currentParsedConfiguration === parsed) stopManagers()
                 }
             }
             try {
@@ -73,7 +63,6 @@ class Vpn(
                     socketManager.start(configuration.listenPort ?: DEFAULT_PORT, onFailure)
                 }
                 operation("start") { interfaceManager.start(parsed.toTunSessionConfig(), onFailure) }
-                if (failure.isCompleted) throw runBlocking { failure.await() }
             } catch (error: Throwable) {
                 try {
                     stopManagers()
@@ -85,10 +74,10 @@ class Vpn(
         }
     }
 
-    fun information(): VpnInterfaceInformation? = withLifecycleLock {
+    fun information(): VpnInterfaceInformation? = onLifecycle {
         val liveInformation = operation("information") {
             interfaceManager.information()
-        } ?: return@withLifecycleLock null
+        } ?: return@onLifecycle null
 
         val runtimePeerStats = cryptoSessionManager.peerStats()
         val informationWithPeerStats = if (runtimePeerStats.isEmpty()) {
@@ -101,7 +90,7 @@ class Vpn(
     }
 
     fun stop() {
-        withLifecycleLock { stopManagers() }
+        onLifecycle { stopManagers() }
     }
 
     private fun stopManagers() {
@@ -128,8 +117,8 @@ class Vpn(
         networkPipePair.first.discardPending()
     }
 
-    private fun <T> withLifecycleLock(block: () -> T): T = runBlocking {
-        lifecycleMutex.withLock { block() }
+    private fun <T> onLifecycle(block: () -> T): T = runBlocking(lifecycleScope.coroutineContext) {
+        block()
     }
 
     private inline fun <T> operation(name: String, block: () -> T): T {

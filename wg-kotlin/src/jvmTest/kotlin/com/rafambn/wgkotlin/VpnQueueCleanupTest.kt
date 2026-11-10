@@ -129,7 +129,7 @@ class VpnQueueCleanupTest {
     }
 
     @Test
-    fun failureDuringOpeningClosesTheSessionThatFinishesOpening() {
+    fun failureDuringOpeningClosesTheSessionThatFinishesOpening() = runBlocking {
         val vpn = Vpn("utun130")
         val closed = AtomicBoolean()
         replaceBridge(vpn) { _, _, onFailure ->
@@ -137,7 +137,10 @@ class VpnQueueCleanupTest {
             AutoCloseable { closed.set(true) }
         }
         try {
-            assertFailsWith<IllegalStateException> { vpn.open(configuration()) }
+            vpn.open(configuration())
+            withTimeout(5_000) {
+                while (!closed.get()) delay(10)
+            }
             assertTrue(closed.get())
             assertFalse(vpn.isRunning())
             assertNull(vpn.information())
@@ -158,8 +161,8 @@ class VpnQueueCleanupTest {
             vpn.open(configuration("10.0.0.1/32"))
             vpn.open(configuration("10.0.1.1/32"))
             callbacks.first()(IllegalStateException("Late failure"))
-            val failureScope = field<CoroutineScope>(vpn, "failureScope")
-            withTimeout(5_000) { failureScope.coroutineContext.job.children.toList().joinAll() }
+            val lifecycleScope = field<CoroutineScope>(vpn, "lifecycleScope")
+            withTimeout(5_000) { lifecycleScope.coroutineContext.job.children.toList().joinAll() }
             assertTrue(vpn.isRunning())
             assertEquals(listOf("10.0.1.1/32"), vpn.information()!!.vpnConfiguration!!.addresses)
         } finally {

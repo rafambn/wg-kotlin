@@ -32,6 +32,7 @@ class VpnConfigurationTest {
 
         val session = configuration.toTunSessionConfig()
 
+        assertEquals("utun1", session.interfaceName)
         assertEquals(listOf(ipv4, ipv6), session.peerEndpoints)
         assertEquals(listOf(network), session.peerAllowedIps)
         assertEquals(listOf(network), session.addresses)

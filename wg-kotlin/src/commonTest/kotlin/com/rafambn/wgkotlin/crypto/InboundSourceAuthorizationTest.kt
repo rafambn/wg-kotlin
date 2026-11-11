@@ -38,7 +38,7 @@ class InboundSourceAuthorizationTest {
         }
         val manager = CryptoSessionManagerImpl(cryptoTun, cryptoNetwork, peerSessionFactory = factory)
         val failure = CompletableDeferred<Throwable>()
-        manager.reconcileSessions(VpnConfiguration(
+        manager.createSessions(VpnConfiguration(
             interfaceName = "utun1",
             privateKey = "test-key",
             peers = listOf(

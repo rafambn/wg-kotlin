@@ -22,17 +22,16 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CryptoSessionManagerTest {
 
     @Test
-    fun reconcileSessionsCreatesActiveSessionsForAllPeers() {
+    fun createSessionsCreatesActiveSessionsForAllPeers() {
         val factory = RecordingSessionFactory()
         val manager = createManager(factory)
 
-        manager.reconcileSessions(configurationWithPeers("peer-a", "peer-b"))
+        manager.createSessions(configurationWithPeers("peer-a", "peer-b"))
 
         assertTrue(manager.hasActiveSessions())
         assertEquals(2, manager.peerStats().size)
@@ -40,24 +39,25 @@ class CryptoSessionManagerTest {
     }
 
     @Test
-    fun reconcileSessionsRemovesMissingPeers() {
+    fun creatingSessionsAgainRequiresStop() = runBlocking {
         val factory = RecordingSessionFactory()
         val manager = createManager(factory)
 
-        manager.reconcileSessions(configurationWithPeers("peer-a", "peer-b"))
-        manager.reconcileSessions(configurationWithPeers("peer-b"))
-
-        assertNull(manager.peerStats().firstOrNull { stats -> stats.publicKey == "peer-a" })
-        assertNotNull(manager.peerStats().firstOrNull { stats -> stats.publicKey == "peer-b" })
-        assertEquals(1, factory.sessionByPeer("peer-a")?.closeCalls)
+        manager.createSessions(configurationWithPeers("peer-a", "peer-b"))
+        assertFailsWith<IllegalStateException> {
+            manager.createSessions(configurationWithPeers("peer-b"))
+        }
+        assertEquals(2, manager.peerStats().size)
+        assertTrue(factory.createdSessions.all { it.closeCalls == 0 })
+        manager.stop()
     }
 
     @Test
-    fun reconcileSessionsReplacesChangedPeerConfiguration() {
+    fun stopThenCreateUsesTheNewPeerConfiguration() = runBlocking {
         val factory = RecordingSessionFactory()
         val manager = createManager(factory)
 
-        manager.reconcileSessions(
+        manager.createSessions(
             configurationWithPeer(
                 VpnPeer(
                     publicKey = "peer-a",
@@ -67,7 +67,8 @@ class CryptoSessionManagerTest {
             ),
         )
 
-        manager.reconcileSessions(
+        manager.stop()
+        manager.createSessions(
             configurationWithPeer(
                 VpnPeer(
                     publicKey = "peer-a",
@@ -85,6 +86,7 @@ class CryptoSessionManagerTest {
         assertNotNull(session)
         assertEquals("10.0.0.2", session.endpointAddress)
         assertEquals(51821, session.endpointPort)
+        manager.stop()
     }
 
     @Test
@@ -97,7 +99,7 @@ class CryptoSessionManagerTest {
         )
 
         assertFailsWith<IllegalArgumentException> {
-            manager.reconcileSessions(duplicated)
+            manager.createSessions(duplicated)
         }
     }
 
@@ -107,7 +109,7 @@ class CryptoSessionManagerTest {
         val manager = createManager(factory)
 
         val throwable = assertFailsWith<IllegalStateException> {
-            manager.reconcileSessions(configurationWithPeers("peer-a", "peer-b"))
+            manager.createSessions(configurationWithPeers("peer-a", "peer-b"))
         }
 
         assertTrue(throwable.message?.contains("factory forced failure") == true)
@@ -131,7 +133,7 @@ class CryptoSessionManagerTest {
             )
 
             assertFailsWith<IllegalArgumentException>("$address/$prefix") {
-                manager.reconcileSessions(configurationWithPeer(peer))
+                manager.createSessions(configurationWithPeer(peer))
             }
             assertTrue(factory.createdSessions.isEmpty())
             assertFalse(manager.hasActiveSessions())
@@ -150,7 +152,7 @@ class CryptoSessionManagerTest {
             val manager = createManager(factory)
             val peer = VpnPeer(publicKey = "peer-a", endpointAddress = address, endpointPort = 51820)
 
-            assertFailsWith<IllegalArgumentException> { manager.reconcileSessions(configurationWithPeer(peer)) }
+            assertFailsWith<IllegalArgumentException> { manager.createSessions(configurationWithPeer(peer)) }
             assertTrue(factory.createdSessions.isEmpty())
         }
     }
@@ -169,7 +171,7 @@ class CryptoSessionManagerTest {
             publicKey = "peer-a", endpointAddress = mapped, endpointPort = 51820,
             allowedIps = listOf("0.0.0.0/0".toCidr()),
         )
-        manager.reconcileSessions(configurationWithPeer(peer))
+        manager.createSessions(configurationWithPeer(peer))
         val failure = CompletableDeferred<Throwable>()
         manager.start { failure.complete(it) }
         try {
@@ -193,16 +195,17 @@ class CryptoSessionManagerTest {
     }
 
     @Test
-    fun peerIndexesAreDeterministicAcrossPeerOrderChanges() {
+    fun peerIndexesAreDeterministicAcrossPeerOrderChanges() = runBlocking {
         val factory = RecordingSessionFactory()
         val manager = createManager(factory)
 
-        manager.reconcileSessions(configurationWithPeers("peer-b", "peer-a"))
+        manager.createSessions(configurationWithPeers("peer-b", "peer-a"))
         val first = factory.createdSessions
             .take(2)
             .associate { session -> session.peerPublicKey to session.peerIndex }
 
-        manager.reconcileSessions(configurationWithPeers("peer-a", "peer-b"))
+        manager.stop()
+        manager.createSessions(configurationWithPeers("peer-a", "peer-b"))
         val second = factory.createdSessions
             .drop(2)
             .associate { session -> session.peerPublicKey to session.peerIndex }
@@ -210,14 +213,15 @@ class CryptoSessionManagerTest {
         assertEquals(first, second)
         assertEquals(1, second["peer-a"])
         assertEquals(2, second["peer-b"])
+        manager.stop()
     }
 
     @Test
-    fun stopClearsActiveSessions() {
+    fun stopClearsActiveSessions() = runBlocking {
         val factory = RecordingSessionFactory()
         val manager = createManager(factory)
 
-        manager.reconcileSessions(configurationWithPeers("peer-a"))
+        manager.createSessions(configurationWithPeers("peer-a"))
         assertTrue(manager.hasActiveSessions())
 
         manager.stop()
@@ -280,9 +284,6 @@ class CryptoSessionManagerTest {
             return session
         }
 
-        fun sessionByPeer(peerPublicKey: String): TestPeerSession? {
-            return createdSessions.find { session -> session.peerPublicKey == peerPublicKey }
-        }
     }
 
     // ── Data-plane tests ──────────────────────────────────────────────────────
@@ -297,7 +298,7 @@ class CryptoSessionManagerTest {
             networkPipe = cryptoNet,
             peerSessionFactory = factory,
         )
-        manager.reconcileSessions(
+        manager.createSessions(
             configurationWithPeer(
                 VpnPeer(
                     publicKey = "peer-a",
@@ -330,7 +331,7 @@ class CryptoSessionManagerTest {
             networkPipe = cryptoNet,
             peerSessionFactory = factory,
         )
-        manager.reconcileSessions(
+        manager.createSessions(
             configurationWithPeer(
                 VpnPeer(
                     publicKey = "peer-a",
@@ -367,7 +368,7 @@ class CryptoSessionManagerTest {
             networkPipe = cryptoNet,
             peerSessionFactory = factory,
         )
-        manager.reconcileSessions(
+        manager.createSessions(
             configurationWithPeer(
                 VpnPeer(
                     publicKey = "peer-a",
@@ -405,7 +406,7 @@ class CryptoSessionManagerTest {
             networkPipe = cryptoNet,
             peerSessionFactory = factory,
         )
-        manager.reconcileSessions(
+        manager.createSessions(
             configurationWithPeer(
                 VpnPeer(
                     publicKey = "peer-a",

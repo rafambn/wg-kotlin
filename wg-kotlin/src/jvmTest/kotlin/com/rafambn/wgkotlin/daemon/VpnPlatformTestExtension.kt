@@ -12,6 +12,7 @@ class VpnPlatformTestExtension : BeforeAllCallback, AfterAllCallback {
         "com.rafambn.wgkotlin.VpnContractInvariantsTest",
         "com.rafambn.wgkotlin.VpnFoundationWiringTest",
         "com.rafambn.wgkotlin.VpnStateTransitionTest",
+        "com.rafambn.wgkotlin.VpnMultipleInterfacesTest",
     )
 
     override fun beforeAll(context: ExtensionContext) {

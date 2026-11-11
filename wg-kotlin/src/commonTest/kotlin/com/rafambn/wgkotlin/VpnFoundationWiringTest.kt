@@ -2,9 +2,10 @@ package com.rafambn.wgkotlin
 
 import com.rafambn.wgkotlin.util.toCidr
 import com.rafambn.wgkotlin.util.resolveToIp
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -15,55 +16,48 @@ class VpnFoundationWiringTest {
     private val peerKey = "6fX3drXr/7L0KleChX2NDSSSXWMQZnIcXtNCmieYw0I="
 
     @Test
-    fun inMemoryLifecycleStillWorks() {
+    fun inMemoryLifecycleStillWorks() = runBlocking {
         val vpn = testVpn()
 
-        assertFalse(vpn.isRunning())
+        assertNull(vpn.information("utun120"))
 
-        vpn.open(
+        vpn.start(
             VpnConfiguration(
                 interfaceName = "utun120",
                 listenPort = 0,
                 privateKey = privateKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1".resolveToIp(), endpointPort = 51820)),
             ),
-        )
-        assertTrue(vpn.isRunning())
+        ).getOrThrow()
+        assertTrue(vpn.information("utun120")?.isUp == true)
 
-        vpn.stop()
-        assertFalse(vpn.isRunning())
-        assertNull(vpn.information())
+        vpn.stop("utun120").getOrThrow()
+        assertNull(vpn.information("utun120"))
     }
 
     @Test
-    fun repeatedStartKeepsVpnRunning() {
+    fun repeatedStartFailsAndKeepsTheOriginalConfiguration() = runBlocking {
         val vpn = testVpn()
 
-        vpn.open(
-            VpnConfiguration(
-                interfaceName = "utun121",
-                listenPort = 0,
-                privateKey = privateKey,
-                peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1".resolveToIp(), endpointPort = 51820)),
-            ),
+        val original = VpnConfiguration(
+            interfaceName = "utun121",
+            listenPort = 0,
+            privateKey = privateKey,
+            peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1".resolveToIp(), endpointPort = 51820)),
         )
-        vpn.open(
-            VpnConfiguration(
-                interfaceName = "utun121",
-                listenPort = 0,
-                privateKey = privateKey,
-                peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1".resolveToIp(), endpointPort = 51820)),
-            ),
-        )
-
-        assertTrue(vpn.isRunning())
+        vpn.start(original).getOrThrow()
+        val result = vpn.start(original.copy(mtu = 1400))
+        assertIs<IllegalStateException>(result.exceptionOrNull())
+        assertTrue(vpn.information("utun121")?.isUp == true)
+        assertEquals(original, vpn.information("utun121")?.vpnConfiguration)
+        vpn.stop("utun121").getOrThrow()
     }
 
     @Test
-    fun stopThenOpenWithNewConfigUpdatesConfiguration() {
+    fun stopThenStartWithNewConfigUpdatesConfiguration() = runBlocking {
         val vpn = testVpn()
 
-        vpn.open(
+        vpn.start(
             VpnConfiguration(
                 interfaceName = "utun122",
                 listenPort = 0,
@@ -71,11 +65,11 @@ class VpnFoundationWiringTest {
                 privateKey = privateKey,
                 peers = listOf(VpnPeer(publicKey = peerKey, endpointAddress = "198.51.100.1".resolveToIp(), endpointPort = 51820)),
             ),
-        )
+        ).getOrThrow()
 
-        vpn.stop()
+        vpn.stop("utun122").getOrThrow()
 
-        vpn.open(
+        vpn.start(
             VpnConfiguration(
                 interfaceName = "utun122",
                 listenPort = 0,
@@ -84,13 +78,14 @@ class VpnFoundationWiringTest {
                 privateKey = privateKey,
                 peers = listOf(VpnPeer(publicKey = publicKey, endpointAddress = "198.51.100.2".resolveToIp(), endpointPort = 51821)),
             ),
-        )
+        ).getOrThrow()
 
-        val current = requireNotNull(vpn.information()).vpnConfiguration
+        val current = requireNotNull(vpn.information("utun122")).vpnConfiguration
         requireNotNull(current)
 
         assertEquals(DnsConfig(searchDomains = listOf("corp.local"), servers = listOf("9.9.9.9".resolveToIp())), current.dns)
         assertEquals(listOf("10.20.30.2/32".toCidr()), current.addresses)
         assertEquals(listOf(publicKey), current.peers.map { peer -> peer.publicKey })
+        vpn.stop("utun122").getOrThrow()
     }
 }

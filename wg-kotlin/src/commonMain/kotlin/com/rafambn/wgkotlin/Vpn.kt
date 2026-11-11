@@ -1,108 +1,88 @@
 package com.rafambn.wgkotlin
 
-import com.rafambn.wgkotlin.crypto.CryptoSessionManagerImpl
-import com.rafambn.wgkotlin.iface.PlatformInterfaceFactory
 import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
-import com.rafambn.wgkotlin.network.SocketManagerImpl
-import com.rafambn.wgkotlin.network.io.UdpDatagram
-import com.rafambn.wgkotlin.util.DuplexChannelPipe
+import kotlin.concurrent.Volatile
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 class Vpn(
-    engine: Engine = Engine.BORINGTUN
+    private val engine: Engine = Engine.BORINGTUN,
 ) {
 
     companion object {
         const val DEFAULT_PORT: Int = 51820
     }
 
-    private val tunPipePair = DuplexChannelPipe.create<ByteArray>()
-    private val networkPipePair = DuplexChannelPipe.create<UdpDatagram>()
-    private val cryptoSessionManager = CryptoSessionManagerImpl(
-        tunPipe = tunPipePair.second,
-        networkPipe = networkPipePair.second,
-        engine = engine,
-    )
-    private val socketManager = SocketManagerImpl(networkPipe = networkPipePair.first)
-    private val interfaceManager = PlatformInterfaceFactory.create(tunPipePair.first)
-    private var originalConfiguration: VpnConfiguration? = null
+    private val lifecycleMutex = Mutex()
+    @Volatile private var sessions: Map<String, VpnSession> = emptyMap()
 
-    fun isRunning(): Boolean {
-        return interfaceManager.isRunning() && cryptoSessionManager.hasActiveSessions()
-    }
-
-    fun open(configuration: VpnConfiguration) {
-        requireNonBlankInterfaceName(configuration.interfaceName)
-        requireValidRegex(configuration.interfaceName)
-        requireUniquePeerPublicKeys(configuration.peers)
-
-        stop()
-
-        originalConfiguration = configuration
-
-        operation("reconcileSessions") {
-            cryptoSessionManager.reconcileSessions(configuration)
+    suspend fun start(configuration: VpnConfiguration): Result<Unit> = lifecycleMutex.withLock {
+        val tunName = configuration.interfaceName
+        if (tunName in sessions) {
+            return@withLock Result.failure(IllegalStateException("TUN `$tunName` must be stopped before starting"))
         }
+        var session: VpnSession? = null
+        try {
+            currentCoroutineContext().ensureActive()
+            requireNonBlankInterfaceName(tunName)
+            requireValidRegex(tunName)
+            requireUniquePeerPublicKeys(configuration.peers)
 
-        operation("start") {
-            cryptoSessionManager.start { stop() }
-        }
+            val created = VpnSession(configuration, engine)
+            session = created
+            val onFailure: (Throwable) -> Unit = { created.failureScope.launch { stop(tunName) } }
 
-        operation("socketStart") {
-            socketManager.start(
-                listenPort = configuration.listenPort ?: DEFAULT_PORT,
-                onFailure = { stop() },
-            )
-        }
-
-        operation("start") {
-            interfaceManager.start(configuration.toTunSessionConfig()) { stop() }
+            created.cryptoSessionManager.createSessions(configuration)
+            created.cryptoSessionManager.start(onFailure)
+            created.socketManager.start(configuration.listenPort ?: DEFAULT_PORT, onFailure)
+            created.interfaceManager.start(configuration.toTunSessionConfig(), onFailure)
+            currentCoroutineContext().ensureActive()
+            sessions = sessions + (tunName to created)
+            Result.success(Unit)
+        } catch (error: Throwable) {
+            if (session != null) stopComponents(session).exceptionOrNull()?.let(error::addSuppressed)
+            if (error is CancellationException) throw error
+            Result.failure(error)
         }
     }
 
-    fun information(): VpnInterfaceInformation? {
-        val liveInformation = operation("information") {
-            interfaceManager.information()
-        } ?: return null
+    fun information(tunName: String): VpnInterfaceInformation? {
+        val session = sessions[tunName] ?: return null
+        val liveInformation = session.interfaceManager.information() ?: return null
 
-        val runtimePeerStats = cryptoSessionManager.peerStats()
+        val runtimePeerStats = session.cryptoSessionManager.peerStats()
         val informationWithPeerStats = if (runtimePeerStats.isEmpty()) {
             liveInformation
         } else {
             liveInformation.copy(peerStats = runtimePeerStats)
         }
 
-        return informationWithPeerStats.copy(vpnConfiguration = originalConfiguration)
+        return informationWithPeerStats.copy(vpnConfiguration = session.configuration)
     }
 
-    fun stop() {
-        var firstError: Throwable? = null
-        try {
-            operation("stop") { interfaceManager.stop() }
-        } catch (error: Throwable) {
-            firstError = error
-        }
-        try {
-            operation("socketStop") { socketManager.stop() }
-        } catch (error: Throwable) {
-            if (firstError == null) firstError = error
-        }
-        try {
-            operation("stop") { cryptoSessionManager.stop() }
-        } catch (error: Throwable) {
-            if (firstError == null) firstError = error
-        }
-        originalConfiguration = null
-        if (firstError != null) throw firstError
+    suspend fun stop(tunName: String): Result<Unit> = lifecycleMutex.withLock {
+        val session = sessions[tunName] ?: return@withLock Result.success(Unit)
+        val result = stopComponents(session)
+        sessions = sessions - tunName
+        result
     }
 
-    private inline fun <T> operation(name: String, block: () -> T): T {
-        return try {
-            block()
-        } catch (throwable: Throwable) {
-            throw IllegalStateException(
-                "Operation `$name` failed: ${throwable.message ?: "unknown"}",
-                throwable,
-            )
+    private suspend fun stopComponents(session: VpnSession): Result<Unit> = withContext(NonCancellable) {
+        session.failureScope.cancel()
+        val interfaceStop = runCatching { session.interfaceManager.stop() }
+        val socketStop = runCatching { session.socketManager.stop() }
+        val cryptoStop = runCatching { session.cryptoSessionManager.stop() }
+        when {
+            interfaceStop.isFailure -> interfaceStop
+            socketStop.isFailure -> socketStop
+            else -> cryptoStop
         }
     }
 }

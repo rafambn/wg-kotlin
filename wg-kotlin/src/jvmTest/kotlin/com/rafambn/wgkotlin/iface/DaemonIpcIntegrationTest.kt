@@ -15,15 +15,15 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
+import kotlin.test.assertNull
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
-import kotlin.test.assertFalse
 
 class DaemonIpcIntegrationTest {
     @Test
-    fun existingVpnApiCanBeConstructedBeforeLaunchingTheDaemon() {
+    fun existingVpnApiCanBeConstructedBeforeLaunchingTheDaemon() = runBlocking {
         val first = Vpn()
         val second = Vpn()
         IpcTestFixture("echo").use { fixture ->
@@ -38,32 +38,32 @@ class DaemonIpcIntegrationTest {
                         endpointAddress = "198.51.100.1".resolveToIp(), endpointPort = 51820,
                     )),
                 )
-                first.open(configuration("utun10"))
-                second.open(configuration("utun11"))
-                assertTrue(first.isRunning())
-                assertTrue(second.isRunning())
-                first.stop()
-                assertFalse(first.isRunning())
-                assertTrue(second.isRunning())
+                first.start(configuration("utun10")).getOrThrow()
+                second.start(configuration("utun11")).getOrThrow()
+                assertTrue(first.information("utun10")?.isUp == true)
+                assertTrue(second.information("utun11")?.isUp == true)
+                first.stop("utun10").getOrThrow()
+                assertNull(first.information("utun10"))
+                assertTrue(second.information("utun11")?.isUp == true)
                 assertTrue(fixture.daemon.isAlive)
             } finally {
-                first.stop()
-                second.stop()
+                first.stop("utun10").getOrThrow()
+                second.stop("utun11").getOrThrow()
             }
         }
     }
 
     @Test
-    fun ownedClientReachesRustConfigValidationWithoutRootOrCredentials() {
+    fun ownedClientReachesRustConfigValidationWithoutRootOrCredentials() = runBlocking {
         IpcTestFixture().use { fixture ->
             val vpn = Vpn()
             val failure = assertFailsWith<IllegalStateException> {
-                vpn.open(VpnConfiguration(
-                    interfaceName = "utun1", listenPort = 0,
+                vpn.start(VpnConfiguration(interfaceName = "utun1", listenPort = 0,
                     privateKey = "oA8gY5Yg7R6pujISiFDUFxIr05o2IaNbS1Ry6j3TzXs=",
-                ))
+                )).getOrThrow()
             }
             assertTrue(generateSequence<Throwable>(failure) { it.cause }.any { it.message?.contains("addresses must contain") == true })
+            assertNull(vpn.information("utun1"))
         }
     }
 

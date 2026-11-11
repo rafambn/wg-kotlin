@@ -30,7 +30,7 @@
 
 ## Key Features
 
-- **Small Kotlin API**: Launch an owned daemon, create a `Vpn`, then open, inspect, or stop its session.
+- **Small Kotlin API**: Launch an owned daemon, create a `Vpn`, then start, inspect, or stop TUN sessions by name.
 - **BoringTun Runtime**: WireGuard key generation and peer sessions are backed by Rust BoringTun bindings.
 - **Native Daemon**: TUN packet I/O, route installation, and DNS configuration run in a standalone Rust process.
 - **Local IPC**: One named-pipe or Unix-socket connection per TUN, using protobuf messages and OS process authentication.
@@ -86,8 +86,8 @@ val daemon = DaemonProcess.launch { arguments ->
 ```
 
 `DaemonProcess.launch(...)` registers the daemon used by `Vpn(...)`; it does not
-create VPN objects. Keep the existing `Vpn(interfaceName, engine)` and
-`vpn.open(configuration)` API.
+create VPN objects. A `Vpn(engine)` manages multiple TUNs through
+`start(configuration)`, `information(tunName)`, and `stop(tunName)`.
 
 Each daemon has one endpoint: a named pipe on Windows or a Unix domain socket on
 Linux/macOS. Each TUN owns an independent connection to that endpoint. The daemon
@@ -110,41 +110,53 @@ val localKeys = WireGuardKeys.generateKeyPair()
 val presharedKey = WireGuardKeys.generatePresharedKey()
 ```
 
-Open a VPN session:
+Start a VPN session from a coroutine. IP addresses and CIDRs must already be parsed:
 
 ```kotlin
 import com.rafambn.wgkotlin.DnsConfig
 import com.rafambn.wgkotlin.Vpn
 import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.VpnPeer
+import com.rafambn.wgkotlin.daemon.proto.Cidr
+import com.rafambn.wgkotlin.daemon.proto.Ip
+import com.rafambn.wgkotlin.daemon.proto.invoke
+import kotlinx.io.bytestring.ByteString
 
-val vpn = Vpn(interfaceName = "utun0")
+val vpn = Vpn()
+val address = Ip { value = Ip.Value.V4(ByteString(byteArrayOf(10, 0, 0, 2))) }
+val dnsServer = Ip { value = Ip.Value.V4(ByteString(byteArrayOf(1, 1, 1, 1))) }
+val peerAddress = Ip { value = Ip.Value.V4(ByteString(byteArrayOf(203.toByte(), 0, 113, 10))) }
+val defaultRoute = Cidr {
+    ip = Ip { value = Ip.Value.V4(ByteString(ByteArray(4))) }
+    prefix = 0u
+}
 
-vpn.open(
+vpn.start(
     VpnConfiguration(
         interfaceName = "utun0",
         privateKey = localKeys.privateKey,
-        addresses = mutableListOf("10.0.0.2/32"),
+        listenPort = 0,
+        addresses = listOf(Cidr { ip = address; prefix = 32u }),
         dns = DnsConfig(
-            servers = listOf("1.1.1.1"),
+            servers = listOf(dnsServer),
             searchDomains = listOf("example.com"),
         ),
         peers = listOf(
             VpnPeer(
                 publicKey = "remote-peer-public-key-base64",
                 presharedKey = presharedKey,
-                endpointAddress = "203.0.113.10",
+                endpointAddress = peerAddress,
                 endpointPort = 51820,
-                allowedIps = listOf("0.0.0.0/0"),
+                allowedIps = listOf(defaultRoute),
                 persistentKeepalive = 25,
             ),
         ),
     ),
-)
+).getOrThrow()
 
-val information = vpn.information()
+val information = vpn.information("utun0")
 
-vpn.stop()
+vpn.stop("utun0").getOrThrow()
 
 // Close all VPN sessions first. Requests daemon shutdown, then forces exit
 // after five seconds if necessary.

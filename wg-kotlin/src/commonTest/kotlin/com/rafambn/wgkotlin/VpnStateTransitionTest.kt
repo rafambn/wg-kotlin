@@ -1,8 +1,10 @@
 package com.rafambn.wgkotlin
 
 import com.rafambn.wgkotlin.util.resolveToIp
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
-import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class VpnStateTransitionTest {
@@ -11,56 +13,30 @@ class VpnStateTransitionTest {
     private val peerKey = "6fX3drXr/7L0KleChX2NDSSSXWMQZnIcXtNCmieYw0I="
 
     @Test
-    fun lifecycleTransitionsFollowContract() {
+    fun lifecycleTransitionsFollowContract() = runBlocking {
         val vpn = testVpn()
 
-        assertFalse(vpn.isRunning())
+        assertNull(vpn.information("utun130"))
 
-        vpn.open(baseConfiguration(interfaceName = "utun130"))
-        assertTrue(vpn.isRunning())
+        vpn.start(baseConfiguration("utun130")).getOrThrow()
+        assertTrue(vpn.information("utun130")?.isUp == true)
 
-        vpn.stop()
-        assertFalse(vpn.isRunning())
-    }
-
-    // TODO: These tests require dependency injection of internal components.
-    // The Vpn class no longer supports this. Tests need to be refactored to work
-    // with the new design or use integration tests instead.
-    /*
-    @Test
-    fun failedStartLeavesVpnStopped() {
-        val vpn = testVpn(
-            interfaceName = "utun131",
-            interfaceManager = FailingStartInterfaceManager(),
-        )
-
-        assertFailsWith<IllegalStateException> {
-            vpn.open(baseConfiguration(interfaceName = "utun131"))
-        }
-
-        assertFalse(vpn.isRunning())
+        vpn.stop("utun130").getOrThrow()
+        assertNull(vpn.information("utun130"))
     }
 
     @Test
-    fun stopContinuesCleanupWhenInterfaceStopFails() {
-        val configuration = baseConfiguration(interfaceName = "utun132")
-        val socketManager = RecordingSocketManager()
-        val cryptoSessionManager = RecordingCryptoSessionManager()
-        val vpn = testVpn(
-            interfaceName = "utun132",
-            cryptoSessionManager = cryptoSessionManager,
-            socketManager = socketManager,
-            interfaceManager = StopFailingInterfaceManager(configuration),
-        )
-
-        assertFailsWith<IllegalStateException> {
-            vpn.stop()
+    fun startWithoutPeersStillRequiresStopBeforeRestarting() = runBlocking<Unit> {
+        val vpn = testVpn()
+        val configuration = baseConfiguration("utun131").copy(peers = emptyList())
+        try {
+            vpn.start(configuration).getOrThrow()
+            assertTrue(vpn.information("utun131")?.isUp == true)
+            assertIs<IllegalStateException>(vpn.start(configuration).exceptionOrNull())
+        } finally {
+            vpn.stop("utun131").getOrThrow()
         }
-
-        assertEquals(1, socketManager.stopCalls)
-        assertEquals(1, cryptoSessionManager.stopCalls)
     }
-    */
 
     private fun baseConfiguration(interfaceName: String): VpnConfiguration {
         return VpnConfiguration(

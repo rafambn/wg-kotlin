@@ -90,8 +90,12 @@ Windows `.exe` and Unix `.tar.gz` archives to that release. The archives preserv
 the daemon's executable permission. Creating a tag alone does not trigger it.
 The separate Publish Maven workflow builds BoringTun for all five platforms,
 verifies a JVM consumer using one dependency, and publishes WG-Kotlin
-to Maven Central. Running it manually performs the builds and verification without
-publishing to Central. Neither workflow starts an elevated daemon.
+to Maven Central. Running it manually without `release_tag` performs the builds
+and verification without publishing to Central. To recover an existing release,
+run either workflow from `master` and provide its exact tag in `release_tag`.
+The workflow builds that tag's source with the updated workflow, then attaches
+the daemon assets or publishes Maven artifacts. Do not republish a Maven version
+that is already available on Central. Neither workflow starts an elevated daemon.
 
 The application supplies the privileged launcher. The library verifies OS peer
 identity, opens local IPC sessions, and controls daemon termination:

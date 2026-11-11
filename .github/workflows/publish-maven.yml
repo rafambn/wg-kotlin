@@ -4,12 +4,17 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to rebuild and publish to Maven Central
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.release.tag_name || inputs.release_tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -44,6 +49,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -78,6 +85,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - uses: actions/setup-java@v6.2.0
         with:
@@ -96,7 +105,7 @@ jobs:
 
       - name: Verify complete native runtime set
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
         run: ./gradlew :wg-kotlin:verifyNativeRuntimes -PnativeRuntimeDirectory="$PWD/native-runtimes"
 
       - name: Build and publish locally for consumer verification
@@ -109,10 +118,10 @@ jobs:
         run: ./gradlew -p tests/jvm-consumer run -PverifyAllNativeRuntimes=true
 
       - name: Publish WG-Kotlin to Maven Central
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || inputs.release_tag != ''
         run: ./gradlew publishAndReleaseToMavenCentral -PnativeRuntimeDirectory="$PWD/native-runtimes"
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_KEY_CONTENTS }}

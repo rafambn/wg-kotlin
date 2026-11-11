@@ -1,6 +1,6 @@
 package com.rafambn.wgkotlin.daemon
 
-import com.rafambn.wgkotlin.iface.PlatformInterfaceFactory
+import com.rafambn.wgkotlin.iface.PlatformInterfaceManager
 import com.rafambn.wgkotlin.daemon.proto.ClientMessage
 import com.rafambn.wgkotlin.daemon.proto.invoke
 import java.nio.file.Files
@@ -32,7 +32,7 @@ class DaemonProcess private constructor(
         require(timeout.isFinite() && !timeout.isNegative()) { "timeout must be finite and non-negative" }
         if (!process.isAlive) {
             closeStreams(process)
-            PlatformInterfaceFactory.unregisterDaemon(this)
+            PlatformInterfaceManager.unregisterDaemon(this)
             return
         }
         if (timeout.inWholeMilliseconds == 0L) { kill(); return }
@@ -61,7 +61,7 @@ class DaemonProcess private constructor(
             throw error
         } finally {
             closeStreams(process)
-            if (!process.isAlive) PlatformInterfaceFactory.unregisterDaemon(this)
+            if (!process.isAlive) PlatformInterfaceManager.unregisterDaemon(this)
         }
     }
 
@@ -72,7 +72,7 @@ class DaemonProcess private constructor(
             check(process.waitFor(5, TimeUnit.SECONDS)) { "Daemon did not exit after forced termination" }
         } finally {
             closeStreams(process)
-            if (!process.isAlive) PlatformInterfaceFactory.unregisterDaemon(this)
+            if (!process.isAlive) PlatformInterfaceManager.unregisterDaemon(this)
         }
     }
 
@@ -130,7 +130,7 @@ class DaemonProcess private constructor(
                     error("Daemon exited before readiness; inspect launcher stderr")
                 }
                 val daemon = bootstrap.get(startupTimeout.inWholeMilliseconds, TimeUnit.MILLISECONDS)
-                PlatformInterfaceFactory.registerDaemon(daemon)
+                PlatformInterfaceManager.registerDaemon(daemon)
                 return daemon
             } catch (error: Throwable) {
                 try {

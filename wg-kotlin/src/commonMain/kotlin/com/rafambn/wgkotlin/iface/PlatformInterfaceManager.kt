@@ -3,10 +3,10 @@ package com.rafambn.wgkotlin.iface
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 
-interface SessionBridge {
-    fun openSession(
+expect object PlatformInterfaceManager {
+    fun create(
         config: TunSessionConfig,
-        pipe: DuplexChannelPipe<ByteArray>,
+        tunPipe: DuplexChannelPipe<ByteArray>,
         onFailure: (Throwable) -> Unit = {},
-    ): AutoCloseable
+    ): InterfaceSession
 }

@@ -7,7 +7,10 @@ import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.withContext
 
 internal class VpnSession(
     val configuration: VpnConfiguration,
@@ -22,4 +25,16 @@ internal class VpnSession(
     var socketSession: SocketSession? = null
     var interfaceSession: InterfaceSession? = null
     val failureScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    suspend fun close(): Result<Unit> = withContext(NonCancellable) {
+        failureScope.cancel()
+        val interfaceStop = runCatching<Unit> { interfaceSession?.close() }
+        val socketStop = runCatching<Unit> { socketSession?.close() }
+        val cryptoStop = runCatching<Unit> { cryptoSession?.close() }
+        when {
+            interfaceStop.isFailure -> interfaceStop
+            socketStop.isFailure -> socketStop
+            else -> cryptoStop
+        }
+    }
 }

@@ -38,7 +38,7 @@ internal fun requireNonBlankInterfaceName(interfaceName: String) {
     }
 }
 
-internal fun requireValidRegex(interfaceName: String) {
+internal fun requireValidInterfaceName(interfaceName: String) {
     val interfaceNameRegex = Regex("utun[0-9]+")
     require(interfaceNameRegex.matches(interfaceName)) {
         "Interface name must match `${interfaceNameRegex.pattern}`."

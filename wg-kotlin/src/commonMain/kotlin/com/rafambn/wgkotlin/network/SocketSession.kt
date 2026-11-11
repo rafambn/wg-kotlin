@@ -110,8 +110,6 @@ internal class SocketSession(
         scope.cancel("SocketSession closed")
     }
 
-    fun isRunning(): Boolean = !closed
-
     private suspend fun runReceiveLoop(udpPort: UdpPort, onFailure: (Throwable) -> Unit) {
         try {
             while (true) {

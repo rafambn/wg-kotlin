@@ -9,47 +9,49 @@ import io.ktor.network.sockets.InetSocketAddress
 import io.ktor.network.sockets.aSocket
 import io.ktor.utils.io.core.buildPacket
 import io.ktor.utils.io.core.writeFully
+import java.net.BindException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.readByteArray
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class SocketSessionTest {
 
     @Test
-    fun closeIsIdempotent() {
-        val session = SocketManager.create(0, DuplexChannelPipe.create<UdpDatagram>().first)
-        session.close()
-        session.close()
-        assertFalse(session.isRunning())
-    }
-
-    @Test
-    fun createdSessionIsRunningUntilClosed() {
-        val session = SocketManager.create(0, DuplexChannelPipe.create<UdpDatagram>().first)
+    fun closingTwiceReleasesTheBoundPort() = runBlocking {
+        val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
+        val session = SocketManager.create(0, networkPipe.first)
+        val selector = SelectorManager(Dispatchers.IO)
+        val receiver = aSocket(selector).udp().bind(InetSocketAddress("127.0.0.1", 0))
         try {
-            assertTrue(session.isRunning())
+            val endpoint = UdpEndpoint("127.0.0.1", (receiver.localAddress as InetSocketAddress).port)
+            networkPipe.second.send(UdpDatagram(byteArrayOf(1), endpoint))
+            val received = withTimeout(2_000) { receiver.receive() }
+            assertContentEquals(byteArrayOf(1), received.packet.readByteArray())
+
+            session.close()
+            session.close()
+
+            withTimeout(2_000) {
+                while (true) {
+                    try {
+                        val rebound = aSocket(selector).udp().bind(received.address)
+                        rebound.close()
+                        break
+                    } catch (_: BindException) {
+                        delay(10)
+                    }
+                }
+            }
         } finally {
             session.close()
-        }
-        assertFalse(session.isRunning())
-    }
-
-    @Test
-    fun managerCreatesANewSessionAfterClosingPreviousOne() {
-        val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
-        val first = SocketManager.create(0, networkPipe.first)
-        first.close()
-        val second = SocketManager.create(0, networkPipe.first)
-        try {
-            assertTrue(second.isRunning())
-        } finally {
-            second.close()
+            receiver.close()
+            selector.close()
         }
     }
 
@@ -239,9 +241,7 @@ class SocketSessionTest {
 
         val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
         var session = SocketManager.create(networkPipe = networkPipe.first, listenPort = 0, onFailure = {})
-        assertTrue(session.isRunning())
         session.close()
-        assertFalse(session.isRunning())
 
         // Pick a fresh OS-assigned port for the second start.
         val freshReceiver = aSocket(selector).udp().bind(InetSocketAddress("127.0.0.1", 0))
@@ -250,7 +250,6 @@ class SocketSessionTest {
 
         session = SocketManager.create(newPort, networkPipe.first)
         try {
-            assertTrue(session.isRunning())
 
             val sender = aSocket(selector).udp().bind(InetSocketAddress("127.0.0.1", 0))
             try {

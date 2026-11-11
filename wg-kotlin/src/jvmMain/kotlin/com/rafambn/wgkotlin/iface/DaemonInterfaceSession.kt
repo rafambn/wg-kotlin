@@ -23,33 +23,14 @@ import kotlinx.io.bytestring.ByteString
 /** One authenticated IPC connection owns one TUN session. */
 internal class DaemonInterfaceSession(
     private val config: TunSessionConfig,
+    private val connection: LocalConnection,
     pipe: DuplexChannelPipe<ByteArray>,
     private val onFailure: (Throwable) -> Unit,
 ) : InterfaceSession {
-    private val connection: LocalConnection
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("wg-kotlin-ipc-session"))
     private val closed = AtomicBoolean()
 
     init {
-        val activeDaemon = PlatformInterfaceManager.requireDaemon()
-        check(activeDaemon.isAlive) { "Owned daemon has exited" }
-        val daemonPid = activeDaemon.pid
-        val endpoint = activeDaemon.endpoint
-        connection = LocalConnection.connect(endpoint, daemonPid)
-        try {
-            IpcProtocol.awaitReady(connection, daemonPid)
-            connection.readTimeoutMillis = 30_000
-            IpcProtocol.writeClient(connection.output, ClientMessage { payload = ClientMessage.Payload.Config(config) })
-            when (val payload = IpcProtocol.readServer(connection.input).payload) {
-                is ServerMessage.Payload.Started -> check(payload.value.interfaceName.isNotBlank()) { "Missing started interface name" }
-                is ServerMessage.Payload.Error -> error("Daemon session failed (${payload.value.code}): ${payload.value.message}")
-                else -> error("Daemon did not accept the session")
-            }
-            connection.readTimeoutMillis = 0
-        } catch (error: Throwable) {
-            connection.close()
-            throw IllegalStateException("Daemon did not accept the IPC session", error)
-        }
         scope.launch {
             try {
                 while (true) {

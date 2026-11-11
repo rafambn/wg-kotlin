@@ -93,6 +93,42 @@ class VpnContractInvariantsTest {
     }
 
     @Test
+    fun sharedPeerEndpointsAreRejectedOnStart() = runBlocking {
+        val vpn = testVpn()
+        val ipv4 = "192.0.2.1".resolveToIp()
+        val mapped = Ip {
+            value = Ip.Value.V6(ByteString(byteArrayOf(
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff.toByte(), 0xff.toByte(), 192.toByte(), 0, 2, 1,
+            )))
+        }
+        val addresses = listOf(
+            ipv4 to ipv4,
+            "2001:db8::1".resolveToIp() to "2001:0db8:0:0:0:0:0:1".resolveToIp(),
+            ipv4 to mapped,
+            mapped to ipv4,
+        )
+        for ((first, second) in addresses) {
+            val result = vpn.start(VpnConfiguration(
+                interfaceName = "utun110", privateKey = privateKey,
+                peers = listOf(
+                    VpnPeer(publicKey = "peer-a", endpointAddress = first, endpointPort = 51820),
+                    VpnPeer(publicKey = "peer-b", endpointAddress = second, endpointPort = 51820),
+                ),
+            ))
+            val error = assertIs<IllegalArgumentException>(result.exceptionOrNull())
+            assertTrue(error.message.orEmpty().contains("shared by peers `peer-a` and `peer-b`"))
+        }
+    }
+
+    @Test
+    fun differentPeerAddressesOrPortsAreAllowed() {
+        val first = VpnPeer(publicKey = "peer-a", endpointAddress = "192.0.2.1".resolveToIp(), endpointPort = 51820)
+        val second = first.copy(publicKey = "peer-b")
+        requireUserspacePeerEndpoints(listOf(first, second.copy(endpointPort = 51821)))
+        requireUserspacePeerEndpoints(listOf(first, second.copy(endpointAddress = "192.0.2.2".resolveToIp())))
+    }
+
+    @Test
     fun conflictingAllowedIpOwnershipIsRejectedOnStart() = runBlocking {
         val peer = VpnPeer(
             publicKey = peerKey, endpointAddress = "192.0.2.1".resolveToIp(), endpointPort = 51820,
@@ -100,7 +136,7 @@ class VpnContractInvariantsTest {
         )
         val result = testVpn().start(VpnConfiguration(
             interfaceName = "utun110", privateKey = privateKey,
-            peers = listOf(peer, peer.copy(publicKey = "another-peer")),
+            peers = listOf(peer, peer.copy(publicKey = "another-peer", endpointAddress = "192.0.2.2".resolveToIp())),
         ))
         val error = assertIs<IllegalStateException>(result.exceptionOrNull())
         assertTrue(error.message.orEmpty().contains("overlaps between"))

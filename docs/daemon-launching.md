@@ -14,6 +14,9 @@ Starting an active name fails. Stop that TUN before changing its configuration.
 Stopping an absent name succeeds. Use distinct listen ports or `listenPort = 0`
 for separate UDP sockets.
 
+Within each TUN, peers must use distinct remote IP/port pairs. IPv4-mapped IPv6
+endpoints are compared using their IPv4 transport address.
+
 ```kotlin
 val daemon = DaemonProcess.launch(logPath = applicationLogPath) { arguments ->
     applicationPrivilegedLauncher(arguments)

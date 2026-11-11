@@ -7,6 +7,7 @@ import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.Datagram
 import io.ktor.network.sockets.InetSocketAddress
 import io.ktor.network.sockets.aSocket
+import io.ktor.network.sockets.awaitClosed
 import io.ktor.utils.io.core.buildPacket
 import io.ktor.utils.io.core.writeFully
 import java.net.BindException
@@ -275,6 +276,7 @@ class SocketSessionTest {
         val freshReceiver = aSocket(selector).udp().bind(InetSocketAddress("127.0.0.1", 0))
         val newPort = (freshReceiver.localAddress as InetSocketAddress).port
         freshReceiver.close()
+        freshReceiver.awaitClosed()
 
         session = SocketManager.create(newPort, networkPipe.first)
         try {

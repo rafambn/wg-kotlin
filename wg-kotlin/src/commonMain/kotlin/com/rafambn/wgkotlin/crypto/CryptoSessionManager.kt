@@ -4,11 +4,11 @@ import com.rafambn.wgkotlin.VpnConfiguration
 
 internal interface CryptoSessionManager {
 
-    fun reconcileSessions(config: VpnConfiguration)
+    fun createSessions(config: VpnConfiguration)
 
     fun start(onFailure: (Throwable) -> Unit)
 
-    fun stop()
+    suspend fun stop()
 
     fun peerStats(): List<VpnPeerStats>
 

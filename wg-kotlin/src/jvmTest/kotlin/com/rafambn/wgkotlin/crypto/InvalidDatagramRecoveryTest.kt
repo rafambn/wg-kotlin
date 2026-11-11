@@ -36,8 +36,9 @@ class InvalidDatagramRecoveryTest {
         val manager = CryptoSessionManagerImpl(cryptoTun, cryptoNetwork)
         val failure = CompletableDeferred<Throwable>()
         val endpoint = UdpEndpoint("192.0.2.1", 51820)
-        manager.reconcileSessions(VpnConfiguration(
-            interfaceName = "utun1", privateKey = base64(serverKey),
+        manager.createSessions(VpnConfiguration(
+            interfaceName = "utun1",
+            privateKey = base64(serverKey),
             peers = listOf(VpnPeer(
                 publicKey = base64(checkNotNull(generatePublicKey(clientKey))),
                 endpointAddress = endpoint.address.resolveToIp(), endpointPort = endpoint.port,

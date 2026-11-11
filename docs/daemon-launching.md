@@ -7,16 +7,24 @@ HTTP server, bearer credential, or stdin/stdout bootstrap.
 One daemon has one endpoint and serves several VPNs. Each TUN owns a separate
 connection to that endpoint. Closing one session leaves other sessions running.
 
+One `Vpn` can manage multiple TUNs by name. Call `start(configuration)`
+and `stop(tunName)` from a coroutine; both return `Result<Unit>`. Use
+`information(tunName)` to inspect one TUN, or get `null` when it is absent.
+Starting an active name fails. Stop that TUN before changing its configuration.
+Stopping an absent name succeeds. Use distinct listen ports or `listenPort = 0`
+for separate UDP sockets.
+
 ```kotlin
 val daemon = DaemonProcess.launch(logPath = applicationLogPath) { arguments ->
     applicationPrivilegedLauncher(arguments)
 }
 val vpn = Vpn()
 try {
-    vpn.open(configuration)
+    vpn.start(configuration).getOrThrow()
 } finally {
-    vpn.stop()
+    val stopped = vpn.stop(configuration.interfaceName)
     daemon.close()
+    stopped.getOrThrow()
 }
 ```
 
@@ -44,7 +52,9 @@ The application must:
 
 Permission UI, executable packaging, signing, and installation belong to the
 application. No standard-stream handle transfer through elevation is needed.
-Calls to launch, open, stop, and kill are blocking and belong off the UI thread.
+Daemon launch, stop, and kill are blocking and belong off the UI thread.
+VPN `start` and `stop` are suspending functions; startup still performs blocking
+IPC work, so call them off the UI thread as well.
 Serialize lifecycle calls, except that `kill()` can interrupt a graceful stop.
 The startup timeout begins after the callback returns; the app owns cancellation
 and timeout of its permission dialog. Failed startup forces termination.
@@ -255,7 +265,7 @@ with protocol version 2 and its PID. Readiness probes can then close without
 creating a session. A TUN connection sends `ClientMessage.config`, field 1,
 followed by `outgoing_packet`, field 2. It receives `Started`, `IncomingPacket`,
 or `Error`. Config must arrive within five seconds, and each server write has a
-five-second deadline. `open()` waits for `Started` and reports initialization
+five-second deadline. `start()` waits for `Started` and reports initialization
 failures synchronously. Peer authorization uses OS process identity.
 
 DNS configuration accepts at most 64 servers and 64 search domains. Each domain
@@ -299,17 +309,17 @@ exit, clients that stop reading, route/DNS cleanup failures, and an unresponsive
 resolver with a single async worker. Privileged macOS and Windows shutdown have
 not been exercised in this validation.
 
-Use `Vpn(engine)` and `open(configuration)`. The interface name comes from
-`configuration.interfaceName` and is validated when opening the VPN.
+Use `Vpn(engine)` and `start(configuration)`. The TUN name comes from
+`configuration.interfaceName` and is validated when starting that TUN.
 Supply parsed `Cidr` values in `VpnConfiguration.addresses` and `VpnPeer.allowedIps`,
 and `Ip` values in `VpnPeer.endpointAddress` and `DnsConfig.servers`. These types
 are in `com.rafambn.wgkotlin.daemon.proto`. The caller resolves hostnames and parses
-IP addresses and CIDRs before calling `open()`; the VPN consumes the configuration
+IP addresses and CIDRs before calling `start()`; the VPN consumes the configuration
 directly.
 `DaemonProcess.launch(...)` registers the first running daemon for JVM VPN sessions.
 Further launches do not replace that active registration. Closing or killing the
 registered daemon removes it. Constructing a VPN does not require a daemon yet;
-opening it requires a running registered daemon. Upgrade client and daemon together: TCP/gRPC, `--host`, `--port`, the
+starting a TUN requires a running registered daemon. Upgrade client and daemon together: TCP/gRPC, `--host`, `--port`, the
 old host/port properties, and the secret-based bootstrap are no longer supported.
 The build's IPC integration tests launch an unprivileged Rust fixture and never
 configure real TUN, route, or DNS state.

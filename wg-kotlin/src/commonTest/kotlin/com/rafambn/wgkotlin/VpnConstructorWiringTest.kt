@@ -1,8 +1,9 @@
 package com.rafambn.wgkotlin
 
 import com.rafambn.wgkotlin.util.resolveToIp
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
-import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertNotSame
 import kotlin.test.assertTrue
 
@@ -12,15 +13,15 @@ class VpnConstructorWiringTest {
     private val peerKey = "6fX3drXr/7L0KleChX2NDSSSXWMQZnIcXtNCmieYw0I="
 
     @Test
-    fun secondaryConstructorBuildsIndependentInstances() {
+    fun constructorBuildsIndependentInstances() = runBlocking {
         val first = Vpn()
         val second = Vpn()
 
         assertNotSame(first, second)
-        assertFalse(first.isRunning())
-        assertFalse(second.isRunning())
+        assertNull(first.information("utun101"))
+        assertNull(second.information("utun101"))
 
-        first.open(
+        first.start(
             VpnConfiguration(
                 interfaceName = "utun101",
                 listenPort = 52101,
@@ -33,19 +34,20 @@ class VpnConstructorWiringTest {
                     ),
                 ),
             ),
-        )
+        ).getOrThrow()
 
-        assertTrue(first.isRunning())
-        assertFalse(second.isRunning())
+        assertTrue(first.information("utun101")?.isUp == true)
+        assertNull(second.information("utun101"))
+        first.stop("utun101").getOrThrow()
     }
 
     @Test
-    fun explicitEngineStillSupportsLifecycle() {
+    fun explicitEngineStillSupportsLifecycle() = runBlocking {
         val vpn = Vpn(
             engine = Engine.BORINGTUN,
         )
 
-        vpn.open(
+        vpn.start(
             VpnConfiguration(
                 interfaceName = "utun103",
                 listenPort = 52103,
@@ -58,10 +60,10 @@ class VpnConstructorWiringTest {
                     ),
                 ),
             ),
-        )
-        assertTrue(vpn.isRunning())
+        ).getOrThrow()
+        assertTrue(vpn.information("utun103")?.isUp == true)
 
-        vpn.stop()
-        assertFalse(vpn.isRunning())
+        vpn.stop("utun103").getOrThrow()
+        assertNull(vpn.information("utun103"))
     }
 }

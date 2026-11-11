@@ -89,16 +89,15 @@ class DaemonProcessTest {
     }
 
     @Test
-    fun openWithoutDaemonFailsAndReleasesItsUdpSocket() {
+    fun startWithoutDaemonFailsAndReleasesItsUdpSocket() = runBlocking {
         val vpn = Vpn()
         val port = DatagramSocket(0).use { it.localPort }
         val error = assertFailsWith<IllegalStateException> {
-            vpn.open(VpnConfiguration(
-                interfaceName = "utun0", listenPort = port,
+            vpn.start(VpnConfiguration(interfaceName = "utun0", listenPort = port,
                 privateKey = "oA8gY5Yg7R6pujISiFDUFxIr05o2IaNbS1Ry6j3TzXs=",
-            ))
+            )).getOrThrow()
         }
-        assertTrue(error.cause?.message?.contains("Launch DaemonProcess") == true)
+        assertTrue(error.message?.contains("Launch DaemonProcess") == true)
         // Ktor closes its socket through the selector's coroutine context.
         runBlocking {
             withTimeout(2_000) {
@@ -112,6 +111,6 @@ class DaemonProcessTest {
                 }
             }
         }
-        vpn.stop()
+        vpn.stop("utun0").getOrThrow()
     }
 }

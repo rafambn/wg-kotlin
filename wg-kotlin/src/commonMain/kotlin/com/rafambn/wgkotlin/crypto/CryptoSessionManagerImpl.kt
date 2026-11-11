@@ -5,9 +5,8 @@ import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.crypto.factory.BoringTunPeerSessionFactory
 import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
 import com.rafambn.wgkotlin.crypto.factory.QuicPeerSessionFactory
-import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.daemon.proto.Ip
-
+import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.requireDistinctAllowedIpOwnership
 import com.rafambn.wgkotlin.requireUniquePeerPublicKeys
 import com.rafambn.wgkotlin.requireUserspacePeerEndpoints
@@ -22,10 +21,10 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -36,83 +35,43 @@ internal class CryptoSessionManagerImpl(
     private val peerSessionFactory: PeerSessionFactory = defaultFactory(engine),
 ) : CryptoSessionManager {
 
-    private val reconcileMutex = Mutex()
-    private var sessionEntriesByPeer: Map<String, PeerSessionEntry> = emptyMap()
+    private val sessionMutex = Mutex()
+    private var sessionEntries: List<PeerSessionEntry> = emptyList()
     private val peerStatsByPublicKey: MutableMap<String, MutablePeerStats> = mutableMapOf()
 
     private var scope: CoroutineScope? = null
 
-    override fun reconcileSessions(config: VpnConfiguration) {
+    override fun createSessions(config: VpnConfiguration) {
+        check(scope == null && sessionEntries.isEmpty()) { "Crypto sessions must be stopped before creating sessions" }
         requireUniquePeerPublicKeys(config.peers)
         requireUserspacePeerEndpoints(config.peers)
         requireDistinctAllowedIpOwnership(config.peers)
 
-        val desiredPeers = config.peers.associateBy { peer -> peer.publicKey }
-        val desiredIndexes = desiredPeers.keys
-            .toSortedSet()
-            .mapIndexed { index, key -> key to (index + 1) }
-            .toMap()
-        val previousSessions = sessionEntriesByPeer.toMap()
-        val nextSessions: MutableMap<String, PeerSessionEntry> = mutableMapOf()
         val createdSessions: MutableList<PeerSessionEntry> = mutableListOf()
 
         try {
-            desiredPeers.keys.sorted().forEach { publicKey ->
-                val desiredPeer = desiredPeers.getValue(publicKey)
-                val desiredIndex = desiredIndexes.getValue(publicKey)
-                val previous = previousSessions[publicKey]
-
-                if (
-                    previous != null &&
-                    previous.peer == desiredPeer &&
-                    previous.session.peerIndex == desiredIndex &&
-                    previous.session.isActive
-                ) {
-                    nextSessions[publicKey] = previous
-                    return@forEach
-                }
-
+            config.peers.sortedBy { peer -> peer.publicKey }.forEachIndexed { index, peer ->
                 val createdSession = peerSessionFactory.create(
                     config = config,
-                    peer = desiredPeer,
-                    peerIndex = desiredIndex,
+                    peer = peer,
+                    peerIndex = index + 1,
                 )
+                createdSessions += PeerSessionEntry(peer = peer, session = createdSession)
                 require(createdSession.isActive) {
                     "Session factory must return active peer sessions"
                 }
-
-                val sessionEntry = PeerSessionEntry(
-                    peer = desiredPeer,
-                    session = createdSession,
-                )
-
-                createdSessions += sessionEntry
-                nextSessions[publicKey] = sessionEntry
             }
-        } catch (throwable: Throwable) {
-            createdSessions.forEach { entry -> entry.session.close() }
-            throw throwable
-        }
-
-        runBlocking {
-            reconcileMutex.withLock {
-                previousSessions.keys
-                    .filter { key -> !nextSessions.containsKey(key) }
-                    .forEach { key -> peerStatsByPublicKey.remove(key) }
-                sessionEntriesByPeer = nextSessions.toMap()
+        } catch (error: Throwable) {
+            createdSessions.forEach { entry ->
+                runCatching { entry.session.close() }.exceptionOrNull()?.let(error::addSuppressed)
             }
+            throw error
         }
-
-        previousSessions.forEach { (publicKey, entry) ->
-            val replacement = nextSessions[publicKey]
-            if (replacement !== entry) {
-                entry.session.close()
-            }
-        }
+        sessionEntries = createdSessions.toList()
     }
 
     override fun start(onFailure: (Throwable) -> Unit) {
-        scope?.cancel("CryptoSessionManager restarted")
+        check(scope == null) { "Crypto workers must be stopped before starting" }
         peerStatsByPublicKey.clear()
 
         val coroutineLabel = "kmpvpn-crypto"
@@ -132,20 +91,28 @@ internal class CryptoSessionManagerImpl(
         }
     }
 
-    override fun stop() {
-        scope?.cancel("CryptoSessionManager stopped")
+    override suspend fun stop() {
+        scope?.coroutineContext?.job?.cancelAndJoin()
         scope = null
-        sessionEntriesByPeer.values.forEach { entry -> entry.session.close() }
-        sessionEntriesByPeer = emptyMap()
+        var firstError: Throwable? = null
+        sessionEntries.forEach { entry ->
+            try {
+                entry.session.close()
+            } catch (error: Throwable) {
+                if (firstError == null) firstError = error else firstError.addSuppressed(error)
+            }
+        }
+        sessionEntries = emptyList()
         peerStatsByPublicKey.clear()
+        firstError?.let { throw it }
     }
 
     override fun hasActiveSessions(): Boolean {
-        return sessionEntriesByPeer.values.any { entry -> entry.session.isActive }
+        return sessionEntries.any { entry -> entry.session.isActive }
     }
 
     override fun peerStats(): List<VpnPeerStats> {
-        return sessionEntriesByPeer.values.toList().map { entry ->
+        return sessionEntries.map { entry ->
             val stats = peerStatsByPublicKey[entry.peer.publicKey] ?: MutablePeerStats()
             VpnPeerStats(
                 publicKey = entry.peer.publicKey,
@@ -166,8 +133,8 @@ internal class CryptoSessionManagerImpl(
                 var pendingNetwork: UdpDatagram? = null
                 var pendingTun: ByteArray? = null
 
-                reconcileMutex.withLock {
-                    val selected = selectSessionForPacket(packet, sessionEntriesByPeer.values)
+                sessionMutex.withLock {
+                    val selected = selectSessionForPacket(packet, sessionEntries)
                         ?: return@withLock
                     when (val result = selected.session.encryptRawPacket(packet, DEFAULT_PACKET_BUFFER_SIZE)) {
                         is PacketAction.WriteToNetwork -> {
@@ -205,8 +172,8 @@ internal class CryptoSessionManagerImpl(
                 val pendingNetwork = mutableListOf<UdpDatagram>()
                 val pendingTun = mutableListOf<ByteArray>()
 
-                reconcileMutex.withLock {
-                    val selected = sessionEntriesByPeer.values.firstOrNull { entry ->
+                sessionMutex.withLock {
+                    val selected = sessionEntries.firstOrNull { entry ->
                         entry.endpoint == datagram.remoteEndpoint
                     } ?: return@withLock
 
@@ -270,8 +237,8 @@ internal class CryptoSessionManagerImpl(
 
                 val pendingNetwork = mutableListOf<UdpDatagram>()
 
-                reconcileMutex.withLock {
-                    sessionEntriesByPeer.values.toList().forEach { entry ->
+                sessionMutex.withLock {
+                    sessionEntries.forEach { entry ->
                         when (val result = entry.session.runPeriodicTask(DEFAULT_PACKET_BUFFER_SIZE)) {
                             is PacketAction.WriteToNetwork -> {
                                 peerStatsByPublicKey
@@ -310,7 +277,7 @@ internal class CryptoSessionManagerImpl(
 
     private fun acceptsSource(packet: ByteArray, authenticatedPeer: PeerSessionEntry): Boolean {
         val source = try { parsePacketSource(packet) } catch (_: Exception) { return false }
-        return selectSessionForAddress(source, sessionEntriesByPeer.values) === authenticatedPeer
+        return selectSessionForAddress(source, sessionEntries) === authenticatedPeer
     }
 
     private fun selectSessionForAddress(destination: Ip, sessionEntries: Iterable<PeerSessionEntry>): PeerSessionEntry? {

@@ -1,5 +1,6 @@
 package com.rafambn.wgkotlin
 
+import com.rafambn.wgkotlin.crypto.CryptoManager
 import com.rafambn.wgkotlin.iface.PlatformInterfaceManager
 import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
 import com.rafambn.wgkotlin.network.SocketManager
@@ -15,7 +16,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class Vpn(
-    private val engine: Engine = Engine.BORINGTUN,
+    engine: Engine = Engine.BORINGTUN,
 ) {
 
     companion object {
@@ -24,6 +25,7 @@ class Vpn(
 
     private val platformInterfaceManager = PlatformInterfaceManager
     private val socketManager = SocketManager
+    private val cryptoManager = CryptoManager(engine)
     private val lifecycleMutex = Mutex()
     @Volatile private var sessions: Map<String, VpnSession> = emptyMap()
 
@@ -39,12 +41,13 @@ class Vpn(
             requireValidRegex(tunName)
             requireUniquePeerPublicKeys(configuration.peers)
 
-            val created = VpnSession(configuration, engine)
+            val created = VpnSession(configuration)
             session = created
             val onFailure: (Throwable) -> Unit = { created.failureScope.launch { stop(tunName) } }
 
-            created.cryptoSessionManager.createSessions(configuration)
-            created.cryptoSessionManager.start(onFailure)
+            created.cryptoSession = cryptoManager.create(
+                configuration, created.cryptoTunPipe, created.cryptoNetworkPipe, onFailure,
+            )
             created.socketSession = socketManager.create(
                 configuration.listenPort ?: DEFAULT_PORT, created.networkPipe, onFailure,
             )
@@ -65,7 +68,7 @@ class Vpn(
         val session = sessions[tunName] ?: return null
         val liveInformation = session.interfaceSession?.information() ?: return null
 
-        val runtimePeerStats = session.cryptoSessionManager.peerStats()
+        val runtimePeerStats = session.cryptoSession?.peerStats().orEmpty()
         val informationWithPeerStats = if (runtimePeerStats.isEmpty()) {
             liveInformation
         } else {
@@ -86,7 +89,7 @@ class Vpn(
         session.failureScope.cancel()
         val interfaceStop = runCatching<Unit> { session.interfaceSession?.close() }
         val socketStop = runCatching<Unit> { session.socketSession?.close() }
-        val cryptoStop = runCatching { session.cryptoSessionManager.stop() }
+        val cryptoStop = runCatching<Unit> { session.cryptoSession?.close() }
         when {
             interfaceStop.isFailure -> interfaceStop
             socketStop.isFailure -> socketStop

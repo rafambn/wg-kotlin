@@ -36,9 +36,9 @@ class InboundSourceAuthorizationTest {
                     }
                 }
         }
-        val manager = CryptoSessionManagerImpl(cryptoTun, cryptoNetwork, peerSessionFactory = factory)
+        val manager = CryptoManager(peerSessionFactory = factory)
         val failure = CompletableDeferred<Throwable>()
-        manager.createSessions(VpnConfiguration(
+        val session = manager.create(VpnConfiguration(
             interfaceName = "utun1",
             privateKey = "test-key",
             peers = listOf(
@@ -47,8 +47,7 @@ class InboundSourceAuthorizationTest {
                 VpnPeer(publicKey = "b", endpointAddress = "192.0.2.2".resolveToIp(), endpointPort = 51820,
                     allowedIps = listOf("10.0.0.3/32".toCidr(), "2001:db8::3/128".toCidr())),
             ),
-        ))
-        manager.start { failure.complete(it) }
+        ), tunPipe = cryptoTun, networkPipe = cryptoNetwork, onFailure = { failure.complete(it) })
         try {
             suspend fun send(source: String, endpoint: String) {
                 network.send(UdpDatagram(packet(source), UdpEndpoint(endpoint, 51820)))
@@ -71,7 +70,7 @@ class InboundSourceAuthorizationTest {
             }
             assertFalse(failure.isCompleted, "Rejected packets must not terminate the VPN")
         } finally {
-            manager.stop()
+            session.close()
         }
     }
 

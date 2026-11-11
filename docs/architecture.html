@@ -75,7 +75,7 @@ const details = {
   proto: ['wg-kotlin-daemon-rust/daemon-proto', 'Crate dos contratos e do serviço protobuf gerados a partir dos .proto compartilhados, usando tonic/prost.', 'wg-kotlin-daemon-rust/daemon-proto/build.rs · src/lib.rs'],
   tun: ['Interface TUN / sistema operacional', 'Conecta os pacotes IP da máquina à VPN. O daemon lê e escreve nessa interface por tun-rs e gerencia a configuração de rede.', 'wg-kotlin-daemon-rust/daemon/src/session.rs · src/platform/'],
   bridge: ['wg-kotlin · DaemonInterfaceSession', 'Verifica a identidade do daemon pelo kernel, envia a configuração inicial e troca pacotes IP com o daemon na conexão IPC exclusiva da TUN. Conecta o stream ao DuplexChannelPipe.', 'wg-kotlin/src/jvmMain/.../iface/DaemonInterfaceSession.kt · daemon-protocol/daemon.proto'],
-  crypto: ['wg-kotlin · CryptoSessionManager', 'Seleciona o peer, organiza os pacotes e aciona criptografia, descriptografia e timers pela implementação BoringTunPeerSession.', 'wg-kotlin/src/commonMain/.../crypto/CryptoSessionManagerImpl.kt · BoringTunPeerSession.kt'],
+  crypto: ['wg-kotlin · CryptoSession', 'Seleciona o peer, organiza os pacotes e aciona criptografia, descriptografia e timers pela implementação BoringTunPeerSession.', 'wg-kotlin/src/commonMain/.../crypto/CryptoSession.kt · BoringTunPeerSession.kt'],
   sockets: ['wg-kotlin · SocketSession', 'Envia e recebe datagramas UDP IPv4/IPv6 dos peers remotos. Os datagramas transportam mensagens WireGuard.', 'wg-kotlin/src/commonMain/.../network/SocketSession.kt'],
   peer: ['Peer WireGuard remoto', 'Outra ponta do túnel. Recebe mensagens WireGuard por UDP e faz o caminho inverso para as respostas.', 'Endpoint configurado em VpnPeer'],
 };
@@ -109,13 +109,13 @@ const graphs = {
   runtime: {
     height: 836,
     title: 'Fluxo bidirecional de pacotes entre TUN e peer remoto',
-    description: 'O sistema operacional troca pacotes IP com o daemon pelo TUN. O daemon usa IPC para trocar esses pacotes com wg-kotlin. CryptoSessionManager chama o wrapper UniFFI dentro do processo JVM. SocketManager troca os pacotes WireGuard por UDP com o peer remoto.',
+    description: 'O sistema operacional troca pacotes IP com o daemon pelo TUN. O daemon usa IPC para trocar esses pacotes com wg-kotlin. CryptoSession chama o wrapper UniFFI dentro do processo JVM. SocketManager troca os pacotes WireGuard por UDP com o peer remoto.',
     groups: [[14, 260, 712, 415, 'Processo da aplicação · JVM + biblioteca Rust nativa']],
     nodes: [
       ['tun', 236, 6, 272, 84, 'Interface TUN', ['sistema operacional'], 'SO'],
       ['daemon', 236, 130, 272, 82, 'daemon', ['TUN · configuração de rede'], 'PROCESSO RUST COM PRIVILÉGIOS'],
       ['bridge', 34, 300, 672, 84, 'DaemonInterfaceSession', ['PID do kernel + configuração + pacotes por conexão'], 'WG-KOTLIN · JVM'],
-      ['crypto', 34, 446, 300, 88, 'CryptoSessionManager', ['orquestra criptografia e peers'], 'WG-KOTLIN'],
+      ['crypto', 34, 446, 300, 88, 'CryptoSession', ['orquestra criptografia e peers'], 'WG-KOTLIN'],
       ['wrapper', 398, 432, 308, 114, 'wg-kotlin-uniffi-boringtun', ['UniFFI → Tunn do BoringTun', 'cifra / decifra · handshake · timers'], 'BIBLIOTECA NO MESMO PROCESSO'],
       ['sockets', 34, 594, 672, 84, 'SocketManager', ['sockets UDP IPv4 / IPv6'], 'WG-KOTLIN'],
       ['peer', 236, 740, 272, 84, 'Peer WireGuard remoto', ['outra ponta do túnel'], 'REDE'],

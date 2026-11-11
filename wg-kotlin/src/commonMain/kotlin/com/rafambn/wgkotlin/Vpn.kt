@@ -6,14 +6,11 @@ import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
 import com.rafambn.wgkotlin.network.SocketManager
 import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 
 class Vpn(
     engine: Engine = Engine.BORINGTUN,
@@ -60,7 +57,7 @@ class Vpn(
             sessions = sessions + (tunName to created)
             Result.success(Unit)
         } catch (error: Throwable) {
-            if (session != null) stopComponents(session).exceptionOrNull()?.let(error::addSuppressed)
+            session?.close()?.exceptionOrNull()?.let(error::addSuppressed)
             if (error is CancellationException) throw error
             Result.failure(error)
         }
@@ -78,20 +75,8 @@ class Vpn(
 
     suspend fun stop(tunName: String): Result<Unit> = lifecycleMutex.withLock {
         val session = sessions[tunName] ?: return@withLock Result.success(Unit)
-        val result = stopComponents(session)
+        val result = session.close()
         sessions = sessions - tunName
         result
-    }
-
-    private suspend fun stopComponents(session: VpnSession): Result<Unit> = withContext(NonCancellable) {
-        session.failureScope.cancel()
-        val interfaceStop = runCatching<Unit> { session.interfaceSession?.close() }
-        val socketStop = runCatching<Unit> { session.socketSession?.close() }
-        val cryptoStop = runCatching<Unit> { session.cryptoSession?.close() }
-        when {
-            interfaceStop.isFailure -> interfaceStop
-            socketStop.isFailure -> socketStop
-            else -> cryptoStop
-        }
     }
 }

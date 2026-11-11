@@ -76,7 +76,7 @@ const details = {
   tun: ['Interface TUN / sistema operacional', 'Conecta os pacotes IP da máquina à VPN. O daemon lê e escreve nessa interface por tun-rs e gerencia a configuração de rede.', 'wg-kotlin-daemon-rust/daemon/src/session.rs · src/platform/'],
   bridge: ['wg-kotlin · DaemonInterfaceSession', 'Verifica a identidade do daemon pelo kernel, envia a configuração inicial e troca pacotes IP com o daemon na conexão IPC exclusiva da TUN. Conecta o stream ao DuplexChannelPipe.', 'wg-kotlin/src/jvmMain/.../iface/DaemonInterfaceSession.kt · daemon-protocol/daemon.proto'],
   crypto: ['wg-kotlin · CryptoSessionManager', 'Seleciona o peer, organiza os pacotes e aciona criptografia, descriptografia e timers pela implementação BoringTunPeerSession.', 'wg-kotlin/src/commonMain/.../crypto/CryptoSessionManagerImpl.kt · BoringTunPeerSession.kt'],
-  sockets: ['wg-kotlin · SocketManager', 'Envia e recebe datagramas UDP IPv4/IPv6 dos peers remotos. Os datagramas transportam mensagens WireGuard.', 'wg-kotlin/src/commonMain/.../network/SocketManagerImpl.kt'],
+  sockets: ['wg-kotlin · SocketSession', 'Envia e recebe datagramas UDP IPv4/IPv6 dos peers remotos. Os datagramas transportam mensagens WireGuard.', 'wg-kotlin/src/commonMain/.../network/SocketSession.kt'],
   peer: ['Peer WireGuard remoto', 'Outra ponta do túnel. Recebe mensagens WireGuard por UDP e faz o caminho inverso para as respostas.', 'Endpoint configurado em VpnPeer'],
 };
 const graphs = {

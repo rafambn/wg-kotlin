@@ -2,6 +2,7 @@ package com.rafambn.wgkotlin
 
 import com.rafambn.wgkotlin.iface.PlatformInterfaceManager
 import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
+import com.rafambn.wgkotlin.network.SocketManager
 import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -22,6 +23,7 @@ class Vpn(
     }
 
     private val platformInterfaceManager = PlatformInterfaceManager
+    private val socketManager = SocketManager
     private val lifecycleMutex = Mutex()
     @Volatile private var sessions: Map<String, VpnSession> = emptyMap()
 
@@ -43,7 +45,9 @@ class Vpn(
 
             created.cryptoSessionManager.createSessions(configuration)
             created.cryptoSessionManager.start(onFailure)
-            created.socketManager.start(configuration.listenPort ?: DEFAULT_PORT, onFailure)
+            created.socketSession = socketManager.create(
+                configuration.listenPort ?: DEFAULT_PORT, created.networkPipe, onFailure,
+            )
             created.interfaceSession = platformInterfaceManager.create(
                 configuration.toTunSessionConfig(), created.tunPipe, onFailure,
             )
@@ -81,7 +85,7 @@ class Vpn(
     private suspend fun stopComponents(session: VpnSession): Result<Unit> = withContext(NonCancellable) {
         session.failureScope.cancel()
         val interfaceStop = runCatching<Unit> { session.interfaceSession?.close() }
-        val socketStop = runCatching { session.socketManager.stop() }
+        val socketStop = runCatching<Unit> { session.socketSession?.close() }
         val cryptoStop = runCatching { session.cryptoSessionManager.stop() }
         when {
             interfaceStop.isFailure -> interfaceStop

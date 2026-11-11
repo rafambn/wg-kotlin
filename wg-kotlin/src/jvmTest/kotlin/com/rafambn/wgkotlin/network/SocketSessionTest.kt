@@ -14,59 +14,75 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.readByteArray
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
-class SocketManagerTest {
+class SocketSessionTest {
 
     @Test
-    fun isRunningFalseBeforeStart() {
-        val manager = SocketManagerImpl(DuplexChannelPipe.create<UdpDatagram>().first)
-
-        assertFalse(manager.isRunning())
+    fun closeIsIdempotent() {
+        val session = SocketManager.create(0, DuplexChannelPipe.create<UdpDatagram>().first)
+        session.close()
+        session.close()
+        assertFalse(session.isRunning())
     }
 
     @Test
-    fun stopIsIdempotentWhenNotRunning() {
-        val manager = SocketManagerImpl(DuplexChannelPipe.create<UdpDatagram>().first)
-
-        manager.stop()
-        manager.stop()
-
-        assertFalse(manager.isRunning())
-    }
-
-    @Test
-    fun startAndStopTransitionsRunningState() {
-        val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
-        val manager = SocketManagerImpl(networkPipe.first)
-
-        manager.start(listenPort = 0, onFailure = { throwable ->
-            throw AssertionError("Unexpected socket failure", throwable)
-        })
-
+    fun createdSessionIsRunningUntilClosed() {
+        val session = SocketManager.create(0, DuplexChannelPipe.create<UdpDatagram>().first)
         try {
-            assertTrue(manager.isRunning())
+            assertTrue(session.isRunning())
         } finally {
-            manager.stop()
+            session.close()
         }
-
-        assertFalse(manager.isRunning())
+        assertFalse(session.isRunning())
     }
 
     @Test
-    fun startAfterStopRebindsSocket() {
+    fun managerCreatesANewSessionAfterClosingPreviousOne() {
         val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
-        val manager = SocketManagerImpl(networkPipe.first)
-
-        manager.start(listenPort = 0, onFailure = {})
-        manager.stop()
-        manager.start(listenPort = 0, onFailure = {})
-
+        val first = SocketManager.create(0, networkPipe.first)
+        first.close()
+        val second = SocketManager.create(0, networkPipe.first)
         try {
-            assertTrue(manager.isRunning())
+            assertTrue(second.isRunning())
         } finally {
-            manager.stop()
+            second.close()
+        }
+    }
+
+    @Test
+    fun closingOneSessionPreservesAnotherSessionsTraffic() = runBlocking {
+        val firstPipe = DuplexChannelPipe.create<UdpDatagram>()
+        val secondPipe = DuplexChannelPipe.create<UdpDatagram>()
+        SocketManager.create(0, firstPipe.first).use { first ->
+            SocketManager.create(0, secondPipe.first).use {
+                val selector = SelectorManager(Dispatchers.IO)
+                val receiver = aSocket(selector).udp().bind(InetSocketAddress("127.0.0.1", 0))
+                try {
+                    val endpoint = UdpEndpoint("127.0.0.1", (receiver.localAddress as InetSocketAddress).port)
+                    firstPipe.second.send(UdpDatagram(byteArrayOf(1), endpoint))
+                    val firstDatagram = withTimeout(2_000) { receiver.receive() }
+                    assertContentEquals(byteArrayOf(1), firstDatagram.packet.readByteArray())
+                    secondPipe.second.send(UdpDatagram(byteArrayOf(2), endpoint))
+                    val secondDatagram = withTimeout(2_000) { receiver.receive() }
+                    assertNotEquals(firstDatagram.address, secondDatagram.address)
+                    assertContentEquals(byteArrayOf(2), secondDatagram.packet.readByteArray())
+
+                    first.close()
+                    secondPipe.second.send(UdpDatagram(byteArrayOf(3), endpoint))
+                    val afterClose = withTimeout(2_000) { receiver.receive() }
+                    assertContentEquals(byteArrayOf(3), afterClose.packet.readByteArray())
+                    receiver.send(Datagram(buildPacket { writeFully(byteArrayOf(4)) }, afterClose.address))
+                    val inbound = withTimeout(2_000) { secondPipe.second.receive() }
+                    assertContentEquals(byteArrayOf(4), inbound.payload)
+                } finally {
+                    receiver.close()
+                    selector.close()
+                }
+            }
         }
     }
 
@@ -79,8 +95,7 @@ class SocketManagerTest {
         val selector = SelectorManager(Dispatchers.IO)
 
         val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
-        val manager = SocketManagerImpl(networkPipe.first)
-        manager.start(listenPort = 0, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
+        val session = SocketManager.create(networkPipe = networkPipe.first, listenPort = 0, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
 
         try {
             // Create a probe receiver socket and discover the manager's OS-assigned port.
@@ -108,7 +123,7 @@ class SocketManagerTest {
                 sender.close()
             }
         } finally {
-            manager.stop()
+            session.close()
             selector.close()
         }
     }
@@ -116,8 +131,7 @@ class SocketManagerTest {
     @Test
     fun sendLoopTransmitsOutboundDatagramFromPipe() = runBlocking {
         val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
-        val manager = SocketManagerImpl(networkPipe.first)
-        manager.start(listenPort = 0, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
+        val session = SocketManager.create(networkPipe = networkPipe.first, listenPort = 0, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
 
         try {
             val selector = SelectorManager(Dispatchers.IO)
@@ -141,7 +155,7 @@ class SocketManagerTest {
                 selector.close()
             }
         } finally {
-            manager.stop()
+            session.close()
         }
     }
 
@@ -153,8 +167,7 @@ class SocketManagerTest {
 
         val selector = SelectorManager(Dispatchers.IO)
         val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
-        val manager = SocketManagerImpl(networkPipe.first)
-        manager.start(listenPort = 0, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
+        val session = SocketManager.create(networkPipe = networkPipe.first, listenPort = 0, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
 
         try {
             val probeReceiver = aSocket(selector).udp().bind(InetSocketAddress("::1", 0))
@@ -180,7 +193,7 @@ class SocketManagerTest {
                 sender.close()
             }
         } finally {
-            manager.stop()
+            session.close()
             selector.close()
         }
     }
@@ -192,8 +205,7 @@ class SocketManagerTest {
         }
 
         val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
-        val manager = SocketManagerImpl(networkPipe.first)
-        manager.start(listenPort = 0, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
+        val session = SocketManager.create(networkPipe = networkPipe.first, listenPort = 0, onFailure = { throwable -> throw AssertionError("Unexpected failure", throwable) })
 
         try {
             val selector = SelectorManager(Dispatchers.IO)
@@ -217,29 +229,28 @@ class SocketManagerTest {
                 selector.close()
             }
         } finally {
-            manager.stop()
+            session.close()
         }
     }
 
     @Test
-    fun restartOnListenPortChangeRebindsAndStillProcessesPackets() = runBlocking {
+    fun newSessionOnAnotherPortStillProcessesPackets() = runBlocking {
         val selector = SelectorManager(Dispatchers.IO)
 
         val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
-        val manager = SocketManagerImpl(networkPipe.first)
-        manager.start(listenPort = 0, onFailure = {})
-        assertTrue(manager.isRunning())
-        manager.stop()
-        assertFalse(manager.isRunning())
+        var session = SocketManager.create(networkPipe = networkPipe.first, listenPort = 0, onFailure = {})
+        assertTrue(session.isRunning())
+        session.close()
+        assertFalse(session.isRunning())
 
         // Pick a fresh OS-assigned port for the second start.
         val freshReceiver = aSocket(selector).udp().bind(InetSocketAddress("127.0.0.1", 0))
         val newPort = (freshReceiver.localAddress as InetSocketAddress).port
         freshReceiver.close()
 
-        manager.start(listenPort = newPort, onFailure = {})
+        session = SocketManager.create(newPort, networkPipe.first)
         try {
-            assertTrue(manager.isRunning())
+            assertTrue(session.isRunning())
 
             val sender = aSocket(selector).udp().bind(InetSocketAddress("127.0.0.1", 0))
             try {
@@ -252,7 +263,7 @@ class SocketManagerTest {
                 sender.close()
             }
         } finally {
-            manager.stop()
+            session.close()
             selector.close()
         }
     }

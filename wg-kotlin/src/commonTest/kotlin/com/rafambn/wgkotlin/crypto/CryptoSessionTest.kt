@@ -3,7 +3,6 @@ package com.rafambn.wgkotlin.crypto
 import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.VpnPeer
 import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
-import com.rafambn.wgkotlin.daemon.proto.Cidr
 import com.rafambn.wgkotlin.daemon.proto.Ip
 import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.network.io.UdpDatagram
@@ -34,7 +33,6 @@ class CryptoSessionTest {
         val session = manager.createSession(configurationWithPeers("peer-a", "peer-b"))
 
         try {
-            assertTrue(session.hasActiveSessions())
             assertEquals(2, session.peerStats().size)
             assertTrue(factory.createdSessions.all { peer -> peer.isActive })
         } finally {
@@ -55,7 +53,6 @@ class CryptoSessionTest {
             } finally {
                 second.close()
             }
-            assertTrue(first.hasActiveSessions())
             assertTrue(factory.createdSessions.take(2).all { it.closeCalls == 0 })
             assertEquals(1, factory.createdSessions.last().closeCalls)
         } finally {
@@ -101,20 +98,6 @@ class CryptoSessionTest {
     }
 
     @Test
-    fun duplicatePeerKeysAreRejected() {
-        val manager = CryptoManager(peerSessionFactory = RecordingSessionFactory())
-
-        val duplicated = configurationWithPeer(
-            VpnPeer(publicKey = "peer-a"),
-            VpnPeer(publicKey = "peer-a"),
-        )
-
-        assertFailsWith<IllegalArgumentException> {
-            manager.createSession(duplicated)
-        }
-    }
-
-    @Test
     fun partialCreateFailureRollsBackOnlyNewlyCreatedPeers() = runBlocking {
         val factory = RecordingSessionFactory(failOnPeer = "peer-b")
         val manager = CryptoManager(peerSessionFactory = factory)
@@ -125,56 +108,17 @@ class CryptoSessionTest {
             }
 
             assertTrue(throwable.message?.contains("factory forced failure") == true)
-            assertTrue(active.hasActiveSessions())
             assertEquals(2, factory.createdSessions.size)
             assertEquals(0, factory.createdSessions.first().closeCalls)
             assertEquals(1, factory.createdSessions.last().closeCalls)
             val next = manager.createSession(configurationWithPeers("peer-c"))
             try {
-                assertTrue(next.hasActiveSessions())
+                assertEquals("peer-c", next.peerStats().single().publicKey)
             } finally {
                 next.close()
             }
         } finally {
             active.close()
-        }
-    }
-
-    @Test
-    fun invalidDirectAllowedNetworksFailBeforeCreatingSessions() {
-        for ((address, prefix) in listOf(
-            "192.0.2.1" to 33u, "2001:db8::1" to 129u,
-            "192.0.2.1" to 4294967288u, "2001:db8::1" to UInt.MAX_VALUE,
-        )) {
-            val factory = RecordingSessionFactory()
-            val manager = CryptoManager(peerSessionFactory = factory)
-            val route = Cidr { ip = address.resolveToIp(); this.prefix = prefix }
-            val peer = VpnPeer(
-                publicKey = "peer-a", endpointAddress = "192.0.2.1".resolveToIp(), endpointPort = 51820,
-                allowedIps = listOf(route),
-            )
-
-            assertFailsWith<IllegalArgumentException>("$address/$prefix") {
-                manager.createSession(configurationWithPeer(peer))
-            }
-            assertTrue(factory.createdSessions.isEmpty())
-        }
-    }
-
-    @Test
-    fun malformedEndpointIpsFailBeforeCreatingSessions() {
-        val addresses = listOf(
-            Ip { },
-            Ip { value = Ip.Value.V4(ByteString(byteArrayOf(192.toByte(), 0, 2))) },
-            Ip { value = Ip.Value.V6(ByteString(ByteArray(15))) },
-        )
-        for (address in addresses) {
-            val factory = RecordingSessionFactory()
-            val manager = CryptoManager(peerSessionFactory = factory)
-            val peer = VpnPeer(publicKey = "peer-a", endpointAddress = address, endpointPort = 51820)
-
-            assertFailsWith<IllegalArgumentException> { manager.createSession(configurationWithPeer(peer)) }
-            assertTrue(factory.createdSessions.isEmpty())
         }
     }
 
@@ -245,7 +189,7 @@ class CryptoSessionTest {
         val manager = CryptoManager(peerSessionFactory = factory)
 
         val session = manager.createSession(configurationWithPeers("peer-a"))
-        assertTrue(session.hasActiveSessions())
+        assertEquals(1, session.peerStats().size)
 
         session.close()
 

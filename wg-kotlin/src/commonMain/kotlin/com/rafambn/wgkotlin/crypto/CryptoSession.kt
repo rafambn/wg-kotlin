@@ -60,10 +60,6 @@ internal class CryptoSession(
         firstError?.let { throw it }
     }
 
-    fun hasActiveSessions(): Boolean {
-        return sessionEntries.any { entry -> entry.session.isActive }
-    }
-
     fun peerStats(): List<VpnPeerStats> {
         return sessionEntries.map { entry ->
             VpnPeerStats(

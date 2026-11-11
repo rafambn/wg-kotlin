@@ -18,7 +18,6 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
-import kotlin.test.assertTrue
 
 class InvalidDatagramRecoveryTest {
     @Test
@@ -66,7 +65,6 @@ class InvalidDatagramRecoveryTest {
             val next = assertIs<PacketAction.WriteToNetwork>(client.encryptRawPacket(nextPacket, 0u))
             network.send(UdpDatagram(next.packet, endpoint))
             assertContentEquals(nextPacket, withTimeout(2_000) { tun.receive() })
-            assertTrue(session.hasActiveSessions())
             assertFalse(failure.isCompleted)
         } finally {
             session.close()

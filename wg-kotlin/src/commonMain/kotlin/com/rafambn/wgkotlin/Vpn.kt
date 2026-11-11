@@ -38,8 +38,10 @@ class Vpn(
         try {
             currentCoroutineContext().ensureActive()
             requireNonBlankInterfaceName(tunName)
-            requireValidRegex(tunName)
+            requireValidInterfaceName(tunName)
             requireUniquePeerPublicKeys(configuration.peers)
+            requireUserspacePeerEndpoints(configuration.peers)
+            requireDistinctAllowedIpOwnership(configuration.peers)
 
             val created = VpnSession(configuration)
             session = created

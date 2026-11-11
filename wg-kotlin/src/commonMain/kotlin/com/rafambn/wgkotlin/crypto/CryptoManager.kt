@@ -6,9 +6,6 @@ import com.rafambn.wgkotlin.crypto.factory.BoringTunPeerSessionFactory
 import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
 import com.rafambn.wgkotlin.crypto.factory.QuicPeerSessionFactory
 import com.rafambn.wgkotlin.network.io.UdpDatagram
-import com.rafambn.wgkotlin.requireDistinctAllowedIpOwnership
-import com.rafambn.wgkotlin.requireUniquePeerPublicKeys
-import com.rafambn.wgkotlin.requireUserspacePeerEndpoints
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 
 internal class CryptoManager(
@@ -24,10 +21,6 @@ internal class CryptoManager(
         networkPipe: DuplexChannelPipe<UdpDatagram>,
         onFailure: (Throwable) -> Unit = {},
     ): CryptoSession {
-        requireUniquePeerPublicKeys(config.peers)
-        requireUserspacePeerEndpoints(config.peers)
-        requireDistinctAllowedIpOwnership(config.peers)
-
         val createdSessions: MutableList<PeerSessionEntry> = mutableListOf()
 
         try {

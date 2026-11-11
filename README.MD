@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/rafambn/wg-kotlin/actions/workflows/build-and-test.yml"><img alt="Build and Test" src="https://github.com/rafambn/wg-kotlin/actions/workflows/build-and-test.yml/badge.svg"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.5-0A7EA4">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.5.0-0A7EA4">
   <img alt="Platform Targets" src="https://img.shields.io/badge/targets-jvm-0A7EA4">
   <img alt="Daemon Targets" src="https://img.shields.io/badge/daemon-linux%20%7C%20macos%20%7C%20windows-0A7EA4">
 </p>
@@ -25,7 +25,7 @@
 
 - Current public library target: JVM.
 - Real VPN sessions require the Rust daemon running with platform network privileges.
-- Maven publishing is configured, but local publishing is the current setup path.
+- Release publishing bundles the JVM bindings and native BoringTun runtimes.
 - Interface names intentionally use `utun[0-9]+` on every daemon platform.
 
 ## Key Features
@@ -39,10 +39,10 @@
 
 ## Setup
 
-Publish the Kotlin library to Maven Local:
+Publish WG-Kotlin to Maven Local:
 
 ```shell
-./gradlew :wg-kotlin:publishToMavenLocal
+./gradlew publishToMavenLocal -PsignAllPublications=false
 ```
 
 Then add it to your JVM/KMP project:
@@ -51,24 +51,47 @@ Then add it to your JVM/KMP project:
 repositories {
     mavenLocal()
     mavenCentral()
+    // Required by the current kotlinx.rpc protobuf runtime.
+    maven("https://redirector.kotlinlang.org/maven/kxrpc-grpc")
 }
 
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("com.rafambn:wg-kotlin:0.4.5")
+            implementation("com.rafambn:wg-kotlin:0.5.0")
         }
     }
 }
 ```
 
+The `wg-kotlin` JVM JAR includes the generated UniFFI bindings and BoringTun for
+Windows x64, macOS x64/ARM64, and Linux x64/ARM64.
+JNA loads the library for the current platform. Consumers need no classifiers,
+extra runtime dependencies, Rust toolchain, or manual native-library installation.
+Linux x64 builds use Ubuntu 22.04 and Linux ARM64 builds use Ubuntu 24.04; older
+libc versions are not covered by these builds.
+
+Local development builds include only the build host's native runtime. Release
+publishing assembles all five runtimes through the Publish Maven workflow and
+rejects incomplete sets before uploading. The daemon is distributed separately.
+
 ## Daemon Runtime
 
-Build the daemon:
+Download the executable for your platform from
+[GitHub Releases](https://github.com/rafambn/wg-kotlin/releases), or build it:
 
 ```shell
 cargo build --manifest-path wg-kotlin-daemon-rust/daemon/Cargo.toml --release
 ```
+
+Publishing a GitHub release, including a prerelease, runs the Build and Test
+workflow for Windows x64, macOS x64/ARM64, and Linux x64/ARM64. It attaches the
+Windows `.exe` and Unix `.tar.gz` archives to that release. The archives preserve
+the daemon's executable permission. Creating a tag alone does not trigger it.
+The separate Publish Maven workflow builds BoringTun for all five platforms,
+verifies a JVM consumer using one dependency, and publishes WG-Kotlin
+to Maven Central. Running it manually performs the builds and verification without
+publishing to Central. Neither workflow starts an elevated daemon.
 
 The application supplies the privileged launcher. The library verifies OS peer
 identity, opens local IPC sessions, and controls daemon termination:
@@ -176,6 +199,37 @@ daemon.close()
 - Default WireGuard listen port is `51820` when `listenPort` is not set.
 
 ## Development
+
+WG-Kotlin uses the `com.rafambn` Maven namespace and Apache 2.0 license.
+Maven Central publishing requires a Central user token and a signing key.
+Provide `mavenCentralUsername`,
+`mavenCentralPassword`, `signingInMemoryKey`, and `signingInMemoryKeyPassword` as
+Gradle properties or `ORG_GRADLE_PROJECT_` environment variables. See the
+[publishing plugin documentation](https://vanniktech.github.io/gradle-maven-publish-plugin/central/).
+
+The Rust crate lives in `boringtun/` with the standard `src/lib.rs` layout.
+The `wg-kotlin` Gradle module builds it and generates its bindings directly; the crate has no separate
+Gradle module or Maven publication.
+
+To upload WG-Kotlin for manual release in the Central Portal:
+
+```shell
+./gradlew publishToMavenCentral -PnativeRuntimeDirectory=/absolute/path/native-runtimes
+```
+
+`native-runtimes` must contain the shared libraries under their JNA resource
+prefixes: `darwin-aarch64`, `darwin-x86-64`, `linux-aarch64`, `linux-x86-64`, and
+`win32-x86-64`. The Publish Maven workflow builds and assembles this directory.
+For release publishing, configure the repository secrets `MAVEN_CENTRAL_USERNAME`,
+`MAVEN_CENTRAL_PASSWORD`, `GPG_KEY_CONTENTS`, and `SIGNING_PASSWORD`. The release tag
+must match the Gradle version, optionally prefixed with `v`.
+
+After publishing locally, verify an independent JVM consumer that loads BoringTun
+without a daemon:
+
+```shell
+./gradlew -p tests/jvm-consumer run
+```
 
 Build and test Kotlin:
 

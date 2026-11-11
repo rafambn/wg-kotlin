@@ -2,6 +2,11 @@ name: Build and Test
 
 on:
   workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -34,6 +39,8 @@ jobs:
     name: Build Rust Daemon ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -78,7 +85,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build Rust daemon binary
-        run: cargo build --manifest-path wg-kotlin-daemon-rust/daemon/Cargo.toml --release --target ${{ matrix.target }}
+        run: cargo build --manifest-path wg-kotlin-daemon-rust/daemon/Cargo.toml --locked --release --target ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7.0.1
@@ -87,3 +94,28 @@ jobs:
           path: wg-kotlin-daemon-rust/target/${{ matrix.target }}/release/wg-kotlin-daemon${{ matrix.binary-suffix }}
           if-no-files-found: error
           retention-days: 7
+
+      - name: Package release executable
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          BINARY_SUFFIX: ${{ matrix.binary-suffix }}
+        run: |
+          mkdir -p release-assets
+          binary_dir="wg-kotlin-daemon-rust/target/$TARGET/release"
+          asset="release-assets/wg-kotlin-daemon-$TARGET"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp "$binary_dir/wg-kotlin-daemon$BINARY_SUFFIX" "$asset.exe"
+          else
+            COPYFILE_DISABLE=1 tar -czf "$asset.tar.gz" -C "$binary_dir" wg-kotlin-daemon
+          fi
+
+      - name: Attach executable to release
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" release-assets/* --clobber

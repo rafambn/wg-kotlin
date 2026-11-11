@@ -34,4 +34,3 @@ dependencyResolutionManagement {
     }
 }
 include(":wg-kotlin")
-include(":wg-kotlin-uniffi-boringtun")

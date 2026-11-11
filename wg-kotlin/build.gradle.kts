@@ -1,11 +1,37 @@
+import gobley.gradle.GobleyHost
+import gobley.gradle.cargo.dsl.jvm
 import kotlinx.rpc.protoc.proto
+import org.gradle.api.publish.maven.tasks.PublishToMavenRepository
 
 plugins {
     alias(libs.plugins.multiplatform)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kotlinx.rpc.grpc)
+    alias(libs.plugins.gobley.cargo)
+    alias(libs.plugins.gobley.uniffi)
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.atomicfu)
+}
+
+val nativeRuntimeDirectory = providers.gradleProperty("nativeRuntimeDirectory")
+val hostRuntimeJar = objects.fileProperty()
+
+uniffi {
+    generateFromLibrary {
+        namespace = "wg_boringtun"
+        build.set(GobleyHost.current.rustTarget)
+    }
+}
+
+cargo {
+    packageDirectory.set(rootProject.layout.projectDirectory.dir("boringtun"))
+    publishJvmArtifacts.set(false)
+    builds.jvm {
+        embedRustLibrary.set(rustTarget == GobleyHost.current.rustTarget)
+        if (rustTarget == GobleyHost.current.rustTarget) {
+            hostRuntimeJar.set(release.jarTaskProvider.flatMap { it.archiveFile })
+        }
+    }
 }
 
 kotlin {
@@ -20,7 +46,6 @@ kotlin {
             }
 
             dependencies {
-                implementation(project(":wg-kotlin-uniffi-boringtun"))
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.ktor.network)
                 implementation(libs.ktor.io)
@@ -44,6 +69,44 @@ kotlin {
         }
     }
 
+}
+
+tasks.named<Jar>("jvmJar") {
+    if (nativeRuntimeDirectory.isPresent) {
+        from(nativeRuntimeDirectory.get())
+    } else {
+        from(zipTree(hostRuntimeJar)) {
+            exclude("META-INF/**")
+        }
+    }
+}
+
+val verifyNativeRuntimes by tasks.registering {
+    val runtimeDirectory = nativeRuntimeDirectory.orNull?.let { file(it) }
+    val runtimePaths = listOf(
+        "darwin-aarch64/libwg_kotlin_uniffi_boringtun.dylib",
+        "darwin-x86-64/libwg_kotlin_uniffi_boringtun.dylib",
+        "linux-aarch64/libwg_kotlin_uniffi_boringtun.so",
+        "linux-x86-64/libwg_kotlin_uniffi_boringtun.so",
+        "win32-x86-64/wg_kotlin_uniffi_boringtun.dll",
+    )
+    val releaseTag = providers.environmentVariable("RELEASE_TAG").orElse("")
+    val publicationVersion = project.version.toString()
+    inputs.property("releaseTag", releaseTag)
+    inputs.property("publicationVersion", publicationVersion)
+    if (runtimeDirectory != null) inputs.dir(runtimeDirectory)
+    doLast {
+        check(runtimeDirectory != null) {
+            "Maven publishing requires -PnativeRuntimeDirectory with all supported native runtimes."
+        }
+        for (path in runtimePaths) {
+            val runtime = runtimeDirectory.resolve(path)
+            check(runtime.isFile && runtime.length() > 0) { "Missing native runtime: $runtime" }
+        }
+        check(releaseTag.get().isEmpty() || releaseTag.get().removePrefix("v") == publicationVersion) {
+            "Release tag does not match Maven version $publicationVersion."
+        }
+    }
 }
 
 rpc {
@@ -78,8 +141,10 @@ tasks.withType<Test>().configureEach {
     systemProperty("junit.jupiter.extensions.autodetection.enabled", "true")
 }
 
-//Publishing your Kotlin Multiplatform library to Maven Central
-//https://www.jetbrains.com/help/kotlin-multiplatform-dev/multiplatform-publish-libraries.html
+tasks.withType<PublishToMavenRepository>().configureEach {
+    dependsOn(verifyNativeRuntimes)
+}
+
 mavenPublishing {
     publishToMavenCentral(automaticRelease = false)
     coordinates(groupId = "com.rafambn", artifactId = "wg-kotlin", version = project.version.toString())
@@ -89,12 +154,12 @@ mavenPublishing {
         description = "Kotlin Multiplatform WireGuard implementation."
         url = "https://github.com/rafambn/wg-kotlin"
 
-//        licenses {
-//            license {
-//                name = "MIT"
-//                url = "https://opensource.org/licenses/MIT"
-//            }
-//        }
+        licenses {
+            license {
+                name = "Apache License, Version 2.0"
+                url = "https://www.apache.org/licenses/LICENSE-2.0"
+            }
+        }
 
         developers {
             developer {
@@ -107,7 +172,8 @@ mavenPublishing {
 
         scm {
             url = "https://github.com/rafambn/wg-kotlin"
+            connection = "scm:git:https://github.com/rafambn/wg-kotlin.git"
+            developerConnection = "scm:git:ssh://git@github.com/rafambn/wg-kotlin.git"
         }
     }
-    if (project.hasProperty("signing.keyId")) signAllPublications()
 }

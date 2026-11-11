@@ -99,6 +99,16 @@ jobs:
 
       - name: Build Rust daemon binary
         run: cargo build --manifest-path wg-kotlin-daemon-rust/daemon/Cargo.toml --locked --release --target ${{ matrix.target }}
+        env:
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+
+      - name: Smoke test Windows daemon
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          "wg-kotlin-daemon-rust/target/$TARGET/release/wg-kotlin-daemon.exe" --help
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7.0.1

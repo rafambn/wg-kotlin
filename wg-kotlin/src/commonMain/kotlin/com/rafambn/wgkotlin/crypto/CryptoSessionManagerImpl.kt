@@ -174,7 +174,7 @@ internal class CryptoSessionManagerImpl(
                             peerStatsByPublicKey
                                 .getOrPut(selected.peer.publicKey) { MutablePeerStats() }
                                 .transmittedBytes += result.packet.size.toLong()
-                            pendingNetwork = UdpDatagram(payload = result.packet, remoteEndpoint = selected.peerEndpoint())
+                            pendingNetwork = UdpDatagram(payload = result.packet, remoteEndpoint = selected.endpoint)
                         }
                         is PacketAction.WriteToTunIpv4 -> pendingTun = result.packet
                         is PacketAction.WriteToTunIpv6 -> pendingTun = result.packet
@@ -207,8 +207,7 @@ internal class CryptoSessionManagerImpl(
 
                 reconcileMutex.withLock {
                     val selected = sessionEntriesByPeer.values.firstOrNull { entry ->
-                        entry.peer.endpointAddress?.toPlainString() == datagram.remoteEndpoint.address &&
-                            entry.peer.endpointPort == datagram.remoteEndpoint.port
+                        entry.endpoint == datagram.remoteEndpoint
                     } ?: return@withLock
 
                     peerStatsByPublicKey
@@ -228,7 +227,7 @@ internal class CryptoSessionManagerImpl(
                                 peerStatsByPublicKey
                                     .getOrPut(selected.peer.publicKey) { MutablePeerStats() }
                                     .transmittedBytes += result.packet.size.toLong()
-                                pendingNetwork += UdpDatagram(payload = result.packet, remoteEndpoint = selected.peerEndpoint())
+                                pendingNetwork += UdpDatagram(payload = result.packet, remoteEndpoint = selected.endpoint)
                             }
                             is PacketAction.WriteToTunIpv4 -> if (acceptsSource(result.packet, selected)) pendingTun += result.packet
                             is PacketAction.WriteToTunIpv6 -> if (acceptsSource(result.packet, selected)) pendingTun += result.packet
@@ -278,7 +277,7 @@ internal class CryptoSessionManagerImpl(
                                 peerStatsByPublicKey
                                     .getOrPut(entry.peer.publicKey) { MutablePeerStats() }
                                     .transmittedBytes += result.packet.size.toLong()
-                                pendingNetwork += UdpDatagram(payload = result.packet, remoteEndpoint = entry.peerEndpoint())
+                                pendingNetwork += UdpDatagram(payload = result.packet, remoteEndpoint = entry.endpoint)
                             }
                             is PacketAction.WriteToTunIpv4 -> Unit
                             is PacketAction.WriteToTunIpv6 -> Unit

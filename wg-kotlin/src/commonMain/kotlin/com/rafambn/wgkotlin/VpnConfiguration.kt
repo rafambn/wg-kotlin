@@ -4,6 +4,7 @@ import com.rafambn.wgkotlin.daemon.proto.Cidr
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.util.toCidrString
+import com.rafambn.wgkotlin.util.toTransportIp
 import com.rafambn.wgkotlin.daemon.proto.DnsConfig as ProtoDnsConfig
 
 /**
@@ -25,7 +26,7 @@ internal fun VpnConfiguration.toTunSessionConfig(): TunSessionConfig {
         .distinct()
         .sortedBy { it.toCidrString() }
 
-    val endpoints = peers.mapNotNull { peer -> peer.endpointAddress }.distinct()
+    val endpoints = peers.mapNotNull { peer -> peer.endpointAddress?.toTransportIp() }.distinct()
 
     return TunSessionConfig {
         interfaceName = this@toTunSessionConfig.interfaceName

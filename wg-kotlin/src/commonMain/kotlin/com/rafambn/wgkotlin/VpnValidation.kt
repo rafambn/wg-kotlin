@@ -1,13 +1,15 @@
 package com.rafambn.wgkotlin
 
+import com.rafambn.wgkotlin.util.ipBytes
 import com.rafambn.wgkotlin.util.normalizedKey
 import com.rafambn.wgkotlin.util.toCidrString
 
 internal fun requireUserspacePeerEndpoints(peers: List<VpnPeer>) {
     peers.forEachIndexed { index, peer ->
-        require(peer.endpointAddress != null) {
+        val endpoint = requireNotNull(peer.endpointAddress) {
             "Peer `${peer.publicKey}` at index $index must define endpointAddress for BORINGTUN userspace runtime"
         }
+        requireNotNull(endpoint.ipBytes()) { "Peer `${peer.publicKey}` has an unset endpoint IP" }
         require(peer.endpointPort != null) {
             "Peer `${peer.publicKey}` at index $index must define endpointPort for BORINGTUN userspace runtime"
         }

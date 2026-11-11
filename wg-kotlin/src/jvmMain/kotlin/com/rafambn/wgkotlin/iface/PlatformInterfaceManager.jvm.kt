@@ -7,6 +7,7 @@ import com.rafambn.wgkotlin.daemon.LocalConnection
 import com.rafambn.wgkotlin.daemon.proto.ClientMessage
 import com.rafambn.wgkotlin.daemon.proto.ServerMessage
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
+import com.rafambn.wgkotlin.daemon.proto.invoke
 import java.util.concurrent.atomic.AtomicReference
 
 actual object PlatformInterfaceManager {

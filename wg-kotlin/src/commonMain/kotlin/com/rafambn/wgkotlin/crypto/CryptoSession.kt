@@ -19,6 +19,7 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.time.Duration.Companion.milliseconds
 
 /** Owns one TUN's peers and crypto workers. Close waits for workers before releasing peers. */
 internal class CryptoSession(
@@ -28,7 +29,6 @@ internal class CryptoSession(
     onFailure: (Throwable) -> Unit,
 ) {
     private val sessionMutex = Mutex()
-    private val peerStatsByPublicKey: MutableMap<String, MutablePeerStats> = mutableMapOf()
     private val coroutineLabel = "kmpvpn-crypto"
     private val scope = CoroutineScope(
         SupervisorJob() + Dispatchers.Default + CoroutineName(coroutineLabel),
@@ -57,7 +57,6 @@ internal class CryptoSession(
             }
         }
         sessionEntries = emptyList()
-        peerStatsByPublicKey.clear()
         firstError?.let { throw it }
     }
 
@@ -67,14 +66,13 @@ internal class CryptoSession(
 
     fun peerStats(): List<VpnPeerStats> {
         return sessionEntries.map { entry ->
-            val stats = peerStatsByPublicKey[entry.peer.publicKey] ?: MutablePeerStats()
             VpnPeerStats(
                 publicKey = entry.peer.publicKey,
                 endpointAddress = entry.peer.endpointAddress?.toPlainString(),
                 endpointPort = entry.peer.endpointPort,
                 allowedIps = entry.peer.allowedIps.map { it.toCidrString() },
-                receivedBytes = stats.receivedBytes,
-                transmittedBytes = stats.transmittedBytes,
+                receivedBytes = entry.stats.receivedBytes,
+                transmittedBytes = entry.stats.transmittedBytes,
                 lastHandshakeEpochSeconds = null,
             )
         }
@@ -92,9 +90,7 @@ internal class CryptoSession(
                         ?: return@withLock
                     when (val result = selected.session.encryptRawPacket(packet, DEFAULT_PACKET_BUFFER_SIZE)) {
                         is PacketAction.WriteToNetwork -> {
-                            peerStatsByPublicKey
-                                .getOrPut(selected.peer.publicKey) { MutablePeerStats() }
-                                .transmittedBytes += result.packet.size.toLong()
+                            selected.stats.transmittedBytes += result.packet.size.toLong()
                             pendingNetwork = UdpDatagram(payload = result.packet, remoteEndpoint = selected.endpoint)
                         }
                         is PacketAction.WriteToTunIpv4 -> pendingTun = result.packet
@@ -131,9 +127,7 @@ internal class CryptoSession(
                         entry.endpoint == datagram.remoteEndpoint
                     } ?: return@withLock
 
-                    peerStatsByPublicKey
-                        .getOrPut(selected.peer.publicKey) { MutablePeerStats() }
-                        .receivedBytes += datagram.payload.size.toLong()
+                    selected.stats.receivedBytes += datagram.payload.size.toLong()
 
                     var result = selected.session.decryptToRawPacket(
                         src = datagram.payload,
@@ -145,9 +139,7 @@ internal class CryptoSession(
                     while (result !is PacketAction.Done) {
                         when (result) {
                             is PacketAction.WriteToNetwork -> {
-                                peerStatsByPublicKey
-                                    .getOrPut(selected.peer.publicKey) { MutablePeerStats() }
-                                    .transmittedBytes += result.packet.size.toLong()
+                                selected.stats.transmittedBytes += result.packet.size.toLong()
                                 pendingNetwork += UdpDatagram(payload = result.packet, remoteEndpoint = selected.endpoint)
                             }
                             is PacketAction.WriteToTunIpv4 -> if (acceptsSource(result.packet, selected)) pendingTun += result.packet
@@ -187,7 +179,7 @@ internal class CryptoSession(
     private suspend fun runPeriodicLoop(onFailure: (Throwable) -> Unit) {
         try {
             while (true) {
-                delay(DEFAULT_PERIODIC_INTERVAL_MILLIS)
+                delay(DEFAULT_PERIODIC_INTERVAL_MILLIS.milliseconds)
 
                 val pendingNetwork = mutableListOf<UdpDatagram>()
 
@@ -195,9 +187,7 @@ internal class CryptoSession(
                     sessionEntries.forEach { entry ->
                         when (val result = entry.session.runPeriodicTask(DEFAULT_PACKET_BUFFER_SIZE)) {
                             is PacketAction.WriteToNetwork -> {
-                                peerStatsByPublicKey
-                                    .getOrPut(entry.peer.publicKey) { MutablePeerStats() }
-                                    .transmittedBytes += result.packet.size.toLong()
+                                entry.stats.transmittedBytes += result.packet.size.toLong()
                                 pendingNetwork += UdpDatagram(payload = result.packet, remoteEndpoint = entry.endpoint)
                             }
                             is PacketAction.WriteToTunIpv4 -> Unit

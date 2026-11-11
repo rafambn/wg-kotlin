@@ -9,19 +9,63 @@ import com.rafambn.wgkotlin.daemon.IpcTestFixture
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.Test
 import kotlin.test.assertNull
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class DaemonIpcIntegrationTest {
+    @Test
+    fun cancelledReturnFromIoClosesAnOpenedSession() = runBlocking {
+        IpcTestFixture("echo").use { fixture ->
+            val (pipe, peer) = DuplexChannelPipe.create<ByteArray>()
+            val failure = CompletableDeferred<Throwable>()
+            val exchanged = CountDownLatch(1)
+            val packet = byteArrayOf(1, 2, 3)
+            peer.send(packet)
+            val echo = async(Dispatchers.IO) {
+                try {
+                    assertContentEquals(packet, withTimeout(2_000) { peer.receive() })
+                } finally {
+                    exchanged.countDown()
+                }
+            }
+            val opening = async(start = CoroutineStart.UNDISPATCHED) {
+                PlatformInterfaceManager.create(TunSessionConfig { interfaceName = "utun0" }, pipe) {
+                    failure.complete(it)
+                }
+            }
+            try {
+                assertFalse(opening.isCompleted, "IPC creation must leave the caller's thread available")
+                // Hold the caller's thread until the session has exchanged a packet on IO.
+                assertTrue(exchanged.await(3, TimeUnit.SECONDS))
+                opening.cancelAndJoin()
+                echo.await()
+                assertFailsWith<CancellationException> { opening.await() }
+
+                fixture.daemon.kill()
+                assertNull(withTimeoutOrNull(500) { failure.await() }, "A discarded session must already be closed")
+            } finally {
+                opening.cancelAndJoin()
+                echo.cancelAndJoin()
+            }
+        }
+    }
+
     @Test
     fun existingVpnApiCanBeConstructedBeforeLaunchingTheDaemon() = runBlocking {
         val first = Vpn()

@@ -17,45 +17,44 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
-internal class SocketManagerImpl(
+/** Owns bound UDP sockets and their workers. Close it when its TUN is stopped. */
+internal class SocketSession(
+    listenPort: Int,
     private val networkPipe: DuplexChannelPipe<UdpDatagram>,
-) : SocketManager {
+    onFailure: (Throwable) -> Unit,
+) : AutoCloseable {
 
-    private var running = false
+    private var closed = false
     private var ipv4Socket: BoundDatagramSocket? = null
     private var ipv6Socket: BoundDatagramSocket? = null
-    private var selectorManager: SelectorManager? = null
-    private var scope: CoroutineScope? = null
+    private val coroutineLabel = "kmpvpn-socket"
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default + CoroutineName(coroutineLabel),
+    )
+    private val selectorManager = SelectorManager(scope.coroutineContext)
 
-    override fun start(listenPort: Int, onFailure: (Throwable) -> Unit) {
-        stop()
-
-        val coroutineLabel = "kmpvpn-socket"
-        val newScope = CoroutineScope(
-            SupervisorJob() + Dispatchers.Default + CoroutineName(coroutineLabel),
-        )
-
-        val newSelectorManager = SelectorManager(newScope.coroutineContext)
+    init {
         try {
             runBlocking {
                 var firstFailure: Throwable? = null
 
                 runCatching {
-                    aSocket(newSelectorManager).udp().bind(InetSocketAddress("::", listenPort))
+                    aSocket(selectorManager).udp().bind(InetSocketAddress("::", listenPort))
                 }.onSuccess { socket ->
                     ipv6Socket = socket
                 }.onFailure { failure ->
                     firstFailure = failure
                 }
 
-                val ipv4Port = if (listenPort == 0 && ipv6Socket != null) {
-                    (ipv6Socket!!.localAddress as InetSocketAddress).port //TODO change code to not use !! in ipv6Socket!!
+                val ipv6Address = ipv6Socket?.localAddress as InetSocketAddress?
+                val ipv4Port = if (listenPort == 0 && ipv6Address != null) {
+                    ipv6Address.port
                 } else {
                     listenPort
                 }
 
                 runCatching {
-                    aSocket(newSelectorManager).udp().bind(InetSocketAddress("0.0.0.0", ipv4Port))
+                    aSocket(selectorManager).udp().bind(InetSocketAddress("0.0.0.0", ipv4Port))
                 }.onSuccess { socket ->
                     ipv4Socket = socket
                 }.onFailure { failure ->
@@ -69,21 +68,16 @@ internal class SocketManagerImpl(
                 }
             }
         } catch (failure: Throwable) {
-            newSelectorManager.close()
-            newScope.cancel("SocketManager bind failed")
+            close()
             throw failure
         }
 
-        selectorManager = newSelectorManager
-        scope = newScope
-        running = true
-
-        val ipv4UdpPort =  ipv4Socket?.let {
+        val ipv4UdpPort = ipv4Socket?.let {
             val port = KtorDatagramUdpPort(
                 socket = it,
                 receiveTimeoutMillis = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
             )
-            newScope.launch(CoroutineName("$coroutineLabel-receive-ipv4")) {
+            scope.launch(CoroutineName("$coroutineLabel-receive-ipv4")) {
                 runReceiveLoop(port, onFailure)
             }
             port
@@ -94,33 +88,29 @@ internal class SocketManagerImpl(
                 socket = it,
                 receiveTimeoutMillis = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
             )
-            newScope.launch(CoroutineName("$coroutineLabel-receive-ipv6")) {
+            scope.launch(CoroutineName("$coroutineLabel-receive-ipv6")) {
                 runReceiveLoop(port, onFailure)
             }
             port
         }
 
-        newScope.launch(CoroutineName("$coroutineLabel-send")) {
-            runSendLoop(ipv4Port = ipv4UdpPort, ipv6Port = ipv6UdpPort, onFailure = onFailure,)
+        scope.launch(CoroutineName("$coroutineLabel-send")) {
+            runSendLoop(ipv4Port = ipv4UdpPort, ipv6Port = ipv6UdpPort, onFailure = onFailure)
         }
     }
 
-    override fun stop() {
-        if (!running) {
+    override fun close() {
+        if (closed) {
             return
         }
-        running = false
+        closed = true
         runCatching { ipv4Socket?.close() }
         runCatching { ipv6Socket?.close() }
-        selectorManager?.close()
-        scope?.cancel("SocketManager stopped")
-        ipv4Socket = null
-        ipv6Socket = null
-        selectorManager = null
-        scope = null
+        selectorManager.close()
+        scope.cancel("SocketSession closed")
     }
 
-    override fun isRunning(): Boolean = running
+    fun isRunning(): Boolean = !closed
 
     private suspend fun runReceiveLoop(udpPort: UdpPort, onFailure: (Throwable) -> Unit) {
         try {

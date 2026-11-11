@@ -33,10 +33,10 @@ class InvalidDatagramRecoveryTest {
         )
         val (tun, cryptoTun) = DuplexChannelPipe.create<ByteArray>()
         val (network, cryptoNetwork) = DuplexChannelPipe.create<UdpDatagram>()
-        val manager = CryptoSessionManagerImpl(cryptoTun, cryptoNetwork)
+        val manager = CryptoManager()
         val failure = CompletableDeferred<Throwable>()
         val endpoint = UdpEndpoint("192.0.2.1", 51820)
-        manager.createSessions(VpnConfiguration(
+        val session = manager.create(VpnConfiguration(
             interfaceName = "utun1",
             privateKey = base64(serverKey),
             peers = listOf(VpnPeer(
@@ -44,8 +44,7 @@ class InvalidDatagramRecoveryTest {
                 endpointAddress = endpoint.address.resolveToIp(), endpointPort = endpoint.port,
                 allowedIps = listOf("10.0.0.0/24".toCidr()),
             )),
-        ))
-        manager.start { failure.complete(it) }
+        ), tunPipe = cryptoTun, networkPipe = cryptoNetwork, onFailure = { failure.complete(it) })
         try {
             val packet = byteArrayOf(
                 0x45, 0, 0, 20, 0, 0, 0, 0, 64, 0, 0, 0,
@@ -67,10 +66,10 @@ class InvalidDatagramRecoveryTest {
             val next = assertIs<PacketAction.WriteToNetwork>(client.encryptRawPacket(nextPacket, 0u))
             network.send(UdpDatagram(next.packet, endpoint))
             assertContentEquals(nextPacket, withTimeout(2_000) { tun.receive() })
-            assertTrue(manager.hasActiveSessions())
+            assertTrue(session.hasActiveSessions())
             assertFalse(failure.isCompleted)
         } finally {
-            manager.stop()
+            session.close()
             client.close()
         }
     }

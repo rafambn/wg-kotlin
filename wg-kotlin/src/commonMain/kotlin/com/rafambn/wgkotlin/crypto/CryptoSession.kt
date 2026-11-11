@@ -1,15 +1,7 @@
 package com.rafambn.wgkotlin.crypto
 
-import com.rafambn.wgkotlin.Engine
-import com.rafambn.wgkotlin.VpnConfiguration
-import com.rafambn.wgkotlin.crypto.factory.BoringTunPeerSessionFactory
-import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
-import com.rafambn.wgkotlin.crypto.factory.QuicPeerSessionFactory
 import com.rafambn.wgkotlin.daemon.proto.Ip
 import com.rafambn.wgkotlin.network.io.UdpDatagram
-import com.rafambn.wgkotlin.requireDistinctAllowedIpOwnership
-import com.rafambn.wgkotlin.requireUniquePeerPublicKeys
-import com.rafambn.wgkotlin.requireUserspacePeerEndpoints
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.util.matches
 import com.rafambn.wgkotlin.util.parsePacketDestination
@@ -28,72 +20,34 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-internal class CryptoSessionManagerImpl(
+/** Owns one TUN's peers and crypto workers. Close waits for workers before releasing peers. */
+internal class CryptoSession(
+    private var sessionEntries: List<PeerSessionEntry>,
     private val tunPipe: DuplexChannelPipe<ByteArray>,
     private val networkPipe: DuplexChannelPipe<UdpDatagram>,
-    engine: Engine = Engine.BORINGTUN,
-    private val peerSessionFactory: PeerSessionFactory = defaultFactory(engine),
-) : CryptoSessionManager {
-
+    onFailure: (Throwable) -> Unit,
+) {
     private val sessionMutex = Mutex()
-    private var sessionEntries: List<PeerSessionEntry> = emptyList()
     private val peerStatsByPublicKey: MutableMap<String, MutablePeerStats> = mutableMapOf()
+    private val coroutineLabel = "kmpvpn-crypto"
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default + CoroutineName(coroutineLabel),
+    )
 
-    private var scope: CoroutineScope? = null
-
-    override fun createSessions(config: VpnConfiguration) {
-        check(scope == null && sessionEntries.isEmpty()) { "Crypto sessions must be stopped before creating sessions" }
-        requireUniquePeerPublicKeys(config.peers)
-        requireUserspacePeerEndpoints(config.peers)
-        requireDistinctAllowedIpOwnership(config.peers)
-
-        val createdSessions: MutableList<PeerSessionEntry> = mutableListOf()
-
-        try {
-            config.peers.sortedBy { peer -> peer.publicKey }.forEachIndexed { index, peer ->
-                val createdSession = peerSessionFactory.create(
-                    config = config,
-                    peer = peer,
-                    peerIndex = index + 1,
-                )
-                createdSessions += PeerSessionEntry(peer = peer, session = createdSession)
-                require(createdSession.isActive) {
-                    "Session factory must return active peer sessions"
-                }
-            }
-        } catch (error: Throwable) {
-            createdSessions.forEach { entry ->
-                runCatching { entry.session.close() }.exceptionOrNull()?.let(error::addSuppressed)
-            }
-            throw error
-        }
-        sessionEntries = createdSessions.toList()
-    }
-
-    override fun start(onFailure: (Throwable) -> Unit) {
-        check(scope == null) { "Crypto workers must be stopped before starting" }
-        peerStatsByPublicKey.clear()
-
-        val coroutineLabel = "kmpvpn-crypto"
-        val newScope = CoroutineScope(
-            SupervisorJob() + Dispatchers.Default + CoroutineName(coroutineLabel),
-        )
-        scope = newScope
-
-        newScope.launch(CoroutineName("$coroutineLabel-cleartext-ingress")) {
+    init {
+        scope.launch(CoroutineName("$coroutineLabel-cleartext-ingress")) {
             runCleartextIngressLoop(onFailure)
         }
-        newScope.launch(CoroutineName("$coroutineLabel-encrypted-ingress")) {
+        scope.launch(CoroutineName("$coroutineLabel-encrypted-ingress")) {
             runEncryptedIngressLoop(onFailure)
         }
-        newScope.launch(CoroutineName("$coroutineLabel-periodic")) {
+        scope.launch(CoroutineName("$coroutineLabel-periodic")) {
             runPeriodicLoop(onFailure)
         }
     }
 
-    override suspend fun stop() {
-        scope?.coroutineContext?.job?.cancelAndJoin()
-        scope = null
+    suspend fun close() {
+        scope.coroutineContext.job.cancelAndJoin()
         var firstError: Throwable? = null
         sessionEntries.forEach { entry ->
             try {
@@ -107,11 +61,11 @@ internal class CryptoSessionManagerImpl(
         firstError?.let { throw it }
     }
 
-    override fun hasActiveSessions(): Boolean {
+    fun hasActiveSessions(): Boolean {
         return sessionEntries.any { entry -> entry.session.isActive }
     }
 
-    override fun peerStats(): List<VpnPeerStats> {
+    fun peerStats(): List<VpnPeerStats> {
         return sessionEntries.map { entry ->
             val stats = peerStatsByPublicKey[entry.peer.publicKey] ?: MutablePeerStats()
             VpnPeerStats(
@@ -297,10 +251,5 @@ internal class CryptoSessionManagerImpl(
         val DEFAULT_PACKET_BUFFER_SIZE: UInt = 65535u
         const val DEFAULT_MAX_FLUSH_ITERATIONS: Int = 256
         const val DEFAULT_PERIODIC_INTERVAL_MILLIS: Long = 100L
-
-        fun defaultFactory(engine: Engine): PeerSessionFactory = when (engine) {
-            Engine.BORINGTUN -> BoringTunPeerSessionFactory()
-            Engine.QUIC -> QuicPeerSessionFactory()
-        }
     }
 }

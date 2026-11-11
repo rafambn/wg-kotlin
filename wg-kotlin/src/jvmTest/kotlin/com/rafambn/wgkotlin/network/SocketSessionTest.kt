@@ -17,6 +17,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.io.readByteArray
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -52,6 +53,33 @@ class SocketSessionTest {
             session.close()
             receiver.close()
             selector.close()
+        }
+    }
+
+    @Test
+    fun failedCreateOnOccupiedPortPreservesTheExistingSession() = runBlocking {
+        val networkPipe = DuplexChannelPipe.create<UdpDatagram>()
+        SocketManager.create(0, networkPipe.first).use {
+            val selector = SelectorManager(Dispatchers.IO)
+            val receiver = aSocket(selector).udp().bind(InetSocketAddress("127.0.0.1", 0))
+            try {
+                val endpoint = UdpEndpoint("127.0.0.1", (receiver.localAddress as InetSocketAddress).port)
+                networkPipe.second.send(UdpDatagram(byteArrayOf(1), endpoint))
+                val received = withTimeout(2_000) { receiver.receive() }
+                assertContentEquals(byteArrayOf(1), received.packet.readByteArray())
+                val occupiedPort = (received.address as InetSocketAddress).port
+
+                assertFailsWith<IllegalStateException> {
+                    SocketManager.create(occupiedPort, DuplexChannelPipe.create<UdpDatagram>().first).close()
+                }
+
+                networkPipe.second.send(UdpDatagram(byteArrayOf(2), endpoint))
+                val afterFailure = withTimeout(2_000) { receiver.receive() }
+                assertContentEquals(byteArrayOf(2), afterFailure.packet.readByteArray())
+            } finally {
+                receiver.close()
+                selector.close()
+            }
         }
     }
 

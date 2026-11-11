@@ -4,7 +4,7 @@ import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 
 expect object PlatformInterfaceManager {
-    fun create(
+    suspend fun create(
         config: TunSessionConfig,
         tunPipe: DuplexChannelPipe<ByteArray>,
         onFailure: (Throwable) -> Unit = {},

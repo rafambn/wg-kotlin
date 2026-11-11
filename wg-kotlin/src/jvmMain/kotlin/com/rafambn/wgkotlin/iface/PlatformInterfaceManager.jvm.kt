@@ -9,32 +9,50 @@ import com.rafambn.wgkotlin.daemon.proto.ServerMessage
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.proto.invoke
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 
 actual object PlatformInterfaceManager {
     private val running = AtomicReference<DaemonProcess?>()
 
-    actual fun create(
+    actual suspend fun create(
         config: TunSessionConfig,
         tunPipe: DuplexChannelPipe<ByteArray>,
         onFailure: (Throwable) -> Unit,
     ): InterfaceSession {
-        val activeDaemon = requireDaemon()
-        val daemonPid = activeDaemon.pid
-        val connection = LocalConnection.connect(activeDaemon.endpoint, daemonPid)
+        // Cancellation while dispatching the result back must also close the opened session.
+        var openedSession: InterfaceSession? = null
         try {
-            IpcProtocol.awaitReady(connection, daemonPid)
-            connection.readTimeoutMillis = 30_000
-            IpcProtocol.writeClient(connection.output, ClientMessage { payload = ClientMessage.Payload.Config(config) })
-            when (val payload = IpcProtocol.readServer(connection.input).payload) {
-                is ServerMessage.Payload.Started -> check(payload.value.interfaceName.isNotBlank()) { "Missing started interface name" }
-                is ServerMessage.Payload.Error -> error("Daemon session failed (${payload.value.code}): ${payload.value.message}")
-                else -> error("Daemon did not accept the session")
+            return withContext(Dispatchers.IO) {
+                val activeDaemon = requireDaemon()
+                val daemonPid = activeDaemon.pid
+                val connection = LocalConnection.connect(activeDaemon.endpoint, daemonPid)
+                try {
+                    IpcProtocol.awaitReady(connection, daemonPid)
+                    connection.readTimeoutMillis = 30_000
+                    IpcProtocol.writeClient(connection.output, ClientMessage { payload = ClientMessage.Payload.Config(config) })
+                    when (val payload = IpcProtocol.readServer(connection.input).payload) {
+                        is ServerMessage.Payload.Started -> check(payload.value.interfaceName.isNotBlank()) { "Missing started interface name" }
+                        is ServerMessage.Payload.Error -> error("Daemon session failed (${payload.value.code}): ${payload.value.message}")
+                        else -> error("Daemon did not accept the session")
+                    }
+                    connection.readTimeoutMillis = 0
+                    currentCoroutineContext().ensureActive()
+                    val session = DaemonInterfaceSession(config, connection, tunPipe, onFailure)
+                    openedSession = session
+                    session
+                } catch (error: Throwable) {
+                    runCatching { connection.close() }.exceptionOrNull()?.let(error::addSuppressed)
+                    if (error is CancellationException) throw error
+                    throw IllegalStateException("Daemon did not accept the IPC session", error)
+                }
             }
-            connection.readTimeoutMillis = 0
-            return DaemonInterfaceSession(config, connection, tunPipe, onFailure)
         } catch (error: Throwable) {
-            runCatching { connection.close() }.exceptionOrNull()?.let(error::addSuppressed)
-            throw IllegalStateException("Daemon did not accept the IPC session", error)
+            runCatching { openedSession?.close() }.exceptionOrNull()?.let(error::addSuppressed)
+            throw error
         }
     }
 

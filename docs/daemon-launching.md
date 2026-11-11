@@ -53,8 +53,8 @@ The application must:
 Permission UI, executable packaging, signing, and installation belong to the
 application. No standard-stream handle transfer through elevation is needed.
 Daemon launch, stop, and kill are blocking and belong off the UI thread.
-VPN `start` and `stop` are suspending functions; startup still performs blocking
-IPC work, so call them off the UI thread as well.
+VPN `start` and `stop` are suspending functions. IPC connection and session
+initialization run on `Dispatchers.IO`.
 Serialize lifecycle calls, except that `kill()` can interrupt a graceful stop.
 The startup timeout begins after the callback returns; the app owns cancellation
 and timeout of its permission dialog. Failed startup forces termination.

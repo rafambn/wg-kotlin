@@ -68,14 +68,10 @@ class Vpn(
         val session = sessions[tunName] ?: return null
         val liveInformation = session.interfaceSession?.information() ?: return null
 
-        val runtimePeerStats = session.cryptoSession?.peerStats().orEmpty()
-        val informationWithPeerStats = if (runtimePeerStats.isEmpty()) {
-            liveInformation
-        } else {
-            liveInformation.copy(peerStats = runtimePeerStats)
-        }
-
-        return informationWithPeerStats.copy(vpnConfiguration = session.configuration)
+        return liveInformation.copy(
+            peerStats = session.cryptoSession?.peerStats().orEmpty(),
+            vpnConfiguration = session.configuration,
+        )
     }
 
     suspend fun stop(tunName: String): Result<Unit> = lifecycleMutex.withLock {

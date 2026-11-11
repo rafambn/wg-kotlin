@@ -368,36 +368,33 @@ class CryptoSessionTest {
     }
 
     @Test
-    fun inboundStatsAccountForReceivedBytes() = runBlocking {
+    fun inboundStatsAreCountedSeparatelyForEachPeer() = runBlocking {
         val factory = DataPlaneSessionFactory()
         val (_, cryptoTun) = DuplexChannelPipe.create<ByteArray>()
         val (testNet, cryptoNet) = DuplexChannelPipe.create<UdpDatagram>()
         val manager = CryptoManager(peerSessionFactory = factory)
         val session = manager.create(
-            configurationWithPeer(
-                VpnPeer(
-                    publicKey = "peer-a",
-                    endpointAddress = "198.51.100.1".resolveToIp(),
-                    endpointPort = 51820,
-                    allowedIps = listOf("0.0.0.0/0".toCidr()),
-                ),
-            ),
+            configurationWithPeers("peer-a", "peer-b"),
             tunPipe = cryptoTun, networkPipe = cryptoNet, onFailure = { throw it },
         )
+        try {
+            val firstPayload = byteArrayOf(0xAA.toByte(), 0xBB.toByte(), 0xCC.toByte())
+            val secondPayload = byteArrayOf(0xDD.toByte(), 0xEE.toByte())
+            testNet.send(UdpDatagram(firstPayload, UdpEndpoint("198.51.100.1", 51820)))
+            testNet.send(UdpDatagram(secondPayload, UdpEndpoint("198.51.100.2", 51821)))
 
-        val payload = byteArrayOf(0xAA.toByte(), 0xBB.toByte(), 0xCC.toByte())
-        testNet.send(UdpDatagram(payload = payload, remoteEndpoint = UdpEndpoint("198.51.100.1", 51820)))
-
-        withTimeout(2_000) {
-            while (session.peerStats().firstOrNull { it.publicKey == "peer-a" }?.receivedBytes == 0L) {
-                delay(10)
+            withTimeout(2_000) {
+                while (session.peerStats().any { it.receivedBytes == 0L }) {
+                    delay(10)
+                }
             }
+
+            val stats = session.peerStats().associateBy { it.publicKey }
+            assertEquals(firstPayload.size.toLong(), stats.getValue("peer-a").receivedBytes)
+            assertEquals(secondPayload.size.toLong(), stats.getValue("peer-b").receivedBytes)
+        } finally {
+            session.close()
         }
-
-        val stats = session.peerStats().single { it.publicKey == "peer-a" }
-        assertEquals(payload.size.toLong(), stats.receivedBytes)
-
-        session.close()
     }
 
     @Test

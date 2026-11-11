@@ -3,17 +3,24 @@ package com.rafambn.wgkotlin.crypto
 import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.VpnPeer
 import com.rafambn.wgkotlin.crypto.factory.PeerSessionFactory
+import com.rafambn.wgkotlin.daemon.proto.Cidr
+import com.rafambn.wgkotlin.daemon.proto.Ip
+import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.network.io.UdpEndpoint
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.util.resolveToIp
 import com.rafambn.wgkotlin.util.toCidr
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.io.bytestring.ByteString
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -107,6 +114,82 @@ class CryptoSessionManagerTest {
         assertTrue(manager.peerStats().isEmpty())
         assertEquals(1, factory.createdSessions.size)
         assertEquals(1, factory.createdSessions.first().closeCalls)
+    }
+
+    @Test
+    fun invalidDirectAllowedNetworksFailBeforeCreatingSessions() {
+        for ((address, prefix) in listOf(
+            "192.0.2.1" to 33u, "2001:db8::1" to 129u,
+            "192.0.2.1" to 4294967288u, "2001:db8::1" to UInt.MAX_VALUE,
+        )) {
+            val factory = RecordingSessionFactory()
+            val manager = createManager(factory)
+            val route = Cidr { ip = address.resolveToIp(); this.prefix = prefix }
+            val peer = VpnPeer(
+                publicKey = "peer-a", endpointAddress = "192.0.2.1".resolveToIp(), endpointPort = 51820,
+                allowedIps = listOf(route),
+            )
+
+            assertFailsWith<IllegalArgumentException>("$address/$prefix") {
+                manager.reconcileSessions(configurationWithPeer(peer))
+            }
+            assertTrue(factory.createdSessions.isEmpty())
+            assertFalse(manager.hasActiveSessions())
+        }
+    }
+
+    @Test
+    fun malformedEndpointIpsFailBeforeCreatingSessions() {
+        val addresses = listOf(
+            Ip { },
+            Ip { value = Ip.Value.V4(ByteString(byteArrayOf(192.toByte(), 0, 2))) },
+            Ip { value = Ip.Value.V6(ByteString(ByteArray(15))) },
+        )
+        for (address in addresses) {
+            val factory = RecordingSessionFactory()
+            val manager = createManager(factory)
+            val peer = VpnPeer(publicKey = "peer-a", endpointAddress = address, endpointPort = 51820)
+
+            assertFailsWith<IllegalArgumentException> { manager.reconcileSessions(configurationWithPeer(peer)) }
+            assertTrue(factory.createdSessions.isEmpty())
+        }
+    }
+
+    @Test
+    fun mappedIpv6EndpointsExchangePacketsUsingTheirIpv4TransportAddress() = runBlocking {
+        val (testTun, cryptoTun) = DuplexChannelPipe.create<ByteArray>()
+        val (testNet, cryptoNet) = DuplexChannelPipe.create<UdpDatagram>()
+        val manager = CryptoSessionManagerImpl(cryptoTun, cryptoNet, peerSessionFactory = DataPlaneSessionFactory())
+        val mapped = Ip {
+            value = Ip.Value.V6(ByteString(byteArrayOf(
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff.toByte(), 0xff.toByte(), 192.toByte(), 0, 2, 1,
+            )))
+        }
+        val peer = VpnPeer(
+            publicKey = "peer-a", endpointAddress = mapped, endpointPort = 51820,
+            allowedIps = listOf("0.0.0.0/0".toCidr()),
+        )
+        manager.reconcileSessions(configurationWithPeer(peer))
+        val failure = CompletableDeferred<Throwable>()
+        manager.start { failure.complete(it) }
+        try {
+            val packet = fakeIpv4Packet()
+            val expectedEndpoint = UdpEndpoint("192.0.2.1", 51820)
+            testTun.send(packet)
+            withTimeout(2_000) {
+                while (true) {
+                    val outgoing = testNet.receive()
+                    assertEquals(expectedEndpoint, outgoing.remoteEndpoint)
+                    if (outgoing.payload.contentEquals(packet + ENCRYPT_MARKER)) break
+                }
+            }
+
+            testNet.send(UdpDatagram(packet, expectedEndpoint))
+            assertContentEquals(packet + DECRYPT_MARKER, withTimeout(2_000) { testTun.receive() })
+            assertFalse(failure.isCompleted)
+        } finally {
+            manager.stop()
+        }
     }
 
     @Test

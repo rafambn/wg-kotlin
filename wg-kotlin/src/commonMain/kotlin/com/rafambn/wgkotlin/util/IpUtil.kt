@@ -45,35 +45,34 @@ internal fun String.toCidr(): Cidr {
 
 // Ip -> "10.0.0.1" / "[fd00::1]"
 internal fun Ip.toAddressString(): String {
-    val v = value ?: error("Ip without value field")
-    return when (v) {
-        is Ip.Value.V4 -> v.value.toByteArray().joinToString(".") { (it.toInt() and 0xff).toString() }
-        is Ip.Value.V6 -> {
-            val raw = v.value.toByteArray()
-            val segments = raw.toList().chunked(2).map { (hi, lo) ->
-                (hi.toInt().and(0xff).shl(8) or lo.toInt().and(0xff)).toString(16)
-            }
-            "[${segments.joinToString(":")}]"
-        }
-    }
+    val address = toPlainString()
+    return if (value is Ip.Value.V6) "[$address]" else address
 }
 
 // Ip -> "10.0.0.1" / "fd00::1"
 internal fun Ip.toPlainString(): String {
-    val v = value ?: error("Ip without value field")
-    return when (v) {
-        is Ip.Value.V4 -> v.value.toByteArray().joinToString(".") { (it.toInt() and 0xff).toString() }
-        is Ip.Value.V6 -> {
-            val raw = v.value.toByteArray()
-            raw.toList().chunked(2).map { (hi, lo) ->
-                (hi.toInt().and(0xff).shl(8) or lo.toInt().and(0xff)).toString(16)
-            }.joinToString(":")
-        }
+    val bytes = ipBytes() ?: error("Ip without value field")
+    if (bytes.size == 4) {
+        return bytes.joinToString(".") { (it.toInt() and 0xff).toString() }
+    }
+    return bytes.toList().chunked(2).joinToString(":") { (hi, lo) ->
+        (hi.toInt().and(0xff).shl(8) or lo.toInt().and(0xff)).toString(16)
     }
 }
 
 // Cidr -> "10.0.0.1/24" / "fd00::1/64"
-internal fun Cidr.toCidrString(): String = "${ip.toPlainString()}/$prefix"
+internal fun Cidr.toCidrString(): String = "${ip.toPlainString()}/${checkedPrefixLength()}"
+
+/** IPv4-mapped IPv6 endpoints use IPv4 sockets and IPv4 route exceptions. */
+internal fun Ip.toTransportIp(): Ip {
+    val bytes = ipBytes() ?: error("Ip without value field")
+    if (value is Ip.Value.V6 && (0 until 10).all { bytes[it] == 0.toByte() } &&
+        bytes[10] == 0xff.toByte() && bytes[11] == 0xff.toByte()
+    ) {
+        return Ip { value = Ip.Value.V4(ByteString(bytes.copyOfRange(12, 16))) }
+    }
+    return this
+}
 
 // extracts the destination IP from a raw IPv4/IPv6 packet header
 internal fun parsePacketDestination(packet: ByteArray): Ip = parsePacketAddress(packet, 16, 24)
@@ -102,9 +101,9 @@ private fun parsePacketAddress(packet: ByteArray, ipv4Offset: Int, ipv6Offset: I
 // "10.0.0.0/8" matches "11.0.0.1" -> false
 internal fun Cidr.matches(destination: Ip): Boolean {
     val cidrBytes = ip.ipBytes() ?: return false
-    val prefixLen = prefix.toInt()
+    val prefixLen = checkedPrefixLength()
     val dstBytes = destination.ipBytes() ?: return false
-    if (ip.value?.javaClass != destination.value?.javaClass) return false
+    if (cidrBytes.size != dstBytes.size) return false
 
     val fullBytes = prefixLen / 8
     val remainingBits = prefixLen % 8
@@ -121,7 +120,7 @@ internal fun Cidr.matches(destination: Ip): Boolean {
 // "fd00::1/64" -> "v6/64:fd000000000000000000000000000000"
 internal fun Cidr.normalizedKey(): String {
     val ipBytes = ip.ipBytes() ?: error("Cidr without ip")
-    val prefixLen = prefix.toInt()
+    val prefixLen = checkedPrefixLength()
     val normalized = normalizeNetworkBytes(ipBytes, prefixLen)
     val family = when (ip.value) {
         is Ip.Value.V4 -> "v4"
@@ -140,10 +139,25 @@ internal fun Cidr.normalizedKey(): String {
 }
 
 // Ip -> raw bytes, null if unset
-internal fun Ip.ipBytes(): ByteArray? = when (value) {
-    is Ip.Value.V4 -> (value as Ip.Value.V4).value.toByteArray()
-    is Ip.Value.V6 -> (value as Ip.Value.V6).value.toByteArray()
-    else -> null
+internal fun Ip.ipBytes(): ByteArray? {
+    val address = value ?: return null
+    val bytes = when (address) {
+        is Ip.Value.V4 -> address.value.toByteArray()
+        is Ip.Value.V6 -> address.value.toByteArray()
+    }
+    val expectedSize = if (address is Ip.Value.V4) 4 else 16
+    require(bytes.size == expectedSize) { "Expected $expectedSize IP bytes, got ${bytes.size}" }
+    return bytes
+}
+
+private fun Cidr.checkedPrefixLength(): Int {
+    val maximum = when (ip.value) {
+        is Ip.Value.V4 -> 32u
+        is Ip.Value.V6 -> 128u
+        null -> error("Cidr without ip")
+    }
+    require(prefix <= maximum) { "Prefix $prefix out of range 0..$maximum" }
+    return prefix.toInt()
 }
 
 // zeroes out bits beyond the network prefix

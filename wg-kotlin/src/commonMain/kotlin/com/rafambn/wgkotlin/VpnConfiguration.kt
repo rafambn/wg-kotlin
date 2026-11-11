@@ -2,6 +2,7 @@ package com.rafambn.wgkotlin
 
 import com.rafambn.wgkotlin.daemon.proto.Cidr
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
+import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.util.toCidrString
 import com.rafambn.wgkotlin.util.toTransportIp
 import com.rafambn.wgkotlin.daemon.proto.DnsConfig as ProtoDnsConfig

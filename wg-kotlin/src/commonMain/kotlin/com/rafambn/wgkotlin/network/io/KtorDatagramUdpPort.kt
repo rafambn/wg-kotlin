@@ -9,24 +9,28 @@ import io.ktor.utils.io.core.buildPacket
 import io.ktor.utils.io.core.writeFully
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.readByteArray
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Ktor-based UDP adapter that can run from common code.
+ * A zero [receiveTimeoutMillis] waits without a timeout; positive values return null on timeout.
  */
 class KtorDatagramUdpPort(
     private val socket: BoundDatagramSocket,
     private val receiveTimeoutMillis: Long = 0L,
 ) : UdpPort {
     init {
-        require(receiveTimeoutMillis > 0L) {
-            "receiveTimeoutMillis must be greater than zero when provided"
+        require(receiveTimeoutMillis >= 0L) {
+            "receiveTimeoutMillis must be non-negative"
         }
     }
 
     override suspend fun receiveDatagram(): UdpDatagram? {
-        val received = withTimeoutOrNull(receiveTimeoutMillis) {
+        val received = if (receiveTimeoutMillis == 0L) {
             socket.receive()
-        } ?: return null
+        } else {
+            withTimeoutOrNull(receiveTimeoutMillis.milliseconds) { socket.receive() } ?: return null
+        }
 
         return UdpDatagram(
             payload = received.packet.readByteArray(),

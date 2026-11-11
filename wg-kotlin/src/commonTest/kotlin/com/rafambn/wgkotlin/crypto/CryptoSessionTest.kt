@@ -252,7 +252,7 @@ class CryptoSessionTest {
     // ── Data-plane tests ──────────────────────────────────────────────────────
 
     @Test
-    fun cleartextIngressEncryptsAndForwardsToNetwork() = runBlocking {
+    fun cleartextIngressUsesTheLongestMatchingPrefix() = runBlocking {
         val factory = DataPlaneSessionFactory()
         val (testTun, cryptoTun) = DuplexChannelPipe.create<ByteArray>()
         val (testNet, cryptoNet) = DuplexChannelPipe.create<UdpDatagram>()
@@ -260,23 +260,43 @@ class CryptoSessionTest {
         val session = manager.create(
             configurationWithPeer(
                 VpnPeer(
-                    publicKey = "peer-a",
-                    endpointAddress = "198.51.100.1".resolveToIp(),
-                    endpointPort = 51820,
+                    publicKey = "peer-a", endpointAddress = "198.51.100.1".resolveToIp(), endpointPort = 51820,
                     allowedIps = listOf("0.0.0.0/0".toCidr()),
+                ),
+                VpnPeer(
+                    publicKey = "peer-b", endpointAddress = "198.51.100.2".resolveToIp(), endpointPort = 51820,
+                    allowedIps = listOf("10.0.0.0/24".toCidr(), "10.0.0.3/32".toCidr()),
+                ),
+                VpnPeer(
+                    publicKey = "peer-c", endpointAddress = "198.51.100.3".resolveToIp(), endpointPort = 51820,
+                    allowedIps = listOf("10.0.0.0/25".toCidr()),
                 ),
             ),
             tunPipe = cryptoTun, networkPipe = cryptoNet, onFailure = { throw it },
         )
-
-        testTun.send(fakeIpv4Packet())
-
-        val datagram = withTimeout(2_000) { testNet.receive() }
-        assertEquals("198.51.100.1", datagram.remoteEndpoint.address)
-        assertEquals(51820, datagram.remoteEndpoint.port)
-        assertTrue(datagram.payload.contentEquals(fakeIpv4Packet() + ENCRYPT_MARKER))
-
-        session.close()
+        try {
+            val destinations = listOf(
+                byteArrayOf(10, 0, 0, 3) to "198.51.100.2",
+                byteArrayOf(10, 0, 0, 4) to "198.51.100.3",
+                byteArrayOf(10, 0, 0, 129.toByte()) to "198.51.100.2",
+                byteArrayOf(8, 8, 8, 8) to "198.51.100.1",
+            )
+            for ((destination, endpoint) in destinations) {
+                val packet = fakeIpv4Packet(destination)
+                testTun.send(packet)
+                val datagram = withTimeout(2_000) {
+                    var outgoing = testNet.receive()
+                    while (!outgoing.payload.contentEquals(packet + ENCRYPT_MARKER)) {
+                        outgoing = testNet.receive()
+                    }
+                    outgoing
+                }
+                assertEquals(endpoint, datagram.remoteEndpoint.address)
+                assertEquals(51820, datagram.remoteEndpoint.port)
+            }
+        } finally {
+            session.close()
+        }
     }
 
     @Test

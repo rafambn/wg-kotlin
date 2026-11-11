@@ -10,6 +10,20 @@ import kotlin.test.assertEquals
 
 class VpnConfigurationTest {
     @Test
+    fun dnsServersAndSearchDomainsAreSentTogether() {
+        val dns = DnsConfig(
+            servers = listOf("192.0.2.53".resolveToIp(), "2001:db8::53".resolveToIp()),
+            searchDomains = listOf("corp.example", "internal.example"),
+        )
+        val configuration = VpnConfiguration(interfaceName = "utun1", privateKey = "test-key", dns = dns)
+
+        val session = configuration.toTunSessionConfig()
+
+        assertEquals(dns.servers, session.dns.servers)
+        assertEquals(dns.searchDomains, session.dns.searchDomains)
+    }
+
+    @Test
     fun endpointExceptionsUseTheTransportFamilyWhileTunnelNetworksKeepTheirFamily() {
         val mapped = Ip {
             value = Ip.Value.V6(ByteString(byteArrayOf(

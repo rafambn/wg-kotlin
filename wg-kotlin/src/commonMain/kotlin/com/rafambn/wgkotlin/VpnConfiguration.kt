@@ -2,7 +2,6 @@ package com.rafambn.wgkotlin
 
 import com.rafambn.wgkotlin.daemon.proto.Cidr
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
-import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.util.toCidrString
 import com.rafambn.wgkotlin.util.toTransportIp
 import com.rafambn.wgkotlin.daemon.proto.DnsConfig as ProtoDnsConfig
@@ -35,6 +34,7 @@ internal fun VpnConfiguration.toTunSessionConfig(): TunSessionConfig {
         this.peerAllowedIps = routes
         dns = ProtoDnsConfig {
             servers = this@toTunSessionConfig.dns.servers
+            searchDomains = this@toTunSessionConfig.dns.searchDomains
         }
         this.peerEndpoints = endpoints
     }

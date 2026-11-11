@@ -221,16 +221,17 @@ internal class CryptoSession(
     }
 
     private fun selectSessionForAddress(destination: Ip, sessionEntries: Iterable<PeerSessionEntry>): PeerSessionEntry? {
-        return sessionEntries
-            .mapNotNull { entry ->
-                val match = entry.peer.allowedIps
-                    .filter { allowedIp -> allowedIp.matches(destination) }
-                    .maxByOrNull { route -> route.prefix }
-                    ?: return@mapNotNull null
-                entry to match
+        var selected: PeerSessionEntry? = null
+        var longestPrefix = -1
+        for (entry in sessionEntries) {
+            for (allowedIp in entry.peer.allowedIps) {
+                if (allowedIp.matches(destination) && allowedIp.prefix.toInt() > longestPrefix) {
+                    selected = entry
+                    longestPrefix = allowedIp.prefix.toInt()
+                }
             }
-            .maxByOrNull { (_, route) -> route.prefix }
-            ?.first
+        }
+        return selected
     }
 
     private companion object {

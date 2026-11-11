@@ -27,10 +27,7 @@ internal class SocketSession(
 
     init {
         val ipv4UdpPort = ipv4Socket?.let {
-            val port = KtorDatagramUdpPort(
-                socket = it,
-                receiveTimeoutMillis = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
-            )
+            val port = KtorDatagramUdpPort(socket = it)
             scope.launch(CoroutineName("$coroutineLabel-receive-ipv4")) {
                 runReceiveLoop(port, onFailure)
             }
@@ -38,10 +35,7 @@ internal class SocketSession(
         }
 
         val ipv6UdpPort = ipv6Socket?.let {
-            val port = KtorDatagramUdpPort(
-                socket = it,
-                receiveTimeoutMillis = DEFAULT_RECEIVE_TIMEOUT_MILLIS,
-            )
+            val port = KtorDatagramUdpPort(socket = it)
             scope.launch(CoroutineName("$coroutineLabel-receive-ipv6")) {
                 runReceiveLoop(port, onFailure)
             }
@@ -104,9 +98,5 @@ internal class SocketSession(
 
     private fun isIpv6Literal(address: String): Boolean {
         return address.contains(':')
-    }
-
-    private companion object {
-        const val DEFAULT_RECEIVE_TIMEOUT_MILLIS: Long = 50L
     }
 }

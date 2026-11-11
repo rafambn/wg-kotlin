@@ -5,7 +5,7 @@ import com.rafambn.wgkotlin.VpnConfiguration
 import com.rafambn.wgkotlin.crypto.VpnPeerStats
 
 /**
- * Read-only interface information returned by [InterfaceManager.information].
+ * Read-only interface information returned by [InterfaceSession.information].
  */
 data class VpnInterfaceInformation(
     val interfaceName: String,

@@ -1,5 +1,6 @@
 package com.rafambn.wgkotlin
 
+import com.rafambn.wgkotlin.iface.PlatformInterfaceManager
 import com.rafambn.wgkotlin.iface.VpnInterfaceInformation
 import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CancellationException
@@ -20,6 +21,7 @@ class Vpn(
         const val DEFAULT_PORT: Int = 51820
     }
 
+    private val platformInterfaceManager = PlatformInterfaceManager
     private val lifecycleMutex = Mutex()
     @Volatile private var sessions: Map<String, VpnSession> = emptyMap()
 
@@ -42,7 +44,9 @@ class Vpn(
             created.cryptoSessionManager.createSessions(configuration)
             created.cryptoSessionManager.start(onFailure)
             created.socketManager.start(configuration.listenPort ?: DEFAULT_PORT, onFailure)
-            created.interfaceManager.start(configuration.toTunSessionConfig(), onFailure)
+            created.interfaceSession = platformInterfaceManager.create(
+                configuration.toTunSessionConfig(), created.tunPipe, onFailure,
+            )
             currentCoroutineContext().ensureActive()
             sessions = sessions + (tunName to created)
             Result.success(Unit)
@@ -55,7 +59,7 @@ class Vpn(
 
     fun information(tunName: String): VpnInterfaceInformation? {
         val session = sessions[tunName] ?: return null
-        val liveInformation = session.interfaceManager.information() ?: return null
+        val liveInformation = session.interfaceSession?.information() ?: return null
 
         val runtimePeerStats = session.cryptoSessionManager.peerStats()
         val informationWithPeerStats = if (runtimePeerStats.isEmpty()) {
@@ -76,7 +80,7 @@ class Vpn(
 
     private suspend fun stopComponents(session: VpnSession): Result<Unit> = withContext(NonCancellable) {
         session.failureScope.cancel()
-        val interfaceStop = runCatching { session.interfaceManager.stop() }
+        val interfaceStop = runCatching<Unit> { session.interfaceSession?.close() }
         val socketStop = runCatching { session.socketManager.stop() }
         val cryptoStop = runCatching { session.cryptoSessionManager.stop() }
         when {

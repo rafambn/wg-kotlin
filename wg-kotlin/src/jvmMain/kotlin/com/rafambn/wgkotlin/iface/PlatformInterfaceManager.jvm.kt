@@ -2,13 +2,18 @@ package com.rafambn.wgkotlin.iface
 
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
 import com.rafambn.wgkotlin.daemon.DaemonProcess
+import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import java.util.concurrent.atomic.AtomicReference
 
-actual object PlatformInterfaceFactory {
+actual object PlatformInterfaceManager {
     private val running = AtomicReference<DaemonProcess?>()
 
-    actual fun create(tunPipe: DuplexChannelPipe<ByteArray>): InterfaceManager {
-        return JvmInterfaceManager(sessionBridge = DaemonSessionBridge(), tunPipe = tunPipe)
+    actual fun create(
+        config: TunSessionConfig,
+        tunPipe: DuplexChannelPipe<ByteArray>,
+        onFailure: (Throwable) -> Unit,
+    ): InterfaceSession {
+        return DaemonInterfaceSession(config, tunPipe, onFailure)
     }
 
     internal fun requireDaemon(): DaemonProcess {

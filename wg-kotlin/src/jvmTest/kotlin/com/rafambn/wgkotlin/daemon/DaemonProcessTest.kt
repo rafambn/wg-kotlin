@@ -1,7 +1,7 @@
 package com.rafambn.wgkotlin.daemon
 
 import com.rafambn.wgkotlin.Vpn
-import com.rafambn.wgkotlin.iface.PlatformInterfaceFactory
+import com.rafambn.wgkotlin.iface.PlatformInterfaceManager
 import com.rafambn.wgkotlin.VpnConfiguration
 import java.net.DatagramSocket
 import java.net.BindException
@@ -28,9 +28,9 @@ class DaemonProcessTest {
                 assertEquals(first.process.pid(), first.daemon.pid)
                 assertEquals(ProcessHandle.current().pid().toString(), first.arguments[first.arguments.indexOf("--owner-pid") + 1])
                 assertFalse(first.arguments.any { it.contains("token") || it.contains("secret") || it == "--port" })
-                assertSame(first.daemon, PlatformInterfaceFactory.requireDaemon())
+                assertSame(first.daemon, PlatformInterfaceManager.requireDaemon())
             }
-            assertSame(first.daemon, PlatformInterfaceFactory.requireDaemon())
+            assertSame(first.daemon, PlatformInterfaceManager.requireDaemon())
         }
     }
 
@@ -40,7 +40,7 @@ class DaemonProcessTest {
             fixture.daemon.kill()
             assertFalse(fixture.process.isAlive)
             fixture.daemon.kill()
-            assertFailsWith<IllegalStateException> { PlatformInterfaceFactory.requireDaemon() }
+            assertFailsWith<IllegalStateException> { PlatformInterfaceManager.requireDaemon() }
         }
     }
 

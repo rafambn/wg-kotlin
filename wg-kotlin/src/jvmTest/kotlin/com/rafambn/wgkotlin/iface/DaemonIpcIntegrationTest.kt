@@ -70,23 +70,27 @@ class DaemonIpcIntegrationTest {
     @Test
     fun twoSessionConnectionsAreIndependentOnTheSameEndpoint() {
         IpcTestFixture("echo").use { fixture ->
-            val bridge = DaemonSessionBridge()
             val (first, firstPeer) = DuplexChannelPipe.create<ByteArray>()
             val (second, secondPeer) = DuplexChannelPipe.create<ByteArray>()
             val (firstSession, secondSession) = runBlocking {
-                val a = async(Dispatchers.IO) { bridge.openSession(TunSessionConfig { interfaceName = "utun0" }, first) {} }
-                val b = async(Dispatchers.IO) { bridge.openSession(TunSessionConfig { interfaceName = "utun1" }, second) {} }
+                val a = async(Dispatchers.IO) { PlatformInterfaceManager.create(TunSessionConfig { interfaceName = "utun0" }, first) {} }
+                val b = async(Dispatchers.IO) { PlatformInterfaceManager.create(TunSessionConfig { interfaceName = "utun1" }, second) {} }
                 a.await() to b.await()
             }
             secondSession.use {
                 runBlocking {
+                    assertEquals("utun0", firstSession.information()?.interfaceName)
+                    assertEquals("utun1", secondSession.information()?.interfaceName)
                     firstPeer.send(byteArrayOf(1, 2, 3))
                     assertContentEquals(byteArrayOf(1, 2, 3), withTimeout(2_000) { firstPeer.receive() })
                     firstSession.close()
+                    assertNull(firstSession.information())
+                    assertTrue(secondSession.information()?.isUp == true)
                     secondPeer.send(byteArrayOf(4, 5, 6))
                     assertContentEquals(byteArrayOf(4, 5, 6), withTimeout(2_000) { secondPeer.receive() })
                 }
             }
+            assertNull(secondSession.information())
             firstSession.close()
         }
     }

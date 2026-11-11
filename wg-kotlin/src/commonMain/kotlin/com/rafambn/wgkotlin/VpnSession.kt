@@ -1,7 +1,7 @@
 package com.rafambn.wgkotlin
 
 import com.rafambn.wgkotlin.crypto.CryptoSessionManagerImpl
-import com.rafambn.wgkotlin.iface.PlatformInterfaceFactory
+import com.rafambn.wgkotlin.iface.InterfaceSession
 import com.rafambn.wgkotlin.network.SocketManagerImpl
 import com.rafambn.wgkotlin.network.io.UdpDatagram
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
@@ -14,6 +14,7 @@ internal class VpnSession(
     engine: Engine,
 ) {
     private val tunPipePair = DuplexChannelPipe.create<ByteArray>()
+    val tunPipe = tunPipePair.first
     private val networkPipePair = DuplexChannelPipe.create<UdpDatagram>()
     val cryptoSessionManager = CryptoSessionManagerImpl(
         tunPipe = tunPipePair.second,
@@ -21,6 +22,6 @@ internal class VpnSession(
         engine = engine,
     )
     val socketManager = SocketManagerImpl(networkPipe = networkPipePair.first)
-    val interfaceManager = PlatformInterfaceFactory.create(tunPipePair.first)
+    var interfaceSession: InterfaceSession? = null
     val failureScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 }

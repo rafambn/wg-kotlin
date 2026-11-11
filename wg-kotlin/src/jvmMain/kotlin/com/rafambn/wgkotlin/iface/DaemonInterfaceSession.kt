@@ -1,5 +1,6 @@
 package com.rafambn.wgkotlin.iface
 
+import com.rafambn.wgkotlin.DnsConfig
 import com.rafambn.wgkotlin.daemon.IpcProtocol
 import com.rafambn.wgkotlin.daemon.LocalConnection
 import com.rafambn.wgkotlin.daemon.proto.ClientMessage
@@ -8,6 +9,7 @@ import com.rafambn.wgkotlin.daemon.proto.ServerMessage
 import com.rafambn.wgkotlin.daemon.proto.TunSessionConfig
 import com.rafambn.wgkotlin.daemon.proto.invoke
 import com.rafambn.wgkotlin.util.DuplexChannelPipe
+import com.rafambn.wgkotlin.util.toCidrString
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
@@ -19,13 +21,21 @@ import kotlinx.coroutines.launch
 import kotlinx.io.bytestring.ByteString
 
 /** One authenticated IPC connection owns one TUN session. */
-internal class DaemonSessionBridge : SessionBridge {
-    override fun openSession(config: TunSessionConfig, pipe: DuplexChannelPipe<ByteArray>, onFailure: (Throwable) -> Unit): AutoCloseable {
-        val activeDaemon = PlatformInterfaceFactory.requireDaemon()
+internal class DaemonInterfaceSession(
+    private val config: TunSessionConfig,
+    pipe: DuplexChannelPipe<ByteArray>,
+    private val onFailure: (Throwable) -> Unit,
+) : InterfaceSession {
+    private val connection: LocalConnection
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("wg-kotlin-ipc-session"))
+    private val closed = AtomicBoolean()
+
+    init {
+        val activeDaemon = PlatformInterfaceManager.requireDaemon()
         check(activeDaemon.isAlive) { "Owned daemon has exited" }
         val daemonPid = activeDaemon.pid
         val endpoint = activeDaemon.endpoint
-        val connection = LocalConnection.connect(endpoint, daemonPid)
+        connection = LocalConnection.connect(endpoint, daemonPid)
         try {
             IpcProtocol.awaitReady(connection, daemonPid)
             connection.readTimeoutMillis = 30_000
@@ -39,21 +49,6 @@ internal class DaemonSessionBridge : SessionBridge {
         } catch (error: Throwable) {
             connection.close()
             throw IllegalStateException("Daemon did not accept the IPC session", error)
-        }
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("wg-kotlin-ipc-session"))
-        val closed = AtomicBoolean()
-        fun close() {
-            if (closed.compareAndSet(false, true)) {
-                connection.close()
-                scope.cancel()
-            }
-        }
-        fun fail(error: Throwable) {
-            if (closed.compareAndSet(false, true)) {
-                connection.close()
-                scope.cancel()
-                onFailure(error)
-            }
         }
         scope.launch {
             try {
@@ -79,6 +74,34 @@ internal class DaemonSessionBridge : SessionBridge {
             } catch (_: CancellationException) {
             } catch (error: Throwable) { fail(error) }
         }
-        return AutoCloseable { close() }
+    }
+
+    override fun close() {
+        if (closed.compareAndSet(false, true)) {
+            connection.close()
+            scope.cancel()
+        }
+    }
+
+    override fun information(): VpnInterfaceInformation? {
+        if (closed.get()) return null
+        return VpnInterfaceInformation(
+            interfaceName = config.interfaceName,
+            isUp = true,
+            addresses = config.addresses.map { it.toCidrString() },
+            dns = DnsConfig(
+                searchDomains = config.dns.searchDomains,
+                servers = config.dns.servers,
+            ),
+            mtu = if (config.mtu == 0) null else config.mtu,
+        )
+    }
+
+    private fun fail(error: Throwable) {
+        if (closed.compareAndSet(false, true)) {
+            connection.close()
+            scope.cancel()
+            onFailure(error)
+        }
     }
 }

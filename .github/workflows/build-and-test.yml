@@ -2,6 +2,11 @@ name: Build and Test
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to rebuild and attach daemon executables
+        required: false
+        type: string
   release:
     types: [published]
 
@@ -9,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.release.tag_name || inputs.release_tag || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -20,6 +25,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -76,8 +83,14 @@ jobs:
             binary-suffix: ""
 
     steps:
+      - name: Enable long paths on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+
       - name: Checkout code
         uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -96,7 +109,7 @@ jobs:
           retention-days: 7
 
       - name: Package release executable
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || inputs.release_tag != ''
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -112,10 +125,10 @@ jobs:
           fi
 
       - name: Attach executable to release
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || inputs.release_tag != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
         run: gh release upload "$RELEASE_TAG" release-assets/* --clobber

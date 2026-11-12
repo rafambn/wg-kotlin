@@ -73,13 +73,13 @@ jobs:
           - os: ubuntu-latest
             name: Linux x64
             artifact-name: vpn-daemon-linux-x64
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
             binary-suffix: ""
 
           - os: ubuntu-24.04-arm
             name: Linux ARM64
             artifact-name: vpn-daemon-linux-arm64
-            target: aarch64-unknown-linux-gnu
+            target: aarch64-unknown-linux-musl
             binary-suffix: ""
 
     steps:
@@ -97,10 +97,32 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Set up MUSL toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y musl-tools
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> "$GITHUB_ENV"
+
       - name: Build Rust daemon binary
         run: cargo build --manifest-path wg-kotlin-daemon-rust/daemon/Cargo.toml --locked --release --target ${{ matrix.target }}
         env:
-          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+          RUSTFLAGS: ${{ runner.os != 'macOS' && '-C target-feature=+crt-static' || '' }}
+
+      - name: Verify static Linux daemon
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          binary="wg-kotlin-daemon-rust/target/$TARGET/release/wg-kotlin-daemon"
+          headers="$(readelf --program-headers --dynamic --wide "$binary")"
+          if grep -Eq 'INTERP|\(NEEDED\)' <<< "$headers"; then
+            echo "Linux daemon must not require a dynamic loader or shared libraries"
+            printf '%s\n' "$headers"
+            exit 1
+          fi
+          "$binary" --help
 
       - name: Smoke test Windows daemon
         if: runner.os == 'Windows'

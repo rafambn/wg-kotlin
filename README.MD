@@ -88,6 +88,11 @@ Publishing a GitHub release, including a prerelease, runs the Build and Test
 workflow for Windows x64, macOS x64/ARM64, and Linux x64/ARM64. It attaches the
 Windows `.exe` and Unix `.tar.gz` archives to that release. The archives preserve
 the daemon's executable permission. Creating a tag alone does not trigger it.
+Linux daemon archives use the `x86_64-unknown-linux-musl` and
+`aarch64-unknown-linux-musl` targets with a statically linked C runtime, so they do
+not require the host's glibc or MUSL libraries. The workflow checks that neither
+a dynamic loader nor shared libraries are required before uploading. Linux still
+requires kernel 5.3+ and `resolvectl`; the application supplies elevation.
 The separate Publish Maven workflow builds BoringTun for all five platforms,
 verifies a JVM consumer using one dependency, and publishes WG-Kotlin
 to Maven Central. Running it manually without `release_tag` performs the builds

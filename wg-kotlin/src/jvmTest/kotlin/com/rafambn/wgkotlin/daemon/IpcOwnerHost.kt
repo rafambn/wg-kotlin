@@ -7,9 +7,10 @@ object IpcOwnerHost {
     @JvmStatic
     fun main(arguments: Array<String>) {
         val daemon = DaemonProcess.launch(startupTimeout = 3.seconds) { args ->
-            ProcessBuilder(listOf(arguments[0]) + args)
+            val process = ProcessBuilder(listOf(arguments[0]) + args)
                 .redirectError(ProcessBuilder.Redirect.INHERIT)
                 .start()
+            ProcessDaemonHandle(process)
         }
         println(daemon.pid)
         System.out.flush()

@@ -41,17 +41,21 @@ Unix UID or Windows SID from the operating system.
 The application must:
 
 - Start the intended executable with those arguments and root or Administrator
-  privileges. Return a `java.lang.Process` identifying the actual daemon, rather
+  privileges. Return a `DaemonHandle` identifying the actual daemon, rather
   than a permission dialog, shell, or helper process.
-- Supply working `pid`, `isAlive`, timed `waitFor`, and `destroyForcibly` methods.
+- Supply working `pid`, `isAlive`, `awaitExit(timeout: Duration)`, and `kill()` members.
   Forced termination must already be authorized, without another prompt or a
-  response from the daemon. A native launcher may adapt `Process` to its OS
-  process handle. Release native handles after exit and retain exit status for
-  subsequent queries.
+  response from the daemon. Implement the handle using the platform's process
+  controls; inheriting from `java.lang.Process` is not required.
+- Implement `close()` to release launcher resources without requesting termination.
+  It must tolerate repeated calls and leave lifecycle queries usable. If termination
+  fails, retain control of the live daemon. The library calls it after shutdown or
+  failed startup. A `ProcessDaemonHandle` is provided for launchers that already return
+  a JVM `Process` representing the actual daemon.
 - Redirect or drain standard output/error so process output cannot block it.
   These streams do not carry IPC data. Runtime logs are plain text.
 - Clean up partial launches if permission is denied or the callback throws before
-  returning a process. After the callback returns, the library owns cleanup.
+  returning a handle. After the callback returns, the library owns cleanup.
 
 Permission UI, executable packaging, signing, and installation belong to the
 application. No standard-stream handle transfer through elevation is needed.
@@ -147,10 +151,11 @@ A graphical polkit agent can provide the elevation dialog:
 
 ```kotlin
 val daemon = DaemonProcess.launch { arguments ->
-    ProcessBuilder(listOf("pkexec", daemonExecutable.toAbsolutePath().toString()) + arguments)
+    val process = ProcessBuilder(listOf("pkexec", daemonExecutable.toAbsolutePath().toString()) + arguments)
         .redirectOutput(ProcessBuilder.Redirect.DISCARD)
         .redirectError(ProcessBuilder.Redirect.INHERIT)
         .start()
+    ProcessDaemonHandle(process)
 }
 ```
 
@@ -171,7 +176,7 @@ Reference: [pkexec](https://www.freedesktop.org/software/polkit/docs/latest/pkex
 
 A distributed app can register its signed privileged helper using `SMAppService`.
 The helper must authenticate its requesting app and launch the daemon with the
-supplied owner and endpoint arguments. Return a process adapter for the daemon's
+supplied owner and endpoint arguments. Return a `DaemonHandle` for the daemon's
 actual PID and process controls; no pipe descriptor transfer is required.
 
 Before starting runtime threads, the daemon calls `setreuid(ownerUid, 0)` and
@@ -212,9 +217,10 @@ unelevated UAC token without creating a TUN or installing a driver.
 
 The native launcher can use `ShellExecuteEx` with `runas` and
 `SEE_MASK_NOCLOSEPROCESS`. Retain the actual daemon handle with
-`PROCESS_TERMINATE` plus query/wait rights. Adapt it to `Process`; a PowerShell
+`PROCESS_TERMINATE` plus query/wait rights. Implement `DaemonHandle`; a PowerShell
 wrapper's PID is insufficient. Forced termination calls `TerminateProcess` on
-that retained daemon handle, then waits for exit.
+that retained daemon handle, then waits for exit. `close()` releases the native
+handle after exit.
 
 The endpoint is `\\.\pipe\wg-kotlin-<instance>`. Named pipes reject remote
 clients and use an explicit DACL for the app's account, SYSTEM, and administrators.

@@ -102,13 +102,15 @@ identity, opens local IPC sessions, and controls daemon termination:
 
 ```kotlin
 import com.rafambn.wgkotlin.daemon.DaemonProcess
+import com.rafambn.wgkotlin.daemon.ProcessDaemonHandle
 
 // Linux desktop example. The system polkit agent handles the permission dialog.
 val daemon = DaemonProcess.launch { arguments ->
-    ProcessBuilder(listOf("pkexec", "/absolute/path/wg-kotlin-daemon") + arguments)
+    val process = ProcessBuilder(listOf("pkexec", "/absolute/path/wg-kotlin-daemon") + arguments)
         .redirectOutput(ProcessBuilder.Redirect.DISCARD)
         .redirectError(ProcessBuilder.Redirect.INHERIT)
         .start()
+    ProcessDaemonHandle(process)
 }
 ```
 

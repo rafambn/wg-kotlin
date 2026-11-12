@@ -6,7 +6,11 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /** Runs the Rust IPC implementation without network privileges or TUN creation. */
-internal class IpcTestFixture(mode: String = "normal", timeout: Duration = 3.seconds) : AutoCloseable {
+internal class IpcTestFixture(
+    mode: String = "normal",
+    timeout: Duration = 3.seconds,
+    handleFactory: (Process) -> DaemonHandle = ::ProcessDaemonHandle,
+) : AutoCloseable {
     lateinit var process: Process
         private set
     lateinit var arguments: List<String>
@@ -18,7 +22,8 @@ internal class IpcTestFixture(mode: String = "normal", timeout: Duration = 3.sec
         try {
             daemon = DaemonProcess.launch(startupTimeout = timeout) { args ->
                 arguments = args
-                start(args + listOf("--mode", mode)).also { process = it }
+                process = start(args + listOf("--mode", mode))
+                handleFactory(process)
             }
         } catch (error: Throwable) {
             cleanup()

@@ -9,7 +9,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.rafambn:wg-kotlin:0.5.0")
+    implementation("com.rafambn:wg-kotlin:0.5.1")
 }
 
 java {

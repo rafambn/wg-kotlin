@@ -54,6 +54,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          # Gobley 0.3.7 cannot read Cargo 1.100's build-script output layout.
+          toolchain: 1.98.1
           targets: ${{ matrix.target }}
 
       - name: Build native runtime
@@ -94,6 +96,8 @@ jobs:
           java-version: '17'
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
 
       - uses: gradle/actions/setup-gradle@v6.4.1
 

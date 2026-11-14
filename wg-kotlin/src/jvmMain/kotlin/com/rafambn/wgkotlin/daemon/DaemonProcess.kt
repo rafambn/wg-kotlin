@@ -10,6 +10,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.nanoseconds
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -18,10 +19,10 @@ import kotlin.time.Duration.Companion.seconds
  * belong off the UI thread. Peer identity is obtained from the operating system.
  */
 class DaemonProcess private constructor(
-    private val process: Process,
+    private val process: DaemonHandle,
     internal val endpoint: String,
 ) : AutoCloseable {
-    val pid: Long = process.pid()
+    val pid: Long = process.pid
     val isAlive: Boolean get() = process.isAlive
 
     /**
@@ -31,7 +32,7 @@ class DaemonProcess private constructor(
     fun stop(timeout: Duration = 5.seconds) {
         require(timeout.isFinite() && !timeout.isNegative()) { "timeout must be finite and non-negative" }
         if (!process.isAlive) {
-            closeStreams(process)
+            runCatching { process.close() }
             PlatformInterfaceManager.unregisterDaemon(this)
             return
         }
@@ -45,7 +46,7 @@ class DaemonProcess private constructor(
                     payload = ClientMessage.Payload.Shutdown(true)
                 })
             }
-            if (!process.waitFor((timeout.inWholeNanoseconds - (System.nanoTime() - started)).coerceAtLeast(0), TimeUnit.NANOSECONDS)) {
+            if (!process.awaitExit((timeout - (System.nanoTime() - started).nanoseconds).coerceAtLeast(Duration.ZERO))) {
                 kill()
             }
         } catch (_: IOException) {
@@ -60,7 +61,7 @@ class DaemonProcess private constructor(
             }
             throw error
         } finally {
-            closeStreams(process)
+            runCatching { process.close() }
             if (!process.isAlive) PlatformInterfaceManager.unregisterDaemon(this)
         }
     }
@@ -68,10 +69,10 @@ class DaemonProcess private constructor(
     /** Forces OS termination without daemon cooperation; waits up to five seconds for exit. */
     fun kill() {
         try {
-            if (process.isAlive) process.destroyForcibly()
-            check(process.waitFor(5, TimeUnit.SECONDS)) { "Daemon did not exit after forced termination" }
+            if (process.isAlive) process.kill()
+            check(process.awaitExit(5.seconds)) { "Daemon did not exit after forced termination" }
         } finally {
-            closeStreams(process)
+            runCatching { process.close() }
             if (!process.isAlive) PlatformInterfaceManager.unregisterDaemon(this)
         }
     }
@@ -81,19 +82,20 @@ class DaemonProcess private constructor(
     companion object {
         /**
          * [launcher] receives daemon arguments and supplies the elevated daemon's
-         * Process, not a shell or permission-dialog process. Forced termination
-         * must already be authorized. Standard streams are not used for IPC;
+         * [DaemonHandle], identifying the actual daemon rather than a shell or
+         * permission-dialog process. Forced termination must already be authorized.
+         * Standard streams are not used for IPC;
          * the app must redirect or drain output to avoid blocking the daemon.
-         * Native launchers may adapt Process to their OS handles and release
-         * those handles after exit. The app owns elevation and packaging.
+         * The handle releases launcher resources after exit. The app owns
+         * elevation, output redirection, and packaging.
          *
-         * The timeout starts after  launcher returns, so permission dialogs are
+         * The timeout starts after the launcher returns, so permission dialogs are
          * owned by the app. On failure the library forcibly terminates the process.
          */
         fun launch(
             logPath: Path? = null,
             startupTimeout: Duration = 30.seconds,
-            launcher: (arguments: List<String>) -> Process,
+            launcher: (arguments: List<String>) -> DaemonHandle,
         ): DaemonProcess {
             require(startupTimeout.isFinite() && startupTimeout.inWholeMilliseconds > 0) { "startupTimeout must be positive and finite" }
             val app = ProcessHandle.current()
@@ -120,7 +122,7 @@ class DaemonProcess private constructor(
                 val bootstrap = executor.submit<DaemonProcess> {
                     while (process.isAlive) {
                         try {
-                            LocalConnection.connect(endpoint, process.pid()).use { IpcProtocol.awaitReady(it, process.pid()) }
+                            LocalConnection.connect(endpoint, process.pid).use { IpcProtocol.awaitReady(it, process.pid) }
                             return@submit DaemonProcess(process, endpoint)
                         } catch (_: IOException) {
                             // The endpoint does not exist until elevation and bind complete.
@@ -134,23 +136,17 @@ class DaemonProcess private constructor(
                 return daemon
             } catch (error: Throwable) {
                 try {
-                    process.destroyForcibly()
-                    check(process.waitFor(5, TimeUnit.SECONDS)) { "Failed to terminate daemon after bootstrap failure" }
+                    process.kill()
+                    check(process.awaitExit(5.seconds)) { "Failed to terminate daemon after bootstrap failure" }
                 } catch (cleanupError: Throwable) {
                     error.addSuppressed(cleanupError)
                 } finally {
-                    closeStreams(process)
+                    runCatching { process.close() }
                 }
                 throw IllegalStateException("Failed to initialize owned daemon", error)
             } finally {
                 executor.shutdownNow()
             }
-        }
-
-        private fun closeStreams(process: Process) {
-            runCatching { process.outputStream.close() }
-            runCatching { process.inputStream.close() }
-            runCatching { process.errorStream.close() }
         }
     }
 }

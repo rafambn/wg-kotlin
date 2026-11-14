@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/rafambn/wg-kotlin/actions/workflows/build-and-test.yml"><img alt="Build and Test" src="https://github.com/rafambn/wg-kotlin/actions/workflows/build-and-test.yml/badge.svg"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.5.0-0A7EA4">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.5.1-0A7EA4">
   <img alt="Platform Targets" src="https://img.shields.io/badge/targets-jvm-0A7EA4">
   <img alt="Daemon Targets" src="https://img.shields.io/badge/daemon-linux%20%7C%20macos%20%7C%20windows-0A7EA4">
 </p>
@@ -58,7 +58,7 @@ repositories {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("com.rafambn:wg-kotlin:0.5.0")
+            implementation("com.rafambn:wg-kotlin:0.5.1")
         }
     }
 }
@@ -88,6 +88,11 @@ Publishing a GitHub release, including a prerelease, runs the Build and Test
 workflow for Windows x64, macOS x64/ARM64, and Linux x64/ARM64. It attaches the
 Windows `.exe` and Unix `.tar.gz` archives to that release. The archives preserve
 the daemon's executable permission. Creating a tag alone does not trigger it.
+Linux daemon archives use the `x86_64-unknown-linux-musl` and
+`aarch64-unknown-linux-musl` targets with a statically linked C runtime, so they do
+not require the host's glibc or MUSL libraries. The workflow checks that neither
+a dynamic loader nor shared libraries are required before uploading. Linux still
+requires kernel 5.3+ and `resolvectl`; the application supplies elevation.
 The separate Publish Maven workflow builds BoringTun for all five platforms,
 verifies a JVM consumer using one dependency, and publishes WG-Kotlin
 to Maven Central. Running it manually without `release_tag` performs the builds
@@ -102,13 +107,15 @@ identity, opens local IPC sessions, and controls daemon termination:
 
 ```kotlin
 import com.rafambn.wgkotlin.daemon.DaemonProcess
+import com.rafambn.wgkotlin.daemon.ProcessDaemonHandle
 
 // Linux desktop example. The system polkit agent handles the permission dialog.
 val daemon = DaemonProcess.launch { arguments ->
-    ProcessBuilder(listOf("pkexec", "/absolute/path/wg-kotlin-daemon") + arguments)
+    val process = ProcessBuilder(listOf("pkexec", "/absolute/path/wg-kotlin-daemon") + arguments)
         .redirectOutput(ProcessBuilder.Redirect.DISCARD)
         .redirectError(ProcessBuilder.Redirect.INHERIT)
         .start()
+    ProcessDaemonHandle(process)
 }
 ```
 

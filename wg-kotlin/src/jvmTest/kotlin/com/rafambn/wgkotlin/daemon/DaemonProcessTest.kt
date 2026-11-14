@@ -7,6 +7,8 @@ import java.net.DatagramSocket
 import java.net.BindException
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import kotlin.time.Duration
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -20,6 +22,65 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 
 class DaemonProcessTest {
+    @Test
+    fun controlsANativeHandleWithoutAJavaProcessAdapter() {
+        var closed = false
+        val fixture = IpcTestFixture(handleFactory = { process ->
+            val handle = process.toHandle()
+            object : DaemonHandle {
+                override val pid: Long = handle.pid()
+                override val isAlive: Boolean get() = handle.isAlive
+
+                override fun awaitExit(timeout: Duration): Boolean {
+                    if (!handle.isAlive) return true
+                    return try {
+                        handle.onExit().get(timeout.inWholeNanoseconds, TimeUnit.NANOSECONDS)
+                        true
+                    } catch (_: TimeoutException) {
+                        false
+                    }
+                }
+
+                override fun kill() {
+                    check(handle.destroyForcibly() || !handle.isAlive)
+                }
+
+                override fun close() {
+                    process.outputStream.close()
+                    closed = true
+                }
+            }
+        })
+        fixture.use {
+            assertEquals(fixture.process.pid(), fixture.daemon.pid)
+            assertTrue(fixture.daemon.isAlive)
+        }
+        assertFalse(fixture.process.isAlive)
+        assertTrue(closed)
+        fixture.daemon.close()
+        fixture.daemon.kill()
+    }
+
+    @Test
+    fun releasesLauncherResourcesAfterStartupFailure() {
+        var process: Process? = null
+        var closed = false
+        assertFailsWith<IllegalStateException> {
+            IpcTestFixture("no-ready", 200.milliseconds, handleFactory = { child ->
+                process = child
+                val handle = ProcessDaemonHandle(child)
+                object : DaemonHandle by handle {
+                    override fun close() {
+                        handle.close()
+                        closed = true
+                    }
+                }
+            })
+        }
+        assertFalse(requireNotNull(process).isAlive)
+        assertTrue(closed)
+    }
+
     @Test
     fun launchesUseDistinctEndpointsAndNoBearerCredentials() {
         IpcTestFixture().use { first ->

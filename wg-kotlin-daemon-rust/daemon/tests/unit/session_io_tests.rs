@@ -9,6 +9,17 @@ fn proto_ip(bytes: &[u8]) -> Ip {
     Ip { value: Some(ip::Value::V4(bytes.to_vec())) }
 }
 
+fn ipv4_addresses() -> Vec<Cidr> {
+    [1, 2].map(|last| Cidr { ip: Some(proto_ip(&[198, 18, 0, last])), prefix: 32 }).to_vec()
+}
+
+fn assert_ipv4_addresses(session: &TunSession) {
+    let installed = session.device.addresses().unwrap();
+    for last in [1, 2] {
+        assert!(installed.contains(&IpAddr::from([198, 18, 0, last])), "missing 198.18.0.{last} in {installed:?}");
+    }
+}
+
 fn reply(request: &[u8], payload: &[u8]) -> Vec<u8> {
     let header_len = usize::from(request[0] & 15) * 4;
     let mut packet = request[..header_len + 8].to_vec();
@@ -56,14 +67,15 @@ async fn native_async_tun_exchanges_packets_and_cleans_routes_and_dns() {
     let requested = TunSessionConfig {
         interface_name: "utun77".into(),
         mtu: 1400,
-        addresses: vec![Cidr { ip: Some(proto_ip(&[198, 18, 0, 1])), prefix: 32 }],
+        addresses: ipv4_addresses(),
         peer_allowed_ips: vec![Cidr { ip: Some(proto_ip(&[198, 19, 0, 0])), prefix: 24 }],
         peer_endpoints: vec![proto_ip(&[203, 0, 113, 7])],
         dns: Some(DnsConfig { servers: vec![proto_ip(&[9, 9, 9, 9])], search_domains: vec!["wg-session.test".into()] }),
     };
     let config = crate::validation::validate_config(&requested).unwrap();
     let session = tokio::task::spawn_blocking(move || factory().and_then(|create| create(&config))).await.unwrap().unwrap();
-    assert_eq!(session.interface_name, "utun77");
+    assert_eq!(session.interface_name.as_ref(), "utun77");
+    assert_ipv4_addresses(&session);
     assert_eq!(session.device.mtu().unwrap(), 1400);
     let dns = tokio::task::spawn_blocking(|| std::process::Command::new("resolvectl").args(["status", "utun77"]).output().unwrap()).await.unwrap();
     assert!(dns.status.success());
@@ -142,8 +154,12 @@ async fn native_macos_tun_exchanges_packets_after_cancelling_an_idle_read_and_cl
     let c_name = CString::new(name.as_str()).unwrap();
     assert_eq!(unsafe { libc::if_nametoindex(c_name.as_ptr()) }, 0, "test interface already exists");
     eprintln!("native TUN test interface={name}");
-    let reserved: [(IpAddr, u8); 3] =
-        [("198.18.0.1".parse().unwrap(), 32), ("198.19.0.0".parse().unwrap(), 24), ("203.0.113.7".parse().unwrap(), 32)];
+    let reserved: [(IpAddr, u8); 4] = [
+        ("198.18.0.1".parse().unwrap(), 32),
+        ("198.18.0.2".parse().unwrap(), 32),
+        ("198.19.0.0".parse().unwrap(), 24),
+        ("203.0.113.7".parse().unwrap(), 32),
+    ];
     let matching_routes = move || {
         route_manager::RouteManager::new()
             .unwrap()
@@ -157,7 +173,7 @@ async fn native_macos_tun_exchanges_packets_after_cancelling_an_idle_read_and_cl
     let config = crate::validation::validate_config(&TunSessionConfig {
         interface_name: name.clone(),
         mtu: 1400,
-        addresses: vec![Cidr { ip: Some(proto_ip(&[198, 18, 0, 1])), prefix: 32 }],
+        addresses: ipv4_addresses(),
         peer_allowed_ips: vec![Cidr { ip: Some(proto_ip(&[198, 19, 0, 0])), prefix: 24 }],
         peer_endpoints: vec![proto_ip(&[203, 0, 113, 7])],
         dns: Some(DnsConfig { servers: vec![proto_ip(&[9, 9, 9, 9])], search_domains: vec![format!("wg-session-{}.test", std::process::id())] }),
@@ -185,7 +201,8 @@ async fn native_macos_tun_exchanges_packets_after_cancelling_an_idle_read_and_cl
     .unwrap();
     let mut cleanup = Cleanup(Some(session));
     let session = cleanup.0.as_ref().unwrap();
-    assert_eq!(session.interface_name, name);
+    assert_eq!(session.interface_name.as_ref(), name);
+    assert_ipv4_addresses(session);
     assert_eq!(session.device.mtu().unwrap(), 1400);
     let idle_deadline = Instant::now() + Duration::from_secs(2);
     let mut packet = vec![0; 65536];

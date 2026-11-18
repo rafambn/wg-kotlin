@@ -1,8 +1,9 @@
-use crate::platform::{self, CleanupHook};
+use crate::platform::{self, SessionNetwork};
 use crate::validation::Config;
 #[cfg(target_os = "windows")]
 use crate::wintun::WintunDll;
 use anyhow::{Context, Result};
+use itertools::Itertools;
 use std::net::IpAddr;
 use std::sync::Arc;
 use tun_rs::{AsyncDevice, DeviceBuilder};
@@ -10,9 +11,10 @@ use tun_rs::{AsyncDevice, DeviceBuilder};
 pub type SessionFactory = Arc<dyn Fn(&Config) -> Result<TunSession> + Send + Sync>;
 
 pub struct TunSession {
-    pub(crate) interface_name: String,
     pub(crate) device: AsyncDevice,
-    cleanup: CleanupHook,
+    // Keep the interface registered for endpoint checks until the device drops.
+    pub(crate) interface_name: Arc<str>,
+    pub(crate) network: SessionNetwork,
     // Drop after the device so that the DLL stays protected until it unloads.
     #[cfg(target_os = "windows")]
     _wintun: Arc<WintunDll>,
@@ -28,24 +30,40 @@ pub fn factory() -> Result<SessionFactory> {
         #[cfg(windows)]
         platform::clear_stale_nrpt_rules_once().context("failed to prepare platform session")?;
 
-        let builder = DeviceBuilder::new().name(config.interface_name.clone());
-        let builder = config.addresses.iter().fold(builder, |builder, &(ip, prefix)| match ip {
-            IpAddr::V4(v4) => builder.ipv4(v4, prefix, None),
-            IpAddr::V6(v6) => builder.ipv6(v6, prefix),
-        });
+        let mut builder = DeviceBuilder::new().name(config.interface_name.clone());
+        let mut ipv4 = config
+            .addresses
+            .iter()
+            .filter_map(|&(ip, prefix)| match ip {
+                IpAddr::V4(ip) => Some((ip, prefix)),
+                IpAddr::V6(_) => None,
+            })
+            .unique();
+        if let Some((ip, prefix)) = ipv4.next() {
+            builder = builder.ipv4(ip, prefix, None);
+        }
+        for &(ip, prefix) in &config.addresses {
+            if let IpAddr::V6(ip) = ip {
+                builder = builder.ipv6(ip, prefix);
+            }
+        }
         let builder = config.mtu.into_iter().fold(builder, |builder, mtu| builder.mtu(mtu.get()));
 
         #[cfg(target_os = "windows")]
         let builder = builder.wintun_file(wintun.path().to_str().context("Wintun DLL path is not Unicode")?.to_owned());
 
+        let interface_name: Arc<str>;
         let device = builder.build_async().context("failed to create TUN device")?;
-        let interface_name = device.name().unwrap_or_else(|_| config.interface_name.clone());
-        let cleanup = platform::configure_session(config, &interface_name, endpoint_routes).context("failed to configure platform session")?;
+        for (ip, prefix) in ipv4 {
+            device.add_address_v4(ip, prefix).with_context(|| format!("failed to add IPv4 address {ip}/{prefix} to {}", config.interface_name))?;
+        }
+        interface_name = device.name().unwrap_or_else(|_| config.interface_name.clone()).into();
+        let network = platform::configure_session(config, &interface_name, endpoint_routes).context("failed to configure platform session")?;
 
         Ok(TunSession {
             interface_name,
             device,
-            cleanup,
+            network,
             #[cfg(target_os = "windows")]
             _wintun: wintun.clone(),
         })
@@ -54,7 +72,7 @@ pub fn factory() -> Result<SessionFactory> {
 
 impl TunSession {
     pub fn close(self) -> Result<()> {
-        (self.cleanup)()
+        (self.network.cleanup)()
     }
 }
 

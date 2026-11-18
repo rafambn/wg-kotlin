@@ -74,17 +74,18 @@ impl DaemonService {
                     }
                     let started_at = Instant::now();
                     let create_session = self.session_factory.clone();
-                    let session = tokio::task::spawn_blocking(move || create_session(&config))
+                    let mut session = tokio::task::spawn_blocking(move || create_session(&config))
                         .await
                         .unwrap_or_else(|error| Err(anyhow::Error::new(error).context("failed joining session initialization")))
                         .map_err(|error| Status::failed_precondition(format!("{error:#}")))?;
-                    let name = session.interface_name.clone();
+                    let name = session.interface_name.to_string();
                     let _ = outgoing.try_send(ServerPayload::Started(SessionStarted { interface_name: name.clone() }));
                     self.logger.log(format_args!("session started interface={name}"));
                     let transfer_result = tokio::select! {
                         biased;
                         _ = stopping.wait_for(|value| *value) => Ok(()),
                         _ = outgoing.closed() => Ok(()),
+                        error = session.network.route_failure() => Err(Status::internal(error)),
                         result = transfer(&mut reader, &session.device, &outgoing) => result,
                     };
                     self.report_failure(&name, transfer_result, &outgoing);

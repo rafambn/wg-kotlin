@@ -115,6 +115,10 @@ TUN creation; single-path IPv4 and IPv6 endpoints are supported.
 The daemon tracks ownership of requested routes. Identical requests share one
 registration until the final session releases them. An exact prefix requested
 through a different node rejects the new session. Different prefixes can coexist.
+Session startup rejects a peer endpoint whose host route points through another
+active TUN owned by the daemon. On Linux this also applies when the kernel
+selects that TUN through a broader prefix. Sessions can share the same endpoint
+through the same non-tunnel route.
 Resolution, TUN creation and route registration are serialized with cleanup;
 DNS commands run outside that lock.
 

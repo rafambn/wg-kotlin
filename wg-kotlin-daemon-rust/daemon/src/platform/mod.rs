@@ -1,6 +1,6 @@
 use crate::validation::Config;
 use anyhow::{Context, Result, anyhow, ensure};
-use std::{process::Stdio, time::Duration};
+use std::{process::Stdio, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     process::Command,
@@ -18,8 +18,21 @@ pub use routes::{ResolvedEndpoints, resolve_endpoint_routes};
 
 pub type CleanupHook = Box<dyn FnOnce() -> Result<()> + Send + 'static>;
 
-pub fn configure_session(config: &Config, interface: &str, endpoints: ResolvedEndpoints) -> Result<CleanupHook> {
+pub struct SessionNetwork {
+    pub(crate) cleanup: CleanupHook,
+    route_failure: Option<tokio::sync::watch::Receiver<Option<String>>>,
+}
+
+impl SessionNetwork {
+    pub(crate) async fn route_failure(&mut self) -> String {
+        let Some(failure) = &mut self.route_failure else { return std::future::pending().await };
+        failure.wait_for(Option::is_some).await.ok().and_then(|cause| cause.clone()).unwrap_or_else(|| "route failure monitor stopped".into())
+    }
+}
+
+pub fn configure_session(config: &Config, interface: &Arc<str>, endpoints: ResolvedEndpoints) -> Result<SessionNetwork> {
     let ResolvedEndpoints { routes: endpoints, mut registry } = endpoints;
+    registry.track_interface(interface);
     let mut leases = Vec::new();
     let setup = routes::vpn_routes(config, interface).and_then(|vpn| {
         if !endpoints.is_empty() || !vpn.is_empty() {
@@ -33,6 +46,7 @@ pub fn configure_session(config: &Config, interface: &str, endpoints: ResolvedEn
         cleanup_results([result, os::clear_dns(interface)]).with_context(|| format!("{error:#}; cleanup failed"))?;
         return Err(error);
     }
+    let route_failure = (!leases.is_empty()).then(|| registry.failure.subscribe());
     drop(registry);
     let setup = os::clear_dns(interface)
         .and_then(|_| if config.dns_servers.is_empty() { Ok(()) } else { os::set_dns(interface, &config.dns_servers, &config.dns_domains) });
@@ -41,11 +55,15 @@ pub fn configure_session(config: &Config, interface: &str, endpoints: ResolvedEn
         let result = routes::registry().and_then(|mut registry| registry.release(leases));
         cleanup_results([result, os::clear_dns(&interface)])
     };
+    let setup = setup.and_then(|_| match route_failure.as_ref().and_then(|rx| rx.borrow().clone()) {
+        Some(error) => Err(anyhow!(error)),
+        None => Ok(()),
+    });
     if let Err(error) = setup {
         cleanup().with_context(|| format!("{error:#}; cleanup failed"))?;
         return Err(error);
     }
-    Ok(Box::new(cleanup))
+    Ok(SessionNetwork { cleanup: Box::new(cleanup), route_failure })
 }
 
 pub(super) fn cleanup_results(results: impl IntoIterator<Item = Result<()>>) -> Result<()> {

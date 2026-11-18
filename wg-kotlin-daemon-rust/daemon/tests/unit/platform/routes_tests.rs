@@ -58,6 +58,61 @@ fn identical_leases_survive_both_session_close_orders_without_starting_a_manager
 }
 
 #[test]
+fn failed_refresh_restores_active_routes_and_still_rejects_the_new_session() {
+    let mut registry = RouteRegistry::default();
+    let active = Arc::new(route("198.19.0.0/24", "utun64"));
+    registry.routes.insert(active.prefix, active.clone());
+    let failure = registry.failure.subscribe();
+    let mut installed = HashSet::from([active.as_ref().clone()]);
+    let mut attempts = 0;
+    let error = registry
+        .restart_with(|registry| {
+            installed.clear();
+            attempts += 1;
+            if attempts == 1 {
+                anyhow::bail!("refresh failed");
+            }
+            installed.extend(registry.routes.values().map(|route| route.as_ref().clone()));
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(error.to_string(), "refresh failed");
+    assert_eq!(attempts, 2);
+    assert_eq!(installed, HashSet::from([active.as_ref().clone()]));
+    assert!(!failure.has_changed().unwrap());
+}
+
+#[tokio::test]
+async fn failed_restoration_notifies_existing_routed_sessions_and_preserves_both_errors() {
+    let mut registry = RouteRegistry::default();
+    let active = Arc::new(route("198.19.0.0/24", "utun64"));
+    registry.routes.insert(active.prefix, active.clone());
+    let mut network = super::super::SessionNetwork { cleanup: Box::new(|| Ok(())), route_failure: Some(registry.failure.subscribe()) };
+    let mut failures = ["refresh failed", "restore failed"].into_iter();
+    let error = registry.restart_with(|_| Err(anyhow!(failures.next().unwrap()))).unwrap_err();
+    let detail = format!("{error:#}");
+    assert!(detail.contains("refresh failed") && detail.contains("restore failed"));
+    assert_eq!(tokio::time::timeout(Duration::from_secs(1), network.route_failure()).await.unwrap(), detail);
+    assert!(registry.failure.borrow().is_none(), "new sessions must not receive the previous failure");
+}
+
+#[test]
+fn cached_endpoint_exceptions_can_be_shared_but_tunnel_host_routes_cannot() {
+    let mut registry = RouteRegistry::default();
+    let tunnel = Arc::<str>::from("utun64");
+    registry.track_interface(&tunnel);
+    for host in ["192.0.2.1/32", "2001:db8::1/128"] {
+        let vpn = Arc::new(route(host, &tunnel));
+        registry.routes.insert(vpn.prefix, vpn.clone());
+        let error = registry.endpoint_route("utun65", vpn.prefix.ip()).unwrap_err().to_string();
+        assert!(error.contains("utun64") && error.contains("utun65") && error.contains(&vpn.prefix.ip().to_string()));
+        let exception = route(host, "eth0");
+        registry.routes.insert(vpn.prefix, Arc::new(exception.clone()));
+        assert_eq!(registry.endpoint_route("utun65", vpn.prefix.ip()).unwrap(), exception);
+    }
+}
+
+#[test]
 fn conflicting_prefixes_fail_before_native_routing_or_changing_the_existing_lease() {
     let mut registry = RouteRegistry::default();
     let existing = Arc::new(route("198.19.0.0/24", "utun64"));
@@ -95,6 +150,20 @@ fn malformed_endpoints_are_rejected_before_native_routing() {
     config.peer_endpoints = vec![None];
     let error = resolve_endpoint_routes(&config).err().expect("malformed endpoint must fail");
     assert!(error.to_string().contains("invalid peer endpoint"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "isolated Linux namespace with NET_ADMIN, an IPv4 default route and no IPv6 default route; run serially"]
+fn lookup_manager_stops_after_success_and_partial_failure_before_tun_creation() {
+    let endpoints = resolve_endpoint_routes(&config(&["203.0.113.7"], &[])).unwrap();
+    assert_eq!(endpoints.routes.len(), 1);
+    assert!(endpoints.registry.manager.is_none());
+    drop(endpoints); // TUN creation can fail after a successful lookup.
+
+    let error = resolve_endpoint_routes(&config(&["203.0.113.7", "2001:db8::7"], &[])).err().expect("IPv6 should be unreachable");
+    assert!(format!("{error:#}").contains("route"));
+    assert!(registry().unwrap().manager.is_none());
 }
 
 #[cfg(windows)]

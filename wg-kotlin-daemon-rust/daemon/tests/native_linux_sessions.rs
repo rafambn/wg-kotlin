@@ -115,6 +115,25 @@ fn config(index: u8) -> TunSessionConfig {
 }
 
 #[tokio::test]
+#[ignore = "isolated Linux container with NET_ADMIN and /dev/net/tun; run serially"]
+async fn endpoint_via_an_active_tunnel_is_rejected_and_works_after_it_closes() {
+    let mut daemon = Daemon::start(Some("exit 0"));
+    let first = daemon.open(config(64)).await;
+    let mut second = config(65);
+    second.peer_endpoints = vec![ip(&[198, 19, 64, 7])]; // Inside the first session's /24.
+    let mut stream = daemon.connect().await;
+    write_frame(&mut stream, &ClientMessage { payload: Some(client_message::Payload::Config(second.clone())) }).await.unwrap();
+    let response = timeout(Duration::from_secs(3), read_frame::<ServerMessage>(&mut stream)).await.unwrap().unwrap().unwrap();
+    let Some(server_message::Payload::Error(error)) = response.payload else { panic!("expected a chaining error") };
+    assert!(error.message.contains("endpoint 198.19.64.7 for utun65 would be routed through active tunnel utun64"), "{error:?}");
+    assert!(!PathBuf::from("/sys/class/net/utun65").exists());
+    drop(first);
+    wait_removed(64).await;
+    let _second = daemon.open(second).await;
+    daemon.stop().await;
+}
+
+#[tokio::test]
 #[ignore = "isolated Linux netns, NET_ADMIN, /dev/net/tun and systemd-resolved; run serially"]
 async fn unix_signals_wait_for_session_cleanup_before_exit() {
     for signal in [libc::SIGTERM, libc::SIGINT] {

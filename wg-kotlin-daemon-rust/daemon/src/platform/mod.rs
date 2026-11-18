@@ -1,6 +1,6 @@
 use crate::validation::Config;
 use anyhow::{Context, Result, anyhow, ensure};
-use std::{process::Stdio, sync::Arc, time::Duration};
+use std::{process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     process::Command,
@@ -14,13 +14,14 @@ mod routes;
 pub use os::REQUIRED_BINARIES;
 #[cfg(windows)]
 pub(crate) use os::clear_stale_nrpt_rules_once;
+pub(crate) use routes::RegisteredDevice;
 pub use routes::{ResolvedEndpoints, resolve_endpoint_routes};
 
 pub type CleanupHook = Box<dyn FnOnce() -> Result<()> + Send + 'static>;
 
 pub struct SessionNetwork {
     pub(crate) cleanup: CleanupHook,
-    route_failure: Option<tokio::sync::watch::Receiver<Option<String>>>,
+    pub(crate) route_failure: Option<tokio::sync::watch::Receiver<Option<String>>>,
 }
 
 impl SessionNetwork {
@@ -30,9 +31,8 @@ impl SessionNetwork {
     }
 }
 
-pub fn configure_session(config: &Config, interface: &Arc<str>, endpoints: ResolvedEndpoints) -> Result<SessionNetwork> {
+pub fn configure_session(config: &Config, interface: &str, endpoints: ResolvedEndpoints) -> Result<SessionNetwork> {
     let ResolvedEndpoints { routes: endpoints, mut registry } = endpoints;
-    registry.track_interface(interface);
     let mut leases = Vec::new();
     let setup = routes::vpn_routes(config, interface).and_then(|vpn| {
         if !endpoints.is_empty() || !vpn.is_empty() {
@@ -55,10 +55,6 @@ pub fn configure_session(config: &Config, interface: &Arc<str>, endpoints: Resol
         let result = routes::registry().and_then(|mut registry| registry.release(leases));
         cleanup_results([result, os::clear_dns(&interface)])
     };
-    let setup = setup.and_then(|_| match route_failure.as_ref().and_then(|rx| rx.borrow().clone()) {
-        Some(error) => Err(anyhow!(error)),
-        None => Ok(()),
-    });
     if let Err(error) = setup {
         cleanup().with_context(|| format!("{error:#}; cleanup failed"))?;
         return Err(error);

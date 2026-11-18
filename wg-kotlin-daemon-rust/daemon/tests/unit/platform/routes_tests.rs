@@ -57,42 +57,27 @@ fn identical_leases_survive_both_session_close_orders_without_starting_a_manager
     }
 }
 
-#[test]
-fn failed_refresh_restores_active_routes_and_still_rejects_the_new_session() {
+#[tokio::test]
+async fn failed_restart_notifies_existing_sessions_and_preserves_the_error() {
     let mut registry = RouteRegistry::default();
-    let active = Arc::new(route("198.19.0.0/24", "utun64"));
-    registry.routes.insert(active.prefix, active.clone());
-    let failure = registry.failure.subscribe();
-    let mut installed = HashSet::from([active.as_ref().clone()]);
+    let active = route("198.19.0.0/24", "utun64");
+    registry.routes.insert(active.prefix, Arc::new(active.clone()));
+    let networks = [(); 2].map(|_| super::super::SessionNetwork { cleanup: Box::new(|| Ok(())), route_failure: Some(registry.failure.subscribe()) });
     let mut attempts = 0;
     let error = registry
-        .restart_with(|registry| {
-            installed.clear();
+        .restart_with(|_, routes| {
             attempts += 1;
-            if attempts == 1 {
-                anyhow::bail!("refresh failed");
-            }
-            installed.extend(registry.routes.values().map(|route| route.as_ref().clone()));
-            Ok(())
+            assert_eq!(routes, HashSet::from([active]));
+            Err(std::io::Error::other("native error")).context("refresh failed")
         })
         .unwrap_err();
-    assert_eq!(error.to_string(), "refresh failed");
-    assert_eq!(attempts, 2);
-    assert_eq!(installed, HashSet::from([active.as_ref().clone()]));
-    assert!(!failure.has_changed().unwrap());
-}
-
-#[tokio::test]
-async fn failed_restoration_notifies_existing_routed_sessions_and_preserves_both_errors() {
-    let mut registry = RouteRegistry::default();
-    let active = Arc::new(route("198.19.0.0/24", "utun64"));
-    registry.routes.insert(active.prefix, active.clone());
-    let mut network = super::super::SessionNetwork { cleanup: Box::new(|| Ok(())), route_failure: Some(registry.failure.subscribe()) };
-    let mut failures = ["refresh failed", "restore failed"].into_iter();
-    let error = registry.restart_with(|_| Err(anyhow!(failures.next().unwrap()))).unwrap_err();
-    let detail = format!("{error:#}");
-    assert!(detail.contains("refresh failed") && detail.contains("restore failed"));
-    assert_eq!(tokio::time::timeout(Duration::from_secs(1), network.route_failure()).await.unwrap(), detail);
+    assert_eq!(attempts, 1);
+    assert!(registry.manager.is_none());
+    assert_eq!(error.downcast_ref::<std::io::Error>().unwrap().to_string(), "native error");
+    assert_eq!(format!("{error:#}"), "refresh failed: native error");
+    for mut network in networks {
+        assert_eq!(tokio::time::timeout(Duration::from_secs(1), network.route_failure()).await.unwrap(), "refresh failed: native error");
+    }
     assert!(registry.failure.borrow().is_none(), "new sessions must not receive the previous failure");
 }
 
@@ -100,7 +85,7 @@ async fn failed_restoration_notifies_existing_routed_sessions_and_preserves_both
 fn cached_endpoint_exceptions_can_be_shared_but_tunnel_host_routes_cannot() {
     let mut registry = RouteRegistry::default();
     let tunnel = Arc::<str>::from("utun64");
-    registry.track_interface(&tunnel);
+    registry.interfaces.push(tunnel.clone());
     for host in ["192.0.2.1/32", "2001:db8::1/128"] {
         let vpn = Arc::new(route(host, &tunnel));
         registry.routes.insert(vpn.prefix, vpn.clone());
@@ -110,6 +95,25 @@ fn cached_endpoint_exceptions_can_be_shared_but_tunnel_host_routes_cannot() {
         registry.routes.insert(vpn.prefix, Arc::new(exception.clone()));
         assert_eq!(registry.endpoint_route("utun65", vpn.prefix.ip()).unwrap(), exception);
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn dropping_a_device_unregisters_its_interface() {
+    use std::os::{fd::IntoRawFd, unix::net::UnixStream};
+
+    let (socket, _peer) = UnixStream::pair().unwrap();
+    // SAFETY: the socket descriptor is open and ownership transfers to AsyncDevice.
+    let device = unsafe { AsyncDevice::from_fd(socket.into_raw_fd()).unwrap() };
+    let mut endpoints = resolve_endpoint_routes(&config(&[], &[])).unwrap();
+    let device = endpoints.register_device("utun92".into(), device);
+    let name = device.interface_name.clone();
+    let ip = "192.0.2.1".parse().unwrap();
+    let rejected = endpoints.registry.check_endpoint_path("utun93", ip, |tunnel| tunnel == name.as_ref()).is_err();
+    drop(endpoints);
+    assert!(rejected);
+    drop(device);
+    assert!(registry().unwrap().check_endpoint_path("utun93", ip, |tunnel| tunnel == name.as_ref()).is_ok());
 }
 
 #[test]

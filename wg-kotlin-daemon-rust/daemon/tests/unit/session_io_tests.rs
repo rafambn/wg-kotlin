@@ -14,7 +14,7 @@ fn ipv4_addresses() -> Vec<Cidr> {
 }
 
 fn assert_ipv4_addresses(session: &TunSession) {
-    let installed = session.device.addresses().unwrap();
+    let installed = session.tun.device().addresses().unwrap();
     for last in [1, 2] {
         assert!(installed.contains(&IpAddr::from([198, 18, 0, last])), "missing 198.18.0.{last} in {installed:?}");
     }
@@ -60,6 +60,33 @@ fn setup_without_a_runtime_returns_an_error_before_locking_routes() {
     assert!(error.to_string().contains("invalid peer endpoint"), "{error:#}");
 }
 
+#[test]
+fn exact_duplicate_addresses_are_removed_in_order_for_both_families() {
+    let ipv4 = ("10.0.0.1".parse().unwrap(), 24);
+    let ipv6 = ("2001:db8::1".parse().unwrap(), 64);
+    let secondary_ipv4 = ("10.0.0.2".parse().unwrap(), 24);
+    assert_eq!(unique_addresses(&[ipv4, ipv6, ipv4, secondary_ipv4, ipv6]).unwrap(), [ipv4, ipv6, secondary_ipv4]);
+}
+
+#[tokio::test]
+async fn conflicting_address_prefixes_fail_before_endpoint_resolution() {
+    let create = factory().unwrap();
+    for (ip, first, second) in [("10.0.0.1", 24, 32), ("2001:db8::1", 64, 128)] {
+        let ip = ip.parse().unwrap();
+        let config = Config {
+            interface_name: "utun77".into(),
+            addresses: vec![(ip, first), (ip, second)],
+            peer_allowed_ips: vec![],
+            peer_endpoints: vec![None],
+            mtu: None,
+            dns_servers: vec![],
+            dns_domains: vec![],
+        };
+        let error = create(&config).err().expect("conflicting prefixes must fail");
+        assert_eq!(error.to_string(), format!("TUN address {ip} has conflicting prefixes /{first} and /{second}"));
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore = "isolated Linux container with NET_ADMIN, /dev/net/tun and systemd-resolved"]
@@ -74,9 +101,9 @@ async fn native_async_tun_exchanges_packets_and_cleans_routes_and_dns() {
     };
     let config = crate::validation::validate_config(&requested).unwrap();
     let session = tokio::task::spawn_blocking(move || factory().and_then(|create| create(&config))).await.unwrap().unwrap();
-    assert_eq!(session.interface_name.as_ref(), "utun77");
+    assert_eq!(session.tun.interface_name(), "utun77");
     assert_ipv4_addresses(&session);
-    assert_eq!(session.device.mtu().unwrap(), 1400);
+    assert_eq!(session.tun.device().mtu().unwrap(), 1400);
     let dns = tokio::task::spawn_blocking(|| std::process::Command::new("resolvectl").args(["status", "utun77"]).output().unwrap()).await.unwrap();
     assert!(dns.status.success());
     let dns = String::from_utf8(dns.stdout).unwrap();
@@ -98,7 +125,7 @@ async fn exchange_packets(session: &TunSession) {
     let mut packet = vec![0; 65536];
     let count = timeout(Duration::from_secs(2), async {
         loop {
-            let count = session.device.recv(&mut packet).await.unwrap();
+            let count = session.tun.device().recv(&mut packet).await.unwrap();
             // Link creation also causes IPv6 discovery traffic in this namespace.
             if count >= 28 && packet[0] >> 4 == 4 && packet[9] == 17 && packet[..count].ends_with(b"request") {
                 break count;
@@ -109,7 +136,7 @@ async fn exchange_packets(session: &TunSession) {
     .unwrap();
     assert_eq!(packet[0] >> 4, 4);
     assert!(packet[..count].ends_with(b"request"));
-    session.device.send(&reply(&packet[..count], b"response")).await.unwrap();
+    session.tun.device().send(&reply(&packet[..count], b"response")).await.unwrap();
     let count = timeout(Duration::from_secs(2), socket.recv(&mut packet)).await.unwrap().unwrap();
     assert_eq!(&packet[..count], b"response");
 }
@@ -201,14 +228,14 @@ async fn native_macos_tun_exchanges_packets_after_cancelling_an_idle_read_and_cl
     .unwrap();
     let mut cleanup = Cleanup(Some(session));
     let session = cleanup.0.as_ref().unwrap();
-    assert_eq!(session.interface_name.as_ref(), name);
+    assert_eq!(session.tun.interface_name(), name);
     assert_ipv4_addresses(session);
-    assert_eq!(session.device.mtu().unwrap(), 1400);
+    assert_eq!(session.tun.device().mtu().unwrap(), 1400);
     let idle_deadline = Instant::now() + Duration::from_secs(2);
     let mut packet = vec![0; 65536];
     loop {
         // Drain link notifications, then cancel a receive while no packet is ready.
-        match timeout(Duration::from_millis(20), session.device.recv(&mut packet)).await {
+        match timeout(Duration::from_millis(20), session.tun.device().recv(&mut packet)).await {
             Err(_) => break,
             Ok(result) => {
                 result.unwrap();

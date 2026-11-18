@@ -78,7 +78,7 @@ impl DaemonService {
                         .await
                         .unwrap_or_else(|error| Err(anyhow::Error::new(error).context("failed joining session initialization")))
                         .map_err(|error| Status::failed_precondition(format!("{error:#}")))?;
-                    let name = session.interface_name.to_string();
+                    let name = session.tun.interface_name().to_owned();
                     let _ = outgoing.try_send(ServerPayload::Started(SessionStarted { interface_name: name.clone() }));
                     self.logger.log(format_args!("session started interface={name}"));
                     let transfer_result = tokio::select! {
@@ -86,7 +86,7 @@ impl DaemonService {
                         _ = stopping.wait_for(|value| *value) => Ok(()),
                         _ = outgoing.closed() => Ok(()),
                         error = session.network.route_failure() => Err(Status::internal(error)),
-                        result = transfer(&mut reader, &session.device, &outgoing) => result,
+                        result = transfer(&mut reader, session.tun.device(), &outgoing) => result,
                     };
                     self.report_failure(&name, transfer_result, &outgoing);
                     // Neither a full response queue nor a disconnected client can abandon cleanup.

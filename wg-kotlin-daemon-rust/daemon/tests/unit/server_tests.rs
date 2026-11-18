@@ -220,6 +220,66 @@ async fn failed_or_disconnected_start_releases_the_reservation() {
     assert!(service.active_sessions.lock().await.is_empty());
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn broadcast_route_failure_ends_a_running_session_and_runs_cleanup() {
+    use crate::{platform, session::TunSession};
+    use std::{
+        os::{fd::IntoRawFd, unix::net::UnixStream},
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    let (route_failure, _) = watch::channel(None);
+    let failures = route_failure.clone();
+    let cleanup_calls = Arc::new(AtomicUsize::new(0));
+    let cleanup_counter = cleanup_calls.clone();
+    let factory: SessionFactory = Arc::new(move |config| {
+        let (socket, peer) = UnixStream::pair()?;
+        // SAFETY: the socket descriptor is open and ownership transfers to AsyncDevice.
+        let device = unsafe { tun_rs::AsyncDevice::from_fd(socket.into_raw_fd())? };
+        let mut endpoints = platform::resolve_endpoint_routes(config)?;
+        let tun = endpoints.register_device(config.interface_name.clone(), device);
+        drop(endpoints);
+        let cleanup_counter = cleanup_counter.clone();
+        let network = platform::SessionNetwork {
+            cleanup: Box::new(move || {
+                drop(peer);
+                cleanup_counter.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            }),
+            route_failure: Some(failures.subscribe()),
+        };
+        Ok(TunSession { tun, network })
+    });
+    let service = Arc::new(DaemonService::new(Logger::new(None).unwrap(), factory));
+    let connection_service = service.clone();
+    let (shutdown, _receiver) = watch::channel(false);
+    let (mut client, stream) = tokio::io::duplex(4096);
+    let connection = tokio::spawn(async move { connection_service.serve_connection(stream, shutdown).await });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        let ready = read_frame::<ServerMessage>(&mut client).await.unwrap().unwrap();
+        assert!(matches!(ready.payload, Some(ServerPayload::Ready(_))));
+        let mut config = config("utun91");
+        config.peer_endpoints.clear();
+        write_frame(&mut client, &ClientMessage { payload: Some(ClientPayload::Config(config)) }).await.unwrap();
+        let started = read_frame::<ServerMessage>(&mut client).await.unwrap().unwrap();
+        assert_eq!(started.payload, Some(ServerPayload::Started(SessionStarted { interface_name: "utun91".into() })));
+        assert_eq!(cleanup_calls.load(Ordering::Relaxed), 0);
+
+        route_failure.send_replace(Some("route refresh failed".into()));
+        let response = read_frame::<ServerMessage>(&mut client).await.unwrap().unwrap();
+        let Some(ServerPayload::Error(error)) = response.payload else { panic!("expected route failure") };
+        assert_eq!(error.code, tonic::Code::Internal.to_string());
+        assert_eq!(error.message, "route refresh failed");
+        assert!(read_frame::<ServerMessage>(&mut client).await.unwrap().is_none());
+        connection.await.unwrap().unwrap();
+        assert_eq!(cleanup_calls.load(Ordering::Relaxed), 1);
+        assert!(service.active_sessions.lock().await.is_empty());
+    })
+    .await
+    .expect("route failure must end the connection while the client is still open");
+}
+
 #[tokio::test]
 async fn occupied_interfaces_and_capacity_are_rejected_before_starting_a_tun() {
     let service = Arc::new(DaemonService::new(Logger::new(None).unwrap(), session_factory()));
